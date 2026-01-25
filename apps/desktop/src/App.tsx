@@ -21,6 +21,18 @@ type ScanStats = {
   missing: number;
 };
 
+type InboxItem = {
+  id: string;
+  title: string;
+  reason: string;
+};
+
+type DuplicateGroup = {
+  id: string;
+  title: string;
+  files: string[];
+};
+
 const sampleBooks = [
   {
     id: "1",
@@ -133,6 +145,8 @@ function App() {
   const [scanStatus, setScanStatus] = useState<string | null>(null);
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([]);
   const [libraryReady, setLibraryReady] = useState(false);
+  const [inbox, setInbox] = useState<InboxItem[]>([]);
+  const [duplicates, setDuplicates] = useState<DuplicateGroup[]>([]);
 
   const filteredBooks = useMemo(() => {
     const base = libraryItems.length
@@ -163,6 +177,12 @@ function App() {
       try {
         const items = await invoke<LibraryItem[]>("get_library_items");
         setLibraryItems(items);
+        const inboxItems = await invoke<InboxItem[]>("get_inbox_items");
+        setInbox(inboxItems);
+        const duplicateGroups = await invoke<DuplicateGroup[]>(
+          "get_duplicate_groups"
+        );
+        setDuplicates(duplicateGroups);
       } catch (error) {
         setScanStatus("Could not load library data.");
       } finally {
@@ -177,6 +197,12 @@ function App() {
     try {
       const items = await invoke<LibraryItem[]>("get_library_items");
       setLibraryItems(items);
+      const inboxItems = await invoke<InboxItem[]>("get_inbox_items");
+      setInbox(inboxItems);
+      const duplicateGroups = await invoke<DuplicateGroup[]>(
+        "get_duplicate_groups"
+      );
+      setDuplicates(duplicateGroups);
     } catch (error) {
       setScanStatus("Could not refresh library data.");
     }
@@ -361,7 +387,7 @@ function App() {
         {view === "inbox" && (
           <section className="content">
             <div className="inbox">
-              {inboxItems.map((item) => (
+              {(inbox.length ? inbox : inboxItems).map((item) => (
                 <div key={item.id} className="inbox-row">
                   <div>
                     <div className="card-title">{item.title}</div>
@@ -380,7 +406,7 @@ function App() {
         {view === "duplicates" && (
           <section className="content">
             <div className="duplicate-list">
-              {duplicateGroups.map((group) => (
+              {(duplicates.length ? duplicates : duplicateGroups).map((group) => (
                 <div key={group.id} className="duplicate-card">
                   <div>
                     <div className="card-title">{group.title}</div>

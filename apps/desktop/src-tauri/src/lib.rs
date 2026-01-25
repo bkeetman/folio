@@ -24,6 +24,20 @@ struct LibraryItem {
 }
 
 #[derive(Serialize)]
+struct InboxItem {
+  id: String,
+  title: String,
+  reason: String,
+}
+
+#[derive(Serialize)]
+struct DuplicateGroup {
+  id: String,
+  title: String,
+  files: Vec<String>,
+}
+
+#[derive(Serialize)]
 struct ScanStats {
   added: i64,
   updated: i64,
@@ -89,6 +103,74 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
   }
 
   Ok(items)
+}
+
+#[tauri::command]
+fn get_inbox_items(app: tauri::AppHandle) -> Result<Vec<InboxItem>, String> {
+  let conn = open_db(&app)?;
+  let mut stmt = conn
+    .prepare(
+      "SELECT issues.id, COALESCE(items.title, 'Untitled') as title, issues.message \
+       FROM issues \
+       LEFT JOIN items ON items.id = issues.item_id \
+       WHERE issues.type = 'missing_metadata' AND issues.resolved_at IS NULL \
+       ORDER BY issues.created_at DESC"
+    )
+    .map_err(|err| err.to_string())?;
+
+  let rows = stmt
+    .query_map(params![], |row| {
+      Ok(InboxItem {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        reason: row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "Missing metadata".to_string()),
+      })
+    })
+    .map_err(|err| err.to_string())?;
+
+  let mut items = Vec::new();
+  for row in rows {
+    items.push(row.map_err(|err| err.to_string())?);
+  }
+  Ok(items)
+}
+
+#[tauri::command]
+fn get_duplicate_groups(app: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, String> {
+  let conn = open_db(&app)?;
+  let mut stmt = conn
+    .prepare(
+      "SELECT files.sha256, COALESCE(items.title, 'Untitled') as title, \
+       GROUP_CONCAT(files.filename, '|') as filenames \
+       FROM files \
+       LEFT JOIN items ON items.id = files.item_id \
+       WHERE files.sha256 IS NOT NULL AND files.status = 'active' \
+       GROUP BY files.sha256 \
+       HAVING COUNT(files.id) > 1"
+    )
+    .map_err(|err| err.to_string())?;
+
+  let rows = stmt
+    .query_map(params![], |row| {
+      let filenames: Option<String> = row.get(2)?;
+      Ok(DuplicateGroup {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        files: filenames
+          .unwrap_or_default()
+          .split('|')
+          .filter(|value| !value.trim().is_empty())
+          .map(|value| value.trim().to_string())
+          .collect(),
+      })
+    })
+    .map_err(|err| err.to_string())?;
+
+  let mut groups = Vec::new();
+  for row in rows {
+    groups.push(row.map_err(|err| err.to_string())?);
+  }
+  Ok(groups)
 }
 
 #[tauri::command]
@@ -702,7 +784,12 @@ pub fn run() {
       }
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![get_library_items, scan_folder])
+    .invoke_handler(tauri::generate_handler![
+      get_library_items,
+      get_inbox_items,
+      get_duplicate_groups,
+      scan_folder
+    ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

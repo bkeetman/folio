@@ -320,6 +320,12 @@
   align-items: center;
 }
 
+.duplicate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .inbox-actions {
   display: flex;
   gap: 8px;
