@@ -10,6 +10,13 @@ pnpm install
 pnpm dev
 ```
 
+## Tauri app
+
+```bash
+cargo install tauri-cli --locked --version 2.9.6
+pnpm -C apps/desktop dev:tauri
+```
+
 ## Database (local)
 
 ```bash
