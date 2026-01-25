@@ -185,7 +185,10 @@ function App() {
   const [organizeTemplate, setOrganizeTemplate] = useState(
     "{Author}/{Title} ({Year}) [{ISBN13}].{ext}"
   );
-  const isDesktop = isTauri();
+  const isDesktop =
+    isTauri() ||
+    (typeof window !== "undefined" &&
+      Boolean((window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__));
 
   const filteredBooks = useMemo(() => {
     const base = isDesktop
