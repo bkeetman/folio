@@ -646,6 +646,31 @@ function App() {
           </div>
         </header>
 
+        {scanning && scanProgress ? (
+          <div className="library-progress">
+            <div className="library-progress-label">
+              Scanning {scanProgress.processed} of {scanProgress.total || "?"}
+            </div>
+            <div className="library-progress-bar">
+              <div
+                className="library-progress-fill"
+                style={{
+                  width:
+                    scanProgress.total > 0
+                      ? `${Math.min(
+                          100,
+                          Math.round(
+                            (scanProgress.processed / scanProgress.total) * 100
+                          )
+                        )}%`
+                      : "6%",
+                }}
+              />
+            </div>
+            <div className="library-progress-file">{scanProgress.current}</div>
+          </div>
+        ) : null}
+
         {view === "library" && (
           <section className="content">
             <div className="filter-row">

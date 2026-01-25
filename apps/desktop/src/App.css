@@ -253,6 +253,45 @@
   padding-bottom: 20px;
 }
 
+.library-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--border);
+}
+
+.library-progress-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--ink-soft);
+}
+
+.library-progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(208, 138, 70, 0.2);
+  overflow: hidden;
+}
+
+.library-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  border-radius: inherit;
+  transition: width 0.2s ease;
+}
+
+.library-progress-file {
+  font-size: 12px;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .title-block h1 {
   margin: 0 0 4px;
   font-family: "Iowan Old Style", "Baskerville", "Georgia", serif;
