@@ -10,7 +10,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "scan": "tsx src/cli/scan.ts",
-    "enrich": "tsx src/cli/enrich.ts"
+    "enrich": "tsx src/cli/enrich.ts",
+    "list": "tsx src/cli/list.ts"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
