@@ -1,14 +1,10 @@
-import { readdir, stat } from "fs/promises";
+import { access, readdir, stat } from "fs/promises";
+import { constants } from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
 import { and, eq, like } from "drizzle-orm";
 import type { FolioDb } from "../db";
-import {
-  files,
-  items,
-  scanEntries,
-  scanSessions,
-} from "../db/schema";
+import { files, issues, items, scanEntries, scanSessions } from "../db/schema";
 import { sha256File } from "./hash";
 
 type ScanOptions = {
@@ -93,6 +89,46 @@ export async function scanRoot(
       .get();
 
     if (existingByHash && existingByHash.path !== filePath) {
+      const originalExists = await pathExists(existingByHash.path);
+      if (originalExists) {
+        const duplicateFileId = randomUUID();
+        db.insert(files).values({
+          id: duplicateFileId,
+          itemId: existingByHash.itemId,
+          path: filePath,
+          filename,
+          extension,
+          sizeBytes,
+          modifiedAt,
+          sha256,
+          hashAlgo: "sha256",
+          createdAt: now,
+          updatedAt: now,
+          status: "active",
+        });
+        db.insert(issues).values({
+          id: randomUUID(),
+          itemId: existingByHash.itemId,
+          fileId: duplicateFileId,
+          type: "duplicate",
+          message: "Duplicate content detected by hash.",
+          severity: "warn",
+          createdAt: now,
+        });
+        stats.added += 1;
+        db.insert(scanEntries).values({
+          id: randomUUID(),
+          sessionId,
+          path: filePath,
+          modifiedAt,
+          sizeBytes,
+          sha256,
+          action: "added",
+          fileId: duplicateFileId,
+        });
+        continue;
+      }
+
       stats.moved += 1;
       db
         .update(files)
@@ -235,5 +271,14 @@ async function* walkFiles(
       if (!extensions.has(ext)) continue;
       yield entryPath;
     }
+  }
+}
+
+async function pathExists(filePath: string) {
+  try {
+    await access(filePath, constants.F_OK);
+    return true;
+  } catch {
+    return false;
   }
 }
