@@ -250,7 +250,7 @@ function App() {
         setScanStatus("Scan requires the Tauri desktop runtime.");
         return;
       }
-      const { open } = await import("@tauri-apps/api/dialog");
+      const { open } = await import("@tauri-apps/plugin-dialog");
       const selection = await open({ directory: true, multiple: false });
       if (typeof selection === "string") {
         setScanStatus("Scanning...");
@@ -328,7 +328,7 @@ function App() {
       return;
     }
     try {
-      const { open } = await import("@tauri-apps/api/dialog");
+      const { open } = await import("@tauri-apps/plugin-dialog");
       const selection = await open({ directory: true, multiple: false });
       if (typeof selection !== "string") return;
       const plan = await invoke<OrganizePlan>("plan_organize", {
