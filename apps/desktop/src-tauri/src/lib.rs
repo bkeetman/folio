@@ -655,11 +655,16 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
         )
         .optional()
         .map_err(|err| err.to_string())?;
-      if let Some(item_id) = item_id {
-        if let Ok(metadata) = extract_metadata(path) {
-          apply_metadata(&conn, &item_id, &metadata, now)?;
+    if let Some(item_id) = item_id {
+      if let Ok(metadata) = extract_metadata(path) {
+        apply_metadata(&conn, &item_id, &metadata, now)?;
+      }
+      if ext == ".epub" {
+        if let Ok(Some((bytes, extension))) = extract_epub_cover(path) {
+          let _ = save_cover(&app, &conn, &item_id, bytes, &extension, now);
         }
       }
+    }
       continue;
     }
 
@@ -693,6 +698,11 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
 
     if let Ok(metadata) = extract_metadata(path) {
       apply_metadata(&conn, &item_id, &metadata, now)?;
+    }
+    if ext == ".epub" {
+      if let Ok(Some((bytes, extension))) = extract_epub_cover(path) {
+        let _ = save_cover(&app, &conn, &item_id, bytes, &extension, now);
+      }
     }
   }
 
@@ -815,6 +825,57 @@ fn extract_epub_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, St
 
   parse_opf_metadata(&opf, &mut metadata)?;
   Ok(metadata)
+}
+
+fn extract_epub_cover(
+  path: &std::path::Path,
+) -> Result<Option<(Vec<u8>, String)>, String> {
+  let file = std::fs::File::open(path).map_err(|err| err.to_string())?;
+  let mut archive = ZipArchive::new(file).map_err(|err| err.to_string())?;
+  let mut container = String::new();
+  archive
+    .by_name("META-INF/container.xml")
+    .map_err(|err| err.to_string())?
+    .read_to_string(&mut container)
+    .map_err(|err| err.to_string())?;
+
+  let rootfile = find_rootfile(&container).ok_or("Missing rootfile")?;
+  let mut opf = String::new();
+  archive
+    .by_name(&rootfile)
+    .map_err(|err| err.to_string())?
+    .read_to_string(&mut opf)
+    .map_err(|err| err.to_string())?;
+
+  let cover = parse_opf_cover(&opf);
+  let cover = match cover {
+    Some(value) => value,
+    None => return Ok(None),
+  };
+
+  let opf_dir = std::path::Path::new(&rootfile)
+    .parent()
+    .map(|value| value.to_string_lossy().to_string())
+    .unwrap_or_default();
+  let cover_path = if opf_dir.is_empty() {
+    cover.href.clone()
+  } else {
+    format!("{}/{}", opf_dir, cover.href)
+  };
+
+  let mut bytes = Vec::new();
+  archive
+    .by_name(&cover_path)
+    .map_err(|err| err.to_string())?
+    .read_to_end(&mut bytes)
+    .map_err(|err| err.to_string())?;
+
+  let extension = cover
+    .extension
+    .or_else(|| cover.href.split('.').last().map(|value| value.to_string()))
+    .unwrap_or_else(|| "jpg".to_string());
+
+  Ok(Some((bytes, extension)))
 }
 
 fn extract_pdf_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, String> {
@@ -1109,6 +1170,137 @@ fn parse_opf_metadata(opf: &str, metadata: &mut ExtractedMetadata) -> Result<(),
   if metadata.identifiers.is_empty() {
     metadata.identifiers = extract_isbn_candidates(opf);
   }
+
+  Ok(())
+}
+
+struct CoverDescriptor {
+  href: String,
+  extension: Option<String>,
+}
+
+fn parse_opf_cover(opf: &str) -> Option<CoverDescriptor> {
+  let mut reader = quick_xml::Reader::from_str(opf);
+  reader.trim_text(true);
+  let mut buf = Vec::new();
+  let mut cover_id: Option<String> = None;
+  let mut manifest: std::collections::HashMap<String, (String, Option<String>, Option<String>)> =
+    std::collections::HashMap::new();
+
+  loop {
+    match reader.read_event_into(&mut buf) {
+      Ok(quick_xml::events::Event::Start(event)) => {
+        let tag = String::from_utf8_lossy(event.name().as_ref()).to_string();
+        if tag == "meta" || tag.ends_with(":meta") {
+          let mut name: Option<String> = None;
+          let mut content: Option<String> = None;
+          for attr in event.attributes().flatten() {
+            let key = attr.key.as_ref();
+            let value = attr.unescape_value().ok()?.to_string();
+            if key == b"name" {
+              name = Some(value);
+            } else if key == b"content" {
+              content = Some(value);
+            }
+          }
+          if let (Some(name), Some(content)) = (name, content) {
+            if name == "cover" {
+              cover_id = Some(content);
+            }
+          }
+        }
+
+        if tag == "item" || tag.ends_with(":item") {
+          let mut id: Option<String> = None;
+          let mut href: Option<String> = None;
+          let mut media_type: Option<String> = None;
+          let mut properties: Option<String> = None;
+          for attr in event.attributes().flatten() {
+            let key = attr.key.as_ref();
+            let value = attr.unescape_value().ok()?.to_string();
+            if key == b"id" {
+              id = Some(value);
+            } else if key == b"href" {
+              href = Some(value);
+            } else if key == b"media-type" {
+              media_type = Some(value);
+            } else if key == b"properties" {
+              properties = Some(value);
+            }
+          }
+          if let (Some(id), Some(href)) = (id, href) {
+            manifest.insert(id, (href, media_type, properties));
+          }
+        }
+      }
+      Ok(quick_xml::events::Event::Eof) => break,
+      Err(_) => break,
+      _ => {}
+    }
+    buf.clear();
+  }
+
+  let cover_item = cover_id.and_then(|id| manifest.get(&id).cloned());
+  let cover_item = cover_item.or_else(|| {
+    manifest
+      .values()
+      .find(|(_, _, properties)| {
+        properties
+          .as_ref()
+          .map(|value| value.contains("cover-image"))
+          .unwrap_or(false)
+      })
+      .cloned()
+  });
+
+  if let Some((href, media_type, _)) = cover_item {
+    let extension = media_type
+      .as_deref()
+      .and_then(map_cover_extension)
+      .map(|value| value.to_string());
+    return Some(CoverDescriptor { href, extension });
+  }
+
+  None
+}
+
+fn map_cover_extension(mime: &str) -> Option<&'static str> {
+  match mime {
+    "image/jpeg" => Some("jpg"),
+    "image/png" => Some("png"),
+    "image/webp" => Some("webp"),
+    _ => None,
+  }
+}
+
+fn save_cover(
+  app: &tauri::AppHandle,
+  conn: &Connection,
+  item_id: &str,
+  bytes: Vec<u8>,
+  extension: &str,
+  now: i64,
+) -> Result<(), String> {
+  let app_dir = app
+    .path()
+    .app_data_dir()
+    .map_err(|err| err.to_string())?;
+  let covers_dir = app_dir.join("covers");
+  std::fs::create_dir_all(&covers_dir).map_err(|err| err.to_string())?;
+  let filename = format!("cover_{}.{}", item_id, extension);
+  let cover_path = covers_dir.join(filename);
+  std::fs::write(&cover_path, bytes).map_err(|err| err.to_string())?;
+
+  conn.execute(
+    "DELETE FROM covers WHERE item_id = ?1",
+    params![item_id],
+  )
+  .map_err(|err| err.to_string())?;
+  conn.execute(
+    "INSERT INTO covers (id, item_id, source, url, local_path, width, height, created_at) VALUES (?1, ?2, ?3, NULL, ?4, NULL, NULL, ?5)",
+    params![Uuid::new_v4().to_string(), item_id, "embedded", cover_path.to_string_lossy(), now],
+  )
+  .map_err(|err| err.to_string())?;
 
   Ok(())
 }
