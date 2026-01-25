@@ -125,6 +125,41 @@
   letter-spacing: 0.3px;
 }
 
+.scan-progress {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.scan-progress-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.scan-progress-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(208, 138, 70, 0.2);
+  overflow: hidden;
+}
+
+.scan-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  border-radius: inherit;
+  transition: width 0.2s ease;
+}
+
+.scan-progress-file {
+  font-size: 11px;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .organizer-row {
   display: flex;
   justify-content: space-between;

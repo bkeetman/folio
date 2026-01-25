@@ -22,6 +22,12 @@ type ScanStats = {
   missing: number;
 };
 
+type ScanProgress = {
+  processed: number;
+  total: number;
+  current: string;
+};
+
 type InboxItem = {
   id: string;
   title: string;
@@ -173,6 +179,7 @@ function App() {
   const [scanStatus, setScanStatus] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanStartedAt, setScanStartedAt] = useState<number | null>(null);
+  const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([]);
   const [libraryReady, setLibraryReady] = useState(false);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
@@ -259,6 +266,7 @@ function App() {
       if (scanning) return;
       setScanning(true);
       setScanStartedAt(Date.now());
+      setScanProgress(null);
       const { open } = await import("@tauri-apps/plugin-dialog");
       const selection = await open({ directory: true, multiple: false });
       if (typeof selection === "string") {
@@ -270,6 +278,7 @@ function App() {
           `Scan complete: ${stats.added} added, ${stats.updated} updated, ${stats.moved} moved.`
         );
         await refreshLibrary();
+        setScanProgress(null);
       } else if (Array.isArray(selection) && selection.length) {
         setScanStatus("Scanning...");
         const stats = await invoke<ScanStats>("scan_folder", {
@@ -279,8 +288,10 @@ function App() {
           `Scan complete: ${stats.added} added, ${stats.updated} updated, ${stats.moved} moved.`
         );
         await refreshLibrary();
+        setScanProgress(null);
       } else {
         setScanStatus("Scan cancelled.");
+        setScanProgress(null);
       }
     } catch (error) {
       if (error instanceof Error) {
@@ -288,6 +299,7 @@ function App() {
       } else {
         setScanStatus("Scan failed.");
       }
+      setScanProgress(null);
     } finally {
       setScanning(false);
     }
@@ -343,6 +355,35 @@ function App() {
       if (unlisten) unlisten();
     };
   }, [handleScan]);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlistenProgress: (() => void) | undefined;
+    let unlistenComplete: (() => void) | undefined;
+
+    listen<ScanProgress>("scan-progress", (event) => {
+      setScanProgress(event.payload);
+      if (!scanning) setScanning(true);
+      if (!scanStartedAt) setScanStartedAt(Date.now());
+    }).then((stop) => {
+      unlistenProgress = stop;
+    });
+
+    listen<ScanStats>("scan-complete", (event) => {
+      setScanProgress(null);
+      setScanning(false);
+      setScanStatus(
+        `Scan complete: ${event.payload.added} added, ${event.payload.updated} updated, ${event.payload.moved} moved.`
+      );
+    }).then((stop) => {
+      unlistenComplete = stop;
+    });
+
+    return () => {
+      if (unlistenProgress) unlistenProgress();
+      if (unlistenComplete) unlistenComplete();
+    };
+  }, [isDesktop, scanStartedAt, scanning]);
 
   const currentFixItem = inbox.length ? inbox[0] : inboxItems[0] ?? null;
   const candidateList = isDesktop ? fixCandidates : sampleFixCandidates;
@@ -469,6 +510,32 @@ function App() {
               {scanning && scanStartedAt ? (
                 <div className="scan-timer">
                   {Math.floor((Date.now() - scanStartedAt) / 1000)}s elapsed
+                </div>
+              ) : null}
+              {scanProgress ? (
+                <div className="scan-progress">
+                  <div className="scan-progress-label">
+                    {scanProgress.processed} / {scanProgress.total || "?"}
+                  </div>
+                  <div className="scan-progress-bar">
+                    <div
+                      className="scan-progress-fill"
+                      style={{
+                        width:
+                          scanProgress.total > 0
+                            ? `${Math.min(
+                                100,
+                                Math.round(
+                                  (scanProgress.processed / scanProgress.total) * 100
+                                )
+                              )}%`
+                            : "6%",
+                      }}
+                    />
+                  </div>
+                  <div className="scan-progress-file">
+                    {scanProgress.current}
+                  </div>
                 </div>
               ) : null}
             </div>

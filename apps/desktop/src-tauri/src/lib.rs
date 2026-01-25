@@ -74,6 +74,13 @@ struct ScanStats {
   missing: i64,
 }
 
+#[derive(Serialize, Clone)]
+struct ScanProgressPayload {
+  processed: usize,
+  total: usize,
+  current: String,
+}
+
 struct ExtractedMetadata {
   title: Option<String>,
   authors: Vec<String>,
@@ -449,6 +456,8 @@ fn clear_library(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String> {
   let conn = open_db(&app)?;
+  let total = count_scan_targets(&root) as usize;
+  let mut processed = 0usize;
   let mut stats = ScanStats {
     added: 0,
     updated: 0,
@@ -456,6 +465,15 @@ fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String>
     unchanged: 0,
     missing: 0,
   };
+
+  let _ = app.emit(
+    "scan-progress",
+    ScanProgressPayload {
+      processed,
+      total,
+      current: "Preparing scan...".to_string(),
+    },
+  );
 
   let now = chrono::Utc::now().timestamp_millis();
   let session_id = Uuid::new_v4().to_string();
@@ -478,6 +496,21 @@ fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String>
     if ext != ".epub" && ext != ".pdf" {
       continue;
     }
+
+    processed += 1;
+    let filename = path
+      .file_name()
+      .and_then(|value| value.to_str())
+      .unwrap_or("file")
+      .to_string();
+    let _ = app.emit(
+      "scan-progress",
+      ScanProgressPayload {
+        processed,
+        total,
+        current: filename,
+      },
+    );
 
     let path_str = path.to_string_lossy().to_string();
     seen_paths.insert(path_str.clone());
@@ -667,6 +700,8 @@ fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String>
     params![chrono::Utc::now().timestamp_millis(), session_id],
   )
   .map_err(|err| err.to_string())?;
+
+  let _ = app.emit("scan-complete", &stats);
 
   Ok(stats)
 }
@@ -1442,6 +1477,23 @@ fn hash_file(path: &std::path::Path) -> Result<String, std::io::Error> {
   }
   let result = hasher.finalize();
   Ok(result.iter().map(|byte| format!("{:02x}", byte)).collect())
+}
+
+fn count_scan_targets(root: &str) -> u64 {
+  WalkDir::new(root)
+    .into_iter()
+    .filter_map(Result::ok)
+    .filter(|entry| entry.file_type().is_file())
+    .filter(|entry| {
+      let ext = entry
+        .path()
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+      ext == "epub" || ext == "pdf"
+    })
+    .count() as u64
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
