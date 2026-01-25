@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { Button, Panel, SidebarItem } from "./components/ui";
 
 type View = "library" | "inbox" | "duplicates" | "fix";
 
@@ -482,39 +483,24 @@ function App() {
         </div>
 
         <nav className="nav">
-          <button
-            className={view === "library" ? "nav-item active" : "nav-item"}
-            onClick={() => setView("library")}
-          >
+          <SidebarItem active={view === "library"} onClick={() => setView("library")}>
             Library
-          </button>
-          <button
-            className={view === "inbox" ? "nav-item active" : "nav-item"}
-            onClick={() => setView("inbox")}
-          >
+          </SidebarItem>
+          <SidebarItem active={view === "inbox"} onClick={() => setView("inbox")}>
             Inbox
-          </button>
-          <button
-            className={view === "duplicates" ? "nav-item active" : "nav-item"}
+          </SidebarItem>
+          <SidebarItem
+            active={view === "duplicates"}
             onClick={() => setView("duplicates")}
           >
             Duplicates
-          </button>
-          <button
-            className={view === "fix" ? "nav-item active" : "nav-item"}
-            onClick={() => setView("fix")}
-          >
+          </SidebarItem>
+          <SidebarItem active={view === "fix"} onClick={() => setView("fix")}>
             Fix Metadata
-          </button>
+          </SidebarItem>
         </nav>
 
-        <div className="sidebar-panel">
-          <div className="panel-title">Quick Actions</div>
-          <button className="primary" onClick={handleScan} disabled={scanning}>
-            {scanning ? "Scanning..." : "Scan Folder"}
-          </button>
-          <button className="ghost" onClick={handlePlanOrganize}>Organize Files</button>
-          <button className="ghost">Run Enrichment</button>
+        <Panel title="Activity">
           {scanStatus ? (
             <div className="scan-status">
               {scanStatus}
@@ -555,21 +541,12 @@ function App() {
                 </div>
               ) : null}
             </div>
-          ) : null}
-        </div>
+          ) : (
+            <div className="scan-status muted">No recent activity.</div>
+          )}
+        </Panel>
 
-        <div className="sidebar-panel danger">
-          <div className="panel-title">Danger Zone</div>
-          <button className="ghost danger" onClick={handleClearLibrary}>
-            Clear Library
-          </button>
-          <div className="danger-note">
-            Removes all Folio data. Your files remain untouched.
-          </div>
-        </div>
-
-        <div className="sidebar-panel">
-          <div className="panel-title">Organizer</div>
+        <Panel title="Organizer">
           <div className="organizer-row">
             <span>Mode</span>
             <select
@@ -594,14 +571,15 @@ function App() {
                   {entry.target_path}
                 </div>
               ))}
-              <button className="primary" onClick={handleApplyOrganize}>Apply Plan</button>
+              <Button variant="primary" onClick={handleApplyOrganize}>
+                Apply Plan
+              </Button>
             </div>
           ) : null}
           {organizeStatus ? <div className="scan-status">{organizeStatus}</div> : null}
-        </div>
+        </Panel>
 
-        <div className="sidebar-panel">
-          <div className="panel-title">Library Health</div>
+        <Panel title="Library Health">
           <div className="health-row">
             <span>Complete</span>
             <strong>82%</strong>
@@ -614,11 +592,20 @@ function App() {
             <span>Duplicates</span>
             <strong>4</strong>
           </div>
-        </div>
+        </Panel>
+
+        <Panel title="Danger Zone" className="danger">
+          <Button variant="danger" onClick={handleClearLibrary}>
+            Clear Library
+          </Button>
+          <div className="danger-note">
+            Removes all Folio data. Your files remain untouched.
+          </div>
+        </Panel>
       </aside>
 
       <main className="main">
-        <header className="topbar">
+        <header className="toolbar">
           <div className="title-block">
             <h1>
               {view === "library" && "Your Library"}
@@ -634,7 +621,23 @@ function App() {
             </p>
           </div>
 
-          <div className="topbar-actions">
+          <div className="toolbar-actions">
+            <div className="toolbar-group">
+              <Button
+                variant="toolbar"
+                size="sm"
+                onClick={handleScan}
+                disabled={scanning}
+              >
+                {scanning ? "Scanning…" : "Scan"}
+              </Button>
+              <Button variant="toolbar" size="sm" onClick={handlePlanOrganize}>
+                Organize
+              </Button>
+              <Button variant="toolbar" size="sm">
+                Enrich
+              </Button>
+            </div>
             <div className="search">
               <input
                 value={query}
@@ -646,18 +649,22 @@ function App() {
               <div className="library-status">Loading library...</div>
             ) : null}
             <div className="view-toggle">
-              <button
+              <Button
+                variant="toolbar"
+                size="sm"
                 className={grid ? "active" : ""}
                 onClick={() => setGrid(true)}
               >
                 Grid
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="toolbar"
+                size="sm"
                 className={!grid ? "active" : ""}
                 onClick={() => setGrid(false)}
               >
                 List
-              </button>
+              </Button>
             </div>
           </div>
         </header>
