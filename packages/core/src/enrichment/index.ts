@@ -49,6 +49,42 @@ export async function enrichByIsbn(
   return results;
 }
 
+export async function enrichByTitleAuthor(
+  db: FolioDb,
+  itemId: string,
+  title: string,
+  author?: string
+): Promise<EnrichedCandidate[]> {
+  const queryKey = `title:${title}|author:${author ?? ""}`;
+  const openLibrary = await fetchWithCache(
+    db,
+    itemId,
+    "openlibrary",
+    queryKey,
+    () => fetchOpenLibrarySearch(title, author)
+  );
+
+  const google = await fetchWithCache(
+    db,
+    itemId,
+    "googlebooks",
+    queryKey,
+    () => fetchGoogleBooksSearch(title, author)
+  );
+
+  const candidates = [...(openLibrary ?? []), ...(google ?? [])];
+  return candidates
+    .map((candidate) => {
+      const score = scoreCandidate(candidate, title, author);
+      return {
+        ...candidate,
+        confidence: Math.min(0.95, candidate.confidence * score),
+      };
+    })
+    .filter((candidate) => candidate.confidence >= 0.45)
+    .sort((a, b) => b.confidence - a.confidence);
+}
+
 async function fetchWithCache(
   db: FolioDb,
   itemId: string,
@@ -154,6 +190,63 @@ async function fetchGoogleBooksIsbn(
   });
 }
 
+async function fetchOpenLibrarySearch(
+  title: string,
+  author?: string
+): Promise<EnrichedCandidate[] | null> {
+  await rateLimiters.openlibrary.wait();
+  const params = new URLSearchParams({
+    title,
+  });
+  if (author) params.set("author", author);
+  const response = await fetch(`https://openlibrary.org/search.json?${params}`);
+  if (!response.ok) return null;
+  const data = await response.json();
+  const docs = Array.isArray(data?.docs) ? data.docs : [];
+  return docs.slice(0, 5).map((doc: any, index: number) => {
+    const confidence = 0.7 - index * 0.05;
+    return {
+      title: doc.title,
+      authors: doc.author_name,
+      publishedYear: doc.first_publish_year,
+      identifiers: doc.isbn,
+      source: "openlibrary",
+      confidence,
+      raw: doc,
+    } as EnrichedCandidate;
+  });
+}
+
+async function fetchGoogleBooksSearch(
+  title: string,
+  author?: string
+): Promise<EnrichedCandidate[] | null> {
+  await rateLimiters.googlebooks.wait();
+  const terms = [`intitle:${title}`];
+  if (author) terms.push(`inauthor:${author}`);
+  const response = await fetch(
+    `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(
+      terms.join("+")
+    )}`
+  );
+  if (!response.ok) return null;
+  const data = await response.json();
+  const items = Array.isArray(data?.items) ? data.items : [];
+  return items.slice(0, 5).map((item: any, index: number) => {
+    const info = item.volumeInfo ?? {};
+    const confidence = 0.75 - index * 0.05;
+    return {
+      title: info.title,
+      authors: info.authors,
+      publishedYear: parseYear(info.publishedDate),
+      identifiers: info.industryIdentifiers?.map((id: any) => id.identifier),
+      source: "googlebooks",
+      confidence,
+      raw: item,
+    } as EnrichedCandidate;
+  });
+}
+
 async function getOrCreateSource(db: FolioDb, name: EnrichmentSourceName) {
   const existing = db
     .select()
@@ -177,6 +270,37 @@ function parseYear(value?: string) {
   const match = value.match(/\b(\d{4})\b/);
   if (!match) return undefined;
   return Number(match[1]);
+}
+
+function scoreCandidate(
+  candidate: EnrichedCandidate,
+  title: string,
+  author?: string
+) {
+  const titleScore = similarity(candidate.title ?? "", title);
+  const authorScore = author
+    ? similarity((candidate.authors ?? []).join(" "), author)
+    : 1;
+  return Math.max(0.2, titleScore * 0.7 + authorScore * 0.3);
+}
+
+function similarity(a: string, b: string) {
+  const aTokens = tokenize(a);
+  const bTokens = tokenize(b);
+  if (!aTokens.size || !bTokens.size) return 0.2;
+  const intersection = [...aTokens].filter((token) => bTokens.has(token)).length;
+  const union = new Set([...aTokens, ...bTokens]).size;
+  return intersection / union;
+}
+
+function tokenize(value: string) {
+  return new Set(
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(Boolean)
+  );
 }
 
 type RateLimiter = {
