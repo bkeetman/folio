@@ -373,6 +373,20 @@ async function applyMetadata(db: FolioDb, itemId: string, filePath: string) {
           .onConflictDoNothing();
       }
     }
+
+    const missingFields: string[] = [];
+    if (!metadata.title) missingFields.push("title");
+    if (!metadata.authors?.length) missingFields.push("author");
+    if (missingFields.length) {
+      db.insert(issues).values({
+        id: randomUUID(),
+        itemId,
+        type: "missing_metadata",
+        message: `Missing metadata: ${missingFields.join(", ")}.`,
+        severity: "info",
+        createdAt: now,
+      });
+    }
   } catch (error) {
     db.insert(issues).values({
       id: randomUUID(),
