@@ -448,6 +448,13 @@
   color: var(--ink-soft);
 }
 
+.empty-state {
+  border: 1px dashed var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.6);
+}
+
 @media (max-width: 980px) {
   .app {
     grid-template-columns: 1fr;

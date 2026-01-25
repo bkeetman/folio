@@ -188,7 +188,7 @@ function App() {
   const isDesktop = isTauri();
 
   const filteredBooks = useMemo(() => {
-    const base = libraryItems.length
+    const base = isDesktop
       ? libraryItems.map((item) => ({
           id: item.id,
           title: item.title ?? "Untitled",
@@ -205,7 +205,7 @@ function App() {
         book.title.toLowerCase().includes(lowered) ||
         book.author.toLowerCase().includes(lowered)
     );
-  }, [query, libraryItems]);
+  }, [query, libraryItems, isDesktop]);
 
   useEffect(() => {
     const load = async () => {
@@ -579,30 +579,37 @@ function App() {
               <button className="chip">Tagged</button>
             </div>
 
-            <div className={grid ? "grid" : "list"}>
-              {filteredBooks.map((book) => (
-                <article key={book.id} className="card">
-                  <div className="cover">
-                    <div className="cover-badge">{book.format}</div>
-                    <div className="cover-title">{book.title}</div>
-                  </div>
-                  <div className="card-body">
-                    <div className="card-title">{book.title}</div>
-                    <div className="card-meta">{book.author}</div>
-                    <div className="card-meta">
-                      {book.year} · {book.status}
+            {isDesktop && !libraryItems.length ? (
+              <div className="empty-state">
+                <div className="card-title">Library is empty</div>
+                <div className="card-meta">Scan a folder to import books.</div>
+              </div>
+            ) : (
+              <div className={grid ? "grid" : "list"}>
+                {filteredBooks.map((book) => (
+                  <article key={book.id} className="card">
+                    <div className="cover">
+                      <div className="cover-badge">{book.format}</div>
+                      <div className="cover-title">{book.title}</div>
                     </div>
-                  </div>
-                </article>
-              ))}
-            </div>
+                    <div className="card-body">
+                      <div className="card-title">{book.title}</div>
+                      <div className="card-meta">{book.author}</div>
+                      <div className="card-meta">
+                        {book.year} · {book.status}
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
         )}
 
         {view === "inbox" && (
           <section className="content">
             <div className="inbox">
-              {(inbox.length ? inbox : inboxItems).map((item) => (
+              {(isDesktop ? inbox : inboxItems).map((item) => (
                 <div key={item.id} className="inbox-row">
                   <div>
                     <div className="card-title">{item.title}</div>
@@ -621,7 +628,7 @@ function App() {
         {view === "duplicates" && (
           <section className="content">
             <div className="duplicate-list">
-              {(duplicates.length ? duplicates : duplicateGroups).map((group) => (
+              {(isDesktop ? duplicates : duplicateGroups).map((group) => (
                 <div key={group.id} className="duplicate-card">
                   <div>
                     <div className="card-title">{group.title}</div>
