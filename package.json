@@ -1,0 +1,10 @@
+{
+  "name": "folio",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "pnpm -C apps/desktop dev",
+    "build": "pnpm -C apps/desktop build",
+    "lint": "pnpm -C apps/desktop lint"
+  }
+}

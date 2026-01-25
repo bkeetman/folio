@@ -1,0 +1,22 @@
+{
+  "name": "@folio/core",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "drizzle-kit": "^0.31.8",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "drizzle-orm": "^0.45.1"
+  }
+}
