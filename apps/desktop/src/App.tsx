@@ -184,6 +184,10 @@ function App() {
 
   const handleScan = async () => {
     try {
+      if (!isTauri()) {
+        setScanStatus("Scan requires the Tauri desktop runtime.");
+        return;
+      }
       const { open } = await import("@tauri-apps/api/dialog");
       const selection = await open({ directory: true, multiple: false });
       if (typeof selection === "string") {
@@ -208,7 +212,11 @@ function App() {
         setScanStatus("Scan cancelled.");
       }
     } catch (error) {
-      setScanStatus("Scan requires the Tauri desktop runtime.");
+      if (error instanceof Error) {
+        setScanStatus(error.message);
+      } else {
+        setScanStatus("Scan failed.");
+      }
     }
   };
 
