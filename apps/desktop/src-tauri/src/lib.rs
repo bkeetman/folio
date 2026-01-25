@@ -645,7 +645,7 @@ fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String>
 }
 
 fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
-  let db_path = db_path(app).map_err(|err| err.to_string())?;
+  let db_path = db_path(app)?;
   let needs_migration = !db_path.exists();
   let conn = Connection::open(db_path).map_err(|err| err.to_string())?;
   if needs_migration {
@@ -720,7 +720,7 @@ fn extract_pdf_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, Str
     identifiers: vec![],
   };
 
-  if let Some(info) = info {
+  if let Ok(info) = info {
     if let Ok(info) = info.as_dict() {
       if let Some(title) = dict_string(info, b"Title") {
         metadata.title = Some(title);
@@ -741,13 +741,9 @@ fn extract_pdf_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, Str
   }
 
   let pages = doc.get_pages();
-  let page_ids: Vec<lopdf::ObjectId> = pages
-    .values()
-    .take(10)
-    .cloned()
-    .collect();
-  if !page_ids.is_empty() {
-    if let Ok(text) = doc.extract_text(&page_ids) {
+  let page_numbers: Vec<u32> = pages.keys().take(10).cloned().collect();
+  if !page_numbers.is_empty() {
+    if let Ok(text) = doc.extract_text(&page_numbers) {
       metadata.identifiers.extend(extract_isbn_candidates(&text));
     }
   }
@@ -942,7 +938,7 @@ fn extract_year(text: &str) -> Option<i64> {
 }
 
 fn find_rootfile(container: &str) -> Option<String> {
-  let regex = Regex::new(r"full-path=\"([^\"]+)\"").ok()?;
+  let regex = Regex::new(r#"full-path="([^"]+)""#).ok()?;
   let captures = regex.captures(container)?;
   Some(captures.get(1)?.as_str().to_string())
 }
@@ -1397,9 +1393,12 @@ fn resolve_collision(library_root: &str, relative: &str) -> String {
   }
 }
 
-fn db_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, std::io::Error> {
-  let app_dir = app.path().app_data_dir()?;
-  std::fs::create_dir_all(&app_dir)?;
+fn db_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+  let app_dir = app
+    .path()
+    .app_data_dir()
+    .map_err(|err| err.to_string())?;
+  std::fs::create_dir_all(&app_dir).map_err(|err| err.to_string())?;
   Ok(app_dir.join("folio.db"))
 }
 
