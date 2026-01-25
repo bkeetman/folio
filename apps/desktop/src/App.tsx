@@ -13,6 +13,14 @@ type LibraryItem = {
   formats: string[];
 };
 
+type ScanStats = {
+  added: number;
+  updated: number;
+  moved: number;
+  unchanged: number;
+  missing: number;
+};
+
 const sampleBooks = [
   {
     id: "1",
@@ -164,14 +172,38 @@ function App() {
     load();
   }, []);
 
+  const refreshLibrary = async () => {
+    if (!isTauri()) return;
+    try {
+      const items = await invoke<LibraryItem[]>("get_library_items");
+      setLibraryItems(items);
+    } catch (error) {
+      setScanStatus("Could not refresh library data.");
+    }
+  };
+
   const handleScan = async () => {
     try {
       const { open } = await import("@tauri-apps/api/dialog");
       const selection = await open({ directory: true, multiple: false });
       if (typeof selection === "string") {
-        setScanStatus(`Selected folder: ${selection}`);
+        setScanStatus("Scanning...");
+        const stats = await invoke<ScanStats>("scan_folder", {
+          root: selection,
+        });
+        setScanStatus(
+          `Scan complete: ${stats.added} added, ${stats.updated} updated, ${stats.moved} moved.`
+        );
+        await refreshLibrary();
       } else if (Array.isArray(selection) && selection.length) {
-        setScanStatus(`Selected folder: ${selection[0]}`);
+        setScanStatus("Scanning...");
+        const stats = await invoke<ScanStats>("scan_folder", {
+          root: selection[0],
+        });
+        setScanStatus(
+          `Scan complete: ${stats.added} added, ${stats.updated} updated, ${stats.moved} moved.`
+        );
+        await refreshLibrary();
       } else {
         setScanStatus("Scan cancelled.");
       }
