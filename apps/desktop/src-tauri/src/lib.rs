@@ -5,6 +5,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use tauri::Manager;
+use tauri::menu::{Menu, MenuItem, Submenu};
 use uuid::Uuid;
 use walkdir::WalkDir;
 use zip::ZipArchive;
@@ -1419,6 +1420,13 @@ fn hash_file(path: &std::path::Path) -> Result<String, std::io::Error> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  let app_menu = |app: &tauri::App| {
+    let scan_item = MenuItem::with_id(app, "scan_folder", "Scan Folder", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "Quit Folio", true, None::<&str>)?;
+    let folio_menu = Submenu::with_items(app, "Folio", true, &[&scan_item, &quit_item])?;
+    Menu::with_items(app, &[&folio_menu])
+  };
+
   tauri::Builder::default()
     .setup(|app| {
       if cfg!(debug_assertions) {
@@ -1428,7 +1436,18 @@ pub fn run() {
             .build(),
         )?;
       }
+      let menu = app_menu(app)?;
+      app.set_menu(menu)?;
       Ok(())
+    })
+    .plugin(tauri_plugin_dialog::init())
+    .on_menu_event(|app, event| {
+      if event.id().as_ref() == "scan_folder" {
+        let _ = app.emit("menu-scan-folder", ());
+      }
+      if event.id().as_ref() == "quit" {
+        app.exit(0);
+      }
     })
     .invoke_handler(tauri::generate_handler![
       get_library_items,

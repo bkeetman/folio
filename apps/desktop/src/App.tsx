@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 type View = "library" | "inbox" | "duplicates" | "fix";
 
@@ -244,7 +245,7 @@ function App() {
     }
   };
 
-  const handleScan = async () => {
+  const handleScan = useCallback(async () => {
     try {
       if (!isTauri()) {
         setScanStatus("Scan requires the Tauri desktop runtime.");
@@ -280,7 +281,20 @@ function App() {
         setScanStatus("Scan failed.");
       }
     }
-  };
+  }, [refreshLibrary]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+    listen("menu-scan-folder", () => {
+      handleScan();
+    }).then((stop) => {
+      unlisten = stop;
+    });
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [handleScan]);
 
   const currentFixItem = inbox.length ? inbox[0] : inboxItems[0] ?? null;
   const candidateList = isDesktop ? fixCandidates : sampleFixCandidates;
