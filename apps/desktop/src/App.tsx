@@ -193,6 +193,7 @@ function App() {
   const [organizeTemplate, setOrganizeTemplate] = useState(
     "{Author}/{Title} ({Year}) [{ISBN13}].{ext}"
   );
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const isDesktop =
     isTauri() ||
     (typeof window !== "undefined" &&
@@ -217,6 +218,11 @@ function App() {
         book.author.toLowerCase().includes(lowered)
     );
   }, [query, libraryItems, isDesktop]);
+
+  const selectedItem = useMemo(() => {
+    if (!selectedItemId) return null;
+    return filteredBooks.find((book) => book.id === selectedItemId) ?? null;
+  }, [filteredBooks, selectedItemId]);
 
   const scanEtaSeconds = useMemo(() => {
     if (!scanProgress || !scanStartedAt || scanProgress.total === 0) return null;
@@ -707,145 +713,220 @@ function App() {
           </div>
         ) : null}
 
-        {view === "library" && (
+        <div className="workspace">
           <section className="content">
-            <div className="filter-row">
-              <button className="chip active">All</button>
-              <button className="chip">EPUB</button>
-              <button className="chip">PDF</button>
-              <button className="chip">Needs Metadata</button>
-              <button className="chip">Tagged</button>
-            </div>
-
-            {isDesktop && !libraryItems.length ? (
-              <div className="empty-state">
-                <div className="card-title">Library is empty</div>
-                <div className="card-meta">Scan a folder to import books.</div>
-              </div>
-            ) : (
-              <div className={grid ? "grid" : "list"}>
-                {filteredBooks.map((book) => (
-                  <article key={book.id} className="card">
-                    <div className="cover">
-                      <div className="cover-badge">{book.format}</div>
-                      <div className="cover-title">{book.title}</div>
-                    </div>
-                    <div className="card-body">
-                      <div className="card-title">{book.title}</div>
-                      <div className="card-meta">{book.author}</div>
-                      <div className="card-meta">
-                        {book.year} · {book.status}
-                      </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
-
-        {view === "inbox" && (
-          <section className="content">
-            <div className="inbox">
-              {(isDesktop ? inbox : inboxItems).map((item) => (
-                <div key={item.id} className="inbox-row">
-                  <div>
-                    <div className="card-title">{item.title}</div>
-                    <div className="card-meta">{item.reason}</div>
-                  </div>
-                  <div className="inbox-actions">
-                    <button className="ghost">Fix</button>
-                    <button className="ghost">Ignore</button>
-                  </div>
+            {view === "library" && (
+              <>
+                <div className="filter-row">
+                  <button className="chip active">All</button>
+                  <button className="chip">EPUB</button>
+                  <button className="chip">PDF</button>
+                  <button className="chip">Needs Metadata</button>
+                  <button className="chip">Tagged</button>
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
 
-        {view === "duplicates" && (
-          <section className="content">
-            <div className="duplicate-list">
-              {(isDesktop ? duplicates : duplicateGroups).map((group) => (
-                <div key={group.id} className="duplicate-card">
-                  <div>
-                    <div className="card-title">{group.title}</div>
-                    <div className="card-meta">
-                      {group.files.length} matching files
-                    </div>
-                    <ul>
-                      {group.files.map((file) => (
-                        <li key={file}>{file}</li>
-                      ))}
-                    </ul>
+                {isDesktop && !libraryItems.length ? (
+                  <div className="empty-state">
+                    <div className="card-title">Library is empty</div>
+                    <div className="card-meta">Scan a folder to import books.</div>
                   </div>
-                  <button className="ghost">Resolve</button>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {view === "fix" && (
-          <section className="content">
-            <div className="fix-layout">
-              <div className="fix-current">
-                <div className="panel-title">Current Metadata</div>
-                {currentFixItem ? (
-                  <>
-                    <div className="meta-row">
-                      <span>Title</span>
-                      <strong>{currentFixItem.title}</strong>
-                    </div>
-                    <div className="meta-row">
-                      <span>Issue</span>
-                      <strong>{currentFixItem.reason}</strong>
-                    </div>
-                    <button className="primary" onClick={handleFetchCandidates}>
-                      {fixLoading ? "Searching..." : "Search Sources"}
-                    </button>
-                  </>
-                ) : (
-                  <div className="card-meta">No items need fixes.</div>
-                )}
-              </div>
-
-              <div className="fix-results">
-                <div className="panel-title">Top Matches</div>
-                {candidateList.length ? (
-                  <div className="candidate-grid">
-                    {candidateList.map((candidate) => (
-                      <div key={candidate.id} className="candidate-card">
-                        <div className="candidate-head">
-                          <span className="candidate-source">{candidate.source}</span>
-                          <span className="candidate-score">
-                            {Math.round(candidate.confidence * 100)}%
-                          </span>
+                ) : grid ? (
+                  <div className="grid">
+                    {filteredBooks.map((book) => (
+                      <article
+                        key={book.id}
+                        className={
+                          selectedItemId === book.id
+                            ? "card selected"
+                            : "card"
+                        }
+                        onClick={() => setSelectedItemId(book.id)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") setSelectedItemId(book.id);
+                        }}
+                      >
+                        <div className="cover">
+                          <div className="cover-badge">{book.format}</div>
+                          <div className="cover-title">{book.title}</div>
                         </div>
-                        <div className="card-title">{candidate.title ?? "Untitled"}</div>
-                        <div className="card-meta">{candidate.authors.join(", ")}</div>
-                        <div className="card-meta">
-                          {candidate.published_year ?? "Unknown"}
+                        <div className="card-body">
+                          <div className="card-title">{book.title}</div>
+                          <div className="card-meta">{book.author}</div>
+                          <div className="card-meta">
+                            {book.year} · {book.status}
+                          </div>
                         </div>
-                        <button
-                          className="ghost"
-                          onClick={() => handleApplyCandidate(candidate)}
-                          disabled={!currentFixItem || fixLoading || !isDesktop}
-                        >
-                          Use This
-                        </button>
-                      </div>
+                      </article>
                     ))}
                   </div>
                 ) : (
-                  <div className="card-meta">
-                    {fixLoading ? "Searching..." : "No candidates found."}
+                  <div className="list-table">
+                    <div className="list-header">
+                      <div>Title</div>
+                      <div>Author</div>
+                      <div>Year</div>
+                      <div>Format</div>
+                      <div>Status</div>
+                    </div>
+                    {filteredBooks.map((book) => (
+                      <div
+                        key={book.id}
+                        className={
+                          selectedItemId === book.id
+                            ? "list-row selected"
+                            : "list-row"
+                        }
+                        onClick={() => setSelectedItemId(book.id)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") setSelectedItemId(book.id);
+                        }}
+                      >
+                        <div className="list-title">{book.title}</div>
+                        <div>{book.author}</div>
+                        <div>{book.year}</div>
+                        <div>{book.format}</div>
+                        <div className="status-pill">{book.status}</div>
+                      </div>
+                    ))}
                   </div>
                 )}
-              </div>
-            </div>
+              </>
+            )}
+
+            {view === "inbox" && (
+              <section className="content">
+                <div className="inbox">
+                  {(isDesktop ? inbox : inboxItems).map((item) => (
+                    <div key={item.id} className="inbox-row">
+                      <div>
+                        <div className="card-title">{item.title}</div>
+                        <div className="card-meta">{item.reason}</div>
+                      </div>
+                      <div className="inbox-actions">
+                        <Button variant="ghost">Fix</Button>
+                        <Button variant="ghost">Ignore</Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {view === "duplicates" && (
+              <section className="content">
+                <div className="duplicate-list">
+                  {(isDesktop ? duplicates : duplicateGroups).map((group) => (
+                    <div key={group.id} className="duplicate-card">
+                      <div>
+                        <div className="card-title">{group.title}</div>
+                        <div className="card-meta">
+                          {group.files.length} matching files
+                        </div>
+                        <ul>
+                          {group.files.map((file) => (
+                            <li key={file}>{file}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <Button variant="ghost">Resolve</Button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {view === "fix" && (
+              <section className="content">
+                <div className="fix-layout">
+                  <div className="fix-current">
+                    <div className="panel-title">Current Metadata</div>
+                    {currentFixItem ? (
+                      <>
+                        <div className="meta-row">
+                          <span>Title</span>
+                          <strong>{currentFixItem.title}</strong>
+                        </div>
+                        <div className="meta-row">
+                          <span>Issue</span>
+                          <strong>{currentFixItem.reason}</strong>
+                        </div>
+                        <Button variant="primary" onClick={handleFetchCandidates}>
+                          {fixLoading ? "Searching..." : "Search Sources"}
+                        </Button>
+                      </>
+                    ) : (
+                      <div className="card-meta">No items need fixes.</div>
+                    )}
+                  </div>
+
+                  <div className="fix-results">
+                    <div className="panel-title">Top Matches</div>
+                    {candidateList.length ? (
+                      <div className="candidate-grid">
+                        {candidateList.map((candidate) => (
+                          <div key={candidate.id} className="candidate-card">
+                            <div className="candidate-head">
+                              <span className="candidate-source">{candidate.source}</span>
+                              <span className="candidate-score">
+                                {Math.round(candidate.confidence * 100)}%
+                              </span>
+                            </div>
+                            <div className="card-title">{candidate.title ?? "Untitled"}</div>
+                            <div className="card-meta">{candidate.authors.join(", ")}</div>
+                            <div className="card-meta">
+                              {candidate.published_year ?? "Unknown"}
+                            </div>
+                            <Button
+                              variant="ghost"
+                              onClick={() => handleApplyCandidate(candidate)}
+                              disabled={!currentFixItem || fixLoading || !isDesktop}
+                            >
+                              Use This
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="card-meta">
+                        {fixLoading ? "Searching..." : "No candidates found."}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
           </section>
-        )}
+
+          <aside className="inspector">
+            <div className="inspector-header">Details</div>
+            {view !== "library" ? (
+              <div className="card-meta">Select Library to inspect items.</div>
+            ) : selectedItem ? (
+              <div className="inspector-card">
+                <div className="inspector-title">{selectedItem.title}</div>
+                <div className="inspector-meta">{selectedItem.author}</div>
+                <div className="inspector-meta">{selectedItem.year}</div>
+                <div className="inspector-meta">{selectedItem.format}</div>
+                <div className="inspector-meta">{selectedItem.status}</div>
+                <div className="inspector-actions">
+                  <Button variant="toolbar" size="sm">
+                    Reveal
+                  </Button>
+                  <Button variant="toolbar" size="sm">
+                    Edit
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="card-meta">Select a book to see details.</div>
+            )}
+          </aside>
+        </div>
+
       </main>
     </div>
   );
