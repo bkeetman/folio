@@ -4,7 +4,18 @@ import path from "path";
 import { randomUUID } from "crypto";
 import { and, eq, like } from "drizzle-orm";
 import type { FolioDb } from "../db";
-import { files, issues, items, scanEntries, scanSessions } from "../db/schema";
+import {
+  authors,
+  files,
+  identifiers,
+  itemAuthors,
+  itemFieldSources,
+  issues,
+  items,
+  scanEntries,
+  scanSessions,
+} from "../db/schema";
+import { extractMetadataForFile } from "../metadata";
 import { sha256File } from "./hash";
 
 type ScanOptions = {
@@ -181,6 +192,7 @@ export async function scanRoot(
         action: "updated",
         fileId: existingByPath.id,
       });
+      await applyMetadata(db, existingByPath.itemId, filePath);
       continue;
     }
 
@@ -219,6 +231,7 @@ export async function scanRoot(
       action: "added",
       fileId,
     });
+    await applyMetadata(db, itemId, filePath);
   }
 
   const existingPaths = db
@@ -280,5 +293,94 @@ async function pathExists(filePath: string) {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function applyMetadata(db: FolioDb, itemId: string, filePath: string) {
+  try {
+    const metadata = await extractMetadataForFile(filePath);
+    const now = Date.now();
+    if (metadata.title || metadata.language || metadata.publishedYear || metadata.description) {
+      db
+        .update(items)
+        .set({
+          title: metadata.title ?? undefined,
+          language: metadata.language ?? undefined,
+          publishedYear: metadata.publishedYear ?? undefined,
+          description: metadata.description ?? undefined,
+          updatedAt: now,
+        })
+        .where(eq(items.id, itemId));
+
+      for (const field of [
+        "title",
+        "language",
+        "published_year",
+        "description",
+      ]) {
+        db.insert(itemFieldSources).values({
+          id: randomUUID(),
+          itemId,
+          field,
+          source: "embedded",
+          confidence: 0.8,
+          createdAt: now,
+        });
+      }
+    }
+
+    if (metadata.authors?.length) {
+      for (const name of metadata.authors) {
+        const existingAuthor = db
+          .select()
+          .from(authors)
+          .where(eq(authors.name, name))
+          .get();
+        const authorId = existingAuthor?.id ?? randomUUID();
+        if (!existingAuthor) {
+          db.insert(authors).values({
+            id: authorId,
+            name,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+        db
+          .insert(itemAuthors)
+          .values({
+            itemId,
+            authorId,
+            role: "author",
+            ord: 0,
+          })
+          .onConflictDoNothing();
+      }
+    }
+
+    if (metadata.identifiers?.length) {
+      for (const identifier of metadata.identifiers) {
+        db
+          .insert(identifiers)
+          .values({
+            id: randomUUID(),
+            itemId,
+            type: identifier.type,
+            value: identifier.value,
+            source: identifier.source,
+            confidence: identifier.confidence,
+            createdAt: now,
+          })
+          .onConflictDoNothing();
+      }
+    }
+  } catch (error) {
+    db.insert(issues).values({
+      id: randomUUID(),
+      itemId,
+      type: "missing_metadata",
+      message: `Metadata extraction failed: ${String(error)}`,
+      severity: "warn",
+      createdAt: Date.now(),
+    });
   }
 }
