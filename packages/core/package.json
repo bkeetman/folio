@@ -19,6 +19,8 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
-    "drizzle-orm": "^0.45.1"
+    "drizzle-orm": "^0.45.1",
+    "epub2": "^3.0.2",
+    "pdf-parse": "^1.1.4"
   }
 }
