@@ -307,6 +307,9 @@ function App() {
     try {
       await invoke("clear_library");
       setScanStatus("Library cleared.");
+      setLibraryItems([]);
+      setInbox([]);
+      setDuplicates([]);
       await refreshLibrary();
     } catch (error) {
       setScanStatus("Could not clear library.");
