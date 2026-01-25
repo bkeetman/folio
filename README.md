@@ -5,6 +5,7 @@ Calm, modern, Mac-first personal book library.
 ## Development
 
 ```bash
+node -v # should be 22.x
 pnpm install
 pnpm dev
 ```
