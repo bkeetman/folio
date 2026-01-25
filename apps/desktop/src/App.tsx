@@ -112,6 +112,7 @@ function App() {
   const [view, setView] = useState<View>("library");
   const [grid, setGrid] = useState(true);
   const [query, setQuery] = useState("");
+  const [scanStatus, setScanStatus] = useState<string | null>(null);
 
   const filteredBooks = useMemo(() => {
     if (!query) return sampleBooks;
@@ -122,6 +123,22 @@ function App() {
         book.author.toLowerCase().includes(lowered)
     );
   }, [query]);
+
+  const handleScan = async () => {
+    try {
+      const { open } = await import("@tauri-apps/api/dialog");
+      const selection = await open({ directory: true, multiple: false });
+      if (typeof selection === "string") {
+        setScanStatus(`Selected folder: ${selection}`);
+      } else if (Array.isArray(selection) && selection.length) {
+        setScanStatus(`Selected folder: ${selection[0]}`);
+      } else {
+        setScanStatus("Scan cancelled.");
+      }
+    } catch (error) {
+      setScanStatus("Scan requires the Tauri desktop runtime.");
+    }
+  };
 
   return (
     <div className="app">
@@ -163,9 +180,10 @@ function App() {
 
         <div className="sidebar-panel">
           <div className="panel-title">Quick Actions</div>
-          <button className="primary">Scan Folder</button>
+          <button className="primary" onClick={handleScan}>Scan Folder</button>
           <button className="ghost">Organize Files</button>
           <button className="ghost">Run Enrichment</button>
+          {scanStatus ? <div className="scan-status">{scanStatus}</div> : null}
         </div>
 
         <div className="sidebar-panel">

@@ -92,6 +92,14 @@
   box-shadow: 0 18px 30px rgba(30, 22, 15, 0.08);
 }
 
+.scan-status {
+  font-size: 12px;
+  color: var(--ink-soft);
+  background: rgba(207, 217, 210, 0.35);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
 .panel-title {
   font-size: 12px;
   text-transform: uppercase;
