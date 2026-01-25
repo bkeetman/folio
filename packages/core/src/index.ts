@@ -4,3 +4,4 @@ export * from "./scanner";
 export * from "./metadata";
 export * from "./enrichment";
 export * from "./organizer";
+export * from "./library";
