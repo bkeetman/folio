@@ -9,6 +9,19 @@ pnpm install
 pnpm dev
 ```
 
+## Database (local)
+
+```bash
+pnpm -C packages/core db:generate
+pnpm -C packages/core db:migrate
+```
+
+## Scan a folder
+
+```bash
+pnpm -C packages/core scan "/path/to/books" --db "./folio.db"
+```
+
 ## Workspace layout
 
 - `apps/desktop` — Tauri + React app
