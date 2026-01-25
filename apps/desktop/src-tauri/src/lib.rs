@@ -1,9 +1,13 @@
+use lopdf::{Document, Object};
+use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::io::Read;
 use tauri::Manager;
 use uuid::Uuid;
 use walkdir::WalkDir;
+use zip::ZipArchive;
 
 const MIGRATION_SQL: &str = include_str!(
   "../../../../packages/core/drizzle/0000_nebulous_mysterio.sql"
@@ -26,6 +30,15 @@ struct ScanStats {
   moved: i64,
   unchanged: i64,
   missing: i64,
+}
+
+struct ExtractedMetadata {
+  title: Option<String>,
+  authors: Vec<String>,
+  language: Option<String>,
+  published_year: Option<i64>,
+  description: Option<String>,
+  identifiers: Vec<String>,
 }
 
 #[tauri::command]
@@ -130,7 +143,7 @@ fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String>
       .optional()
       .map_err(|err| err.to_string())?;
 
-    if let Some((file_id, existing_mtime, existing_size)) = existing_by_path {
+    if let Some((file_id, existing_mtime, existing_size)) = existing_by_path.clone() {
       if existing_mtime == modified_at && existing_size == Some(size_bytes) {
         stats.unchanged += 1;
         conn.execute(
@@ -221,6 +234,19 @@ fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String>
         params![Uuid::new_v4().to_string(), session_id, path_str, modified_at, size_bytes, sha256, "updated", file_id],
       )
       .map_err(|err| err.to_string())?;
+      let item_id: Option<String> = conn
+        .query_row(
+          "SELECT item_id FROM files WHERE id = ?1",
+          params![file_id],
+          |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+      if let Some(item_id) = item_id {
+        if let Ok(metadata) = extract_metadata(path) {
+          apply_metadata(&conn, &item_id, &metadata, now)?;
+        }
+      }
       continue;
     }
 
@@ -251,6 +277,10 @@ fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String>
       params![Uuid::new_v4().to_string(), session_id, path_str, modified_at, size_bytes, sha256, "added", file_id],
     )
     .map_err(|err| err.to_string())?;
+
+    if let Ok(metadata) = extract_metadata(path) {
+      apply_metadata(&conn, &item_id, &metadata, now)?;
+    }
   }
 
   let mut stmt = conn
@@ -295,6 +325,347 @@ fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
       .map_err(|err| err.to_string())?;
   }
   Ok(conn)
+}
+
+fn extract_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, String> {
+  let extension = path
+    .extension()
+    .and_then(|value| value.to_str())
+    .unwrap_or("")
+    .to_lowercase();
+  if extension == "epub" {
+    return extract_epub_metadata(path);
+  }
+  if extension == "pdf" {
+    return extract_pdf_metadata(path);
+  }
+  Ok(ExtractedMetadata {
+    title: None,
+    authors: vec![],
+    language: None,
+    published_year: None,
+    description: None,
+    identifiers: vec![],
+  })
+}
+
+fn extract_epub_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, String> {
+  let file = std::fs::File::open(path).map_err(|err| err.to_string())?;
+  let mut archive = ZipArchive::new(file).map_err(|err| err.to_string())?;
+  let mut container = String::new();
+  archive
+    .by_name("META-INF/container.xml")
+    .map_err(|err| err.to_string())?
+    .read_to_string(&mut container)
+    .map_err(|err| err.to_string())?;
+
+  let rootfile = find_rootfile(&container).ok_or("Missing rootfile")?;
+  let mut opf = String::new();
+  archive
+    .by_name(&rootfile)
+    .map_err(|err| err.to_string())?
+    .read_to_string(&mut opf)
+    .map_err(|err| err.to_string())?;
+
+  let mut metadata = ExtractedMetadata {
+    title: None,
+    authors: vec![],
+    language: None,
+    published_year: None,
+    description: None,
+    identifiers: vec![],
+  };
+
+  parse_opf_metadata(&opf, &mut metadata)?;
+  Ok(metadata)
+}
+
+fn extract_pdf_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, String> {
+  let doc = Document::load(path).map_err(|err| err.to_string())?;
+  let info = doc.trailer.get(b"Info");
+  let mut metadata = ExtractedMetadata {
+    title: None,
+    authors: vec![],
+    language: None,
+    published_year: None,
+    description: None,
+    identifiers: vec![],
+  };
+
+  if let Some(info) = info {
+    if let Ok(info) = info.as_dict() {
+      if let Some(title) = dict_string(info, b"Title") {
+        metadata.title = Some(title);
+      }
+      if let Some(author) = dict_string(info, b"Author") {
+        metadata.authors.push(author);
+      }
+      if let Some(subject) = dict_string(info, b"Subject") {
+        metadata.description = Some(subject);
+      }
+      if let Some(keywords) = dict_string(info, b"Keywords") {
+        metadata.identifiers.extend(extract_isbn_candidates(&keywords));
+      }
+      if let Some(created) = dict_string(info, b"CreationDate") {
+        metadata.published_year = extract_year(&created);
+      }
+    }
+  }
+
+  Ok(metadata)
+}
+
+fn dict_string(dict: &lopdf::Dictionary, key: &[u8]) -> Option<String> {
+  let value = dict.get(key).ok()?;
+  match value {
+    Object::String(data, _) => Some(String::from_utf8_lossy(data).to_string()),
+    Object::Name(name) => Some(String::from_utf8_lossy(name).to_string()),
+    _ => None,
+  }
+}
+
+fn apply_metadata(
+  conn: &Connection,
+  item_id: &str,
+  metadata: &ExtractedMetadata,
+  now: i64,
+) -> Result<(), String> {
+  let existing: (Option<String>, Option<String>, Option<i64>, Option<String>) = conn
+    .query_row(
+      "SELECT title, language, published_year, description FROM items WHERE id = ?1",
+      params![item_id],
+      |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    )
+    .map_err(|err| err.to_string())?;
+
+  let title = existing.0.or_else(|| metadata.title.clone());
+  let language = existing.1.or_else(|| metadata.language.clone());
+  let published_year = existing.2.or(metadata.published_year);
+  let description = existing.3.or_else(|| metadata.description.clone());
+
+  conn.execute(
+    "UPDATE items SET title = ?1, language = ?2, published_year = ?3, description = ?4, updated_at = ?5 WHERE id = ?6",
+    params![title, language, published_year, description, now, item_id],
+  )
+  .map_err(|err| err.to_string())?;
+
+  if metadata.title.is_some() {
+    insert_field_source(conn, item_id, "title", now)?;
+  }
+  if metadata.language.is_some() {
+    insert_field_source(conn, item_id, "language", now)?;
+  }
+  if metadata.published_year.is_some() {
+    insert_field_source(conn, item_id, "published_year", now)?;
+  }
+  if metadata.description.is_some() {
+    insert_field_source(conn, item_id, "description", now)?;
+  }
+
+  for author in &metadata.authors {
+    let author_id: Option<String> = conn
+      .query_row(
+        "SELECT id FROM authors WHERE name = ?1",
+        params![author],
+        |row| row.get(0),
+      )
+      .optional()
+      .map_err(|err| err.to_string())?;
+    let author_id = author_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    conn.execute(
+      "INSERT OR IGNORE INTO authors (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
+      params![author_id, author, now],
+    )
+    .map_err(|err| err.to_string())?;
+    conn.execute(
+      "INSERT OR IGNORE INTO item_authors (item_id, author_id, role, ord) VALUES (?1, ?2, 'author', 0)",
+      params![item_id, author_id],
+    )
+    .map_err(|err| err.to_string())?;
+  }
+
+  for raw in &metadata.identifiers {
+    let normalized = normalize_isbn(raw);
+    let value = normalized.unwrap_or_else(|| raw.to_string());
+    let id_type = if value.len() == 10 {
+      "ISBN10"
+    } else if value.len() == 13 {
+      "ISBN13"
+    } else {
+      "OTHER"
+    };
+    let identifier_id = Uuid::new_v4().to_string();
+    conn.execute(
+      "INSERT OR IGNORE INTO identifiers (id, item_id, type, value, source, confidence, created_at) VALUES (?1, ?2, ?3, ?4, 'embedded', 0.8, ?5)",
+      params![identifier_id, item_id, id_type, value, now],
+    )
+    .map_err(|err| err.to_string())?;
+  }
+
+  let mut missing = vec![];
+  if title.is_none() {
+    missing.push("title");
+  }
+  if metadata.authors.is_empty() {
+    missing.push("author");
+  }
+  if !missing.is_empty() {
+    conn.execute(
+      "INSERT INTO issues (id, item_id, type, message, severity, created_at) VALUES (?1, ?2, 'missing_metadata', ?3, 'info', ?4)",
+      params![
+        Uuid::new_v4().to_string(),
+        item_id,
+        format!("Missing metadata: {}.", missing.join(", ")),
+        now
+      ],
+    )
+    .map_err(|err| err.to_string())?;
+  }
+
+  Ok(())
+}
+
+fn insert_field_source(
+  conn: &Connection,
+  item_id: &str,
+  field: &str,
+  now: i64,
+) -> Result<(), String> {
+  conn.execute(
+    "INSERT INTO item_field_sources (id, item_id, field, source, confidence, created_at) VALUES (?1, ?2, ?3, 'embedded', 0.8, ?4)",
+    params![Uuid::new_v4().to_string(), item_id, field, now],
+  )
+  .map_err(|err| err.to_string())?;
+  Ok(())
+}
+
+fn extract_isbn_candidates(text: &str) -> Vec<String> {
+  let regex = Regex::new(r"\b(?:97[89][\s-]?)?\d{1,5}[\s-]?\d{1,7}[\s-]?\d{1,7}[\s-]?[\dX]\b")
+    .map_err(|_| "regex")
+    .unwrap();
+  let mut values = vec![];
+  for mat in regex.find_iter(text) {
+    values.push(mat.as_str().to_string());
+  }
+  values
+}
+
+fn normalize_isbn(value: &str) -> Option<String> {
+  let cleaned = value
+    .chars()
+    .filter(|ch| ch.is_ascii_digit() || *ch == 'X' || *ch == 'x')
+    .map(|ch| ch.to_ascii_uppercase())
+    .collect::<String>();
+  if cleaned.len() == 10 && is_valid_isbn10(&cleaned) {
+    return Some(cleaned);
+  }
+  if cleaned.len() == 13 && is_valid_isbn13(&cleaned) {
+    return Some(cleaned);
+  }
+  None
+}
+
+fn is_valid_isbn10(value: &str) -> bool {
+  let mut sum = 0;
+  for (index, ch) in value.chars().take(9).enumerate() {
+    let digit = ch.to_digit(10);
+    if digit.is_none() {
+      return false;
+    }
+    sum += digit.unwrap() as i32 * (10 - index as i32);
+  }
+  let check = value.chars().nth(9).unwrap_or('0');
+  let check_val = if check == 'X' { 10 } else { check.to_digit(10).unwrap_or(0) as i32 };
+  sum += check_val;
+  sum % 11 == 0
+}
+
+fn is_valid_isbn13(value: &str) -> bool {
+  let mut sum = 0;
+  for (index, ch) in value.chars().take(12).enumerate() {
+    let digit = ch.to_digit(10);
+    if digit.is_none() {
+      return false;
+    }
+    let digit = digit.unwrap() as i32;
+    sum += if index % 2 == 0 { digit } else { digit * 3 };
+  }
+  let check = value.chars().nth(12).unwrap_or('0');
+  let check_val = check.to_digit(10).unwrap_or(0) as i32;
+  (10 - (sum % 10)) % 10 == check_val
+}
+
+fn extract_year(text: &str) -> Option<i64> {
+  let regex = Regex::new(r"\b(\d{4})\b").ok()?;
+  let captures = regex.captures(text)?;
+  captures.get(1)?.as_str().parse().ok()
+}
+
+fn find_rootfile(container: &str) -> Option<String> {
+  let regex = Regex::new(r"full-path=\"([^\"]+)\"").ok()?;
+  let captures = regex.captures(container)?;
+  Some(captures.get(1)?.as_str().to_string())
+}
+
+fn parse_opf_metadata(opf: &str, metadata: &mut ExtractedMetadata) -> Result<(), String> {
+  let mut reader = quick_xml::Reader::from_str(opf);
+  reader.trim_text(true);
+  let mut buf = Vec::new();
+  let mut current_tag = String::new();
+
+  loop {
+    match reader.read_event_into(&mut buf) {
+      Ok(quick_xml::events::Event::Start(event)) => {
+        current_tag = String::from_utf8_lossy(event.name().as_ref()).to_string();
+      }
+      Ok(quick_xml::events::Event::Text(event)) => {
+        let text = event.unescape().map_err(|err| err.to_string())?.to_string();
+        match current_tag.as_str() {
+          "dc:title" => {
+            if metadata.title.is_none() {
+              metadata.title = Some(text);
+            }
+          }
+          "dc:creator" => {
+            if !text.is_empty() {
+              metadata.authors.push(text);
+            }
+          }
+          "dc:language" => {
+            if metadata.language.is_none() {
+              metadata.language = Some(text);
+            }
+          }
+          "dc:identifier" => {
+            if !text.is_empty() {
+              metadata.identifiers.push(text);
+            }
+          }
+          "dc:date" => {
+            if metadata.published_year.is_none() {
+              metadata.published_year = extract_year(&text);
+            }
+          }
+          "dc:description" => {
+            if metadata.description.is_none() {
+              metadata.description = Some(text);
+            }
+          }
+          _ => {}
+        }
+      }
+      Ok(quick_xml::events::Event::Eof) => break,
+      Err(err) => return Err(err.to_string()),
+      _ => {}
+    }
+    buf.clear();
+  }
+
+  if metadata.identifiers.is_empty() {
+    metadata.identifiers = extract_isbn_candidates(opf);
+  }
+
+  Ok(())
 }
 
 fn db_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, std::io::Error> {
