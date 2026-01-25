@@ -690,6 +690,14 @@ function App() {
               </div>
             ) : null}
           </div>
+        ) : scanning ? (
+          <div className="library-progress">
+            <div className="library-progress-label">Preparing scan…</div>
+            <div className="library-progress-bar indeterminate">
+              <div className="library-progress-fill" />
+            </div>
+            <div className="library-progress-file">Collecting files…</div>
+          </div>
         ) : null}
 
         {view === "library" && (

@@ -454,9 +454,15 @@ fn clear_library(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String> {
+async fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String> {
+  let app_handle = app.clone();
+  tauri::async_runtime::spawn_blocking(move || scan_folder_sync(app_handle, root))
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, String> {
   let conn = open_db(&app)?;
-  let total = count_scan_targets(&root) as usize;
   let mut processed = 0usize;
   let mut stats = ScanStats {
     added: 0,
@@ -470,8 +476,18 @@ fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String>
     "scan-progress",
     ScanProgressPayload {
       processed,
-      total,
+      total: 0,
       current: "Preparing scan...".to_string(),
+    },
+  );
+
+  let total = count_scan_targets(&root) as usize;
+  let _ = app.emit(
+    "scan-progress",
+    ScanProgressPayload {
+      processed,
+      total,
+      current: "Starting scan...".to_string(),
     },
   );
 

@@ -282,11 +282,28 @@
   overflow: hidden;
 }
 
+.library-progress-bar.indeterminate .library-progress-fill {
+  width: 30%;
+  animation: scan-indeterminate 1.4s ease-in-out infinite;
+}
+
 .library-progress-fill {
   height: 100%;
   background: linear-gradient(90deg, var(--accent), var(--accent-strong));
   border-radius: inherit;
   transition: width 0.2s ease;
+}
+
+@keyframes scan-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+  50% {
+    transform: translateX(80%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
 }
 
 .library-progress-file {
