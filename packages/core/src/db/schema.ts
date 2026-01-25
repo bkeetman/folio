@@ -107,6 +107,19 @@ export const itemTags = sqliteTable(
   })
 );
 
+export const covers = sqliteTable("covers", {
+  id: text("id").primaryKey(),
+  itemId: text("item_id")
+    .notNull()
+    .references(() => items.id),
+  source: text("source").notNull(),
+  url: text("url"),
+  localPath: text("local_path"),
+  width: integer("width"),
+  height: integer("height"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
 export const enrichmentSources = sqliteTable("enrichment_sources", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),

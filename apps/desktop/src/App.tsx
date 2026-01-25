@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Button, Panel, SidebarItem } from "./components/ui";
 
@@ -13,6 +13,7 @@ type LibraryItem = {
   authors: string[];
   file_count: number;
   formats: string[];
+  cover_path?: string | null;
 };
 
 type ScanStats = {
@@ -208,6 +209,7 @@ function App() {
           format: item.formats[0] ?? "FILE",
           year: item.published_year ?? "—",
           status: item.title && item.authors.length ? "Complete" : "Needs Metadata",
+          cover: item.cover_path ? convertFileSrc(item.cover_path) : null,
         }))
       : sampleBooks;
     if (!query) return base;
@@ -748,8 +750,14 @@ function App() {
                         }}
                       >
                         <div className="cover">
-                          <div className="cover-badge">{book.format}</div>
-                          <div className="cover-title">{book.title}</div>
+                          {book.cover ? (
+                            <img className="cover-image" src={book.cover} alt="" />
+                          ) : (
+                            <>
+                              <div className="cover-badge">{book.format}</div>
+                              <div className="cover-title">{book.title}</div>
+                            </>
+                          )}
                         </div>
                         <div className="card-body">
                           <div className="card-title">{book.title}</div>

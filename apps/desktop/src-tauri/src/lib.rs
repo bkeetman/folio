@@ -13,6 +13,9 @@ use zip::ZipArchive;
 const MIGRATION_SQL: &str = include_str!(
   "../../../../packages/core/drizzle/0000_nebulous_mysterio.sql"
 );
+const MIGRATION_COVERS_SQL: &str = include_str!(
+  "../../../../packages/core/drizzle/0001_wandering_young_avengers.sql"
+);
 
 #[derive(Serialize)]
 struct LibraryItem {
@@ -22,6 +25,7 @@ struct LibraryItem {
   authors: Vec<String>,
   file_count: i64,
   formats: Vec<String>,
+  cover_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -98,11 +102,13 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
       "SELECT items.id, items.title, items.published_year, \
        GROUP_CONCAT(DISTINCT authors.name) as authors, \
        COUNT(DISTINCT files.id) as file_count, \
-       GROUP_CONCAT(DISTINCT files.extension) as formats \
+       GROUP_CONCAT(DISTINCT files.extension) as formats, \
+       MAX(covers.local_path) as cover_path \
        FROM items \
        LEFT JOIN item_authors ON item_authors.item_id = items.id \
        LEFT JOIN authors ON authors.id = item_authors.author_id \
        LEFT JOIN files ON files.item_id = items.id \
+       LEFT JOIN covers ON covers.item_id = items.id \
        GROUP BY items.id"
     )
     .map_err(|err| err.to_string())?;
@@ -111,6 +117,7 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
     .query_map(params![], |row| {
       let authors: Option<String> = row.get(3)?;
       let formats: Option<String> = row.get(5)?;
+      let cover_path: Option<String> = row.get(6)?;
       Ok(LibraryItem {
         id: row.get(0)?,
         title: row.get(1)?,
@@ -128,6 +135,7 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
           .filter(|value| !value.trim().is_empty())
           .map(|value| value.trim().to_uppercase())
           .collect(),
+        cover_path,
       })
     })
     .map_err(|err| err.to_string())?;
@@ -463,6 +471,7 @@ async fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, S
 
 fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, String> {
   let conn = open_db(&app)?;
+  ensure_covers_table(&conn)?;
   let mut processed = 0usize;
   let mut stats = ScanStats {
     added: 0,
@@ -726,11 +735,33 @@ fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
   let db_path = db_path(app)?;
   let needs_migration = !db_path.exists();
   let conn = Connection::open(db_path).map_err(|err| err.to_string())?;
+  conn.execute_batch(MIGRATION_SQL)
+    .map_err(|err| err.to_string())?;
+  conn.execute_batch(MIGRATION_COVERS_SQL)
+    .map_err(|err| err.to_string())?;
   if needs_migration {
-    conn.execute_batch(MIGRATION_SQL)
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
       .map_err(|err| err.to_string())?;
   }
   Ok(conn)
+}
+
+fn ensure_covers_table(conn: &Connection) -> Result<(), String> {
+  conn.execute_batch(
+    "CREATE TABLE IF NOT EXISTS covers (
+      id TEXT PRIMARY KEY NOT NULL,
+      item_id TEXT NOT NULL,
+      source TEXT NOT NULL,
+      url TEXT,
+      local_path TEXT,
+      width INTEGER,
+      height INTEGER,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (item_id) REFERENCES items(id) ON UPDATE no action ON DELETE no action
+    );",
+  )
+  .map_err(|err| err.to_string())?;
+  Ok(())
 }
 
 fn extract_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, String> {
