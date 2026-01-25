@@ -5,6 +5,10 @@ use tauri::Manager;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
+const MIGRATION_SQL: &str = include_str!(
+  "../../../../packages/core/drizzle/0000_nebulous_mysterio.sql"
+);
+
 #[derive(Serialize)]
 struct LibraryItem {
   id: String,
@@ -26,11 +30,7 @@ struct ScanStats {
 
 #[tauri::command]
 fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> {
-  let db_path = db_path(&app).map_err(|err| err.to_string())?;
-  if !db_path.exists() {
-    return Ok(vec![]);
-  }
-  let conn = Connection::open(db_path).map_err(|err| err.to_string())?;
+  let conn = open_db(&app)?;
   let mut stmt = conn
     .prepare(
       "SELECT items.id, items.title, items.published_year, \
@@ -80,11 +80,7 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
 
 #[tauri::command]
 fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String> {
-  let db_path = db_path(&app).map_err(|err| err.to_string())?;
-  if !db_path.exists() {
-    return Err("Database not initialized. Run migrations first.".to_string());
-  }
-
+  let conn = open_db(&app)?;
   let mut stats = ScanStats {
     added: 0,
     updated: 0,
@@ -93,7 +89,6 @@ fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String>
     missing: 0,
   };
 
-  let conn = Connection::open(db_path).map_err(|err| err.to_string())?;
   let now = chrono::Utc::now().timestamp_millis();
   let session_id = Uuid::new_v4().to_string();
 
@@ -289,6 +284,17 @@ fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String>
   .map_err(|err| err.to_string())?;
 
   Ok(stats)
+}
+
+fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
+  let db_path = db_path(app).map_err(|err| err.to_string())?;
+  let needs_migration = !db_path.exists();
+  let conn = Connection::open(db_path).map_err(|err| err.to_string())?;
+  if needs_migration {
+    conn.execute_batch(MIGRATION_SQL)
+      .map_err(|err| err.to_string())?;
+  }
+  Ok(conn)
 }
 
 fn db_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, std::io::Error> {
