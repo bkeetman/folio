@@ -9,6 +9,10 @@ import {
 } from "fs/promises";
 import { constants } from "fs";
 import path from "path";
+import { randomUUID } from "crypto";
+import type { FolioDb } from "../db";
+import { files } from "../db/schema";
+import { eq } from "drizzle-orm";
 
 export type OrganizationMode = "reference" | "copy" | "move";
 
@@ -122,6 +126,52 @@ export async function rollbackOrganization(logPath: string) {
     } else {
       await rename(entry.to, entry.from).catch(() => undefined);
     }
+  }
+}
+
+export function applyOrganizationToDb(db: FolioDb, plan: OrganizePlan) {
+  const now = Date.now();
+  for (const entry of plan.entries) {
+    if (entry.action === "skip") continue;
+    const filename = path.basename(entry.targetPath);
+    const extension = path.extname(entry.targetPath).toLowerCase();
+    const existingFile = db
+      .select()
+      .from(files)
+      .where(eq(files.id, entry.fileId))
+      .get();
+    if (!existingFile) continue;
+
+    if (entry.action === "move") {
+      db
+        .update(files)
+        .set({
+          path: entry.targetPath,
+          filename,
+          extension,
+          updatedAt: now,
+          status: "active",
+        })
+        .where(eq(files.id, entry.fileId));
+      continue;
+    }
+
+    const copyId = randomUUID();
+    db.insert(files).values({
+      id: copyId,
+      itemId: existingFile.itemId,
+      path: entry.targetPath,
+      filename,
+      extension,
+      mimeType: existingFile.mimeType,
+      sizeBytes: existingFile.sizeBytes,
+      sha256: existingFile.sha256,
+      hashAlgo: existingFile.hashAlgo,
+      modifiedAt: existingFile.modifiedAt,
+      createdAt: now,
+      updatedAt: now,
+      status: "active",
+    });
   }
 }
 
