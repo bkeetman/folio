@@ -217,6 +217,17 @@ function App() {
     );
   }, [query, libraryItems, isDesktop]);
 
+  const scanEtaSeconds = useMemo(() => {
+    if (!scanProgress || !scanStartedAt || scanProgress.total === 0) return null;
+    const elapsedSeconds = (Date.now() - scanStartedAt) / 1000;
+    if (elapsedSeconds < 1 || scanProgress.processed === 0) return null;
+    const rate = scanProgress.processed / elapsedSeconds;
+    if (!Number.isFinite(rate) || rate <= 0) return null;
+    const remaining = (scanProgress.total - scanProgress.processed) / rate;
+    if (!Number.isFinite(remaining) || remaining < 0) return null;
+    return Math.round(remaining);
+  }, [scanProgress, scanStartedAt]);
+
   useEffect(() => {
     const load = async () => {
       if (!isTauri()) {
@@ -536,6 +547,11 @@ function App() {
                   <div className="scan-progress-file">
                     {scanProgress.current}
                   </div>
+                  {scanEtaSeconds !== null ? (
+                    <div className="scan-progress-eta">
+                      ETA {formatEta(scanEtaSeconds)}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -668,6 +684,11 @@ function App() {
               />
             </div>
             <div className="library-progress-file">{scanProgress.current}</div>
+            {scanEtaSeconds !== null ? (
+              <div className="library-progress-eta">
+                ETA {formatEta(scanEtaSeconds)}
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -813,6 +834,15 @@ function App() {
       </main>
     </div>
   );
+}
+
+function formatEta(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
 }
 
 export default App;

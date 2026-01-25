@@ -160,6 +160,11 @@
   white-space: nowrap;
 }
 
+.scan-progress-eta {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
 .organizer-row {
   display: flex;
   justify-content: space-between;
@@ -290,6 +295,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.library-progress-eta {
+  font-size: 12px;
+  color: var(--ink-soft);
 }
 
 .title-block h1 {
