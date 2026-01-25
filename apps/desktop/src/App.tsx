@@ -1,7 +1,17 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "./App.css";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 
 type View = "library" | "inbox" | "duplicates" | "fix";
+
+type LibraryItem = {
+  id: string;
+  title: string | null;
+  published_year: number | null;
+  authors: string[];
+  file_count: number;
+  formats: string[];
+};
 
 const sampleBooks = [
   {
@@ -113,16 +123,46 @@ function App() {
   const [grid, setGrid] = useState(true);
   const [query, setQuery] = useState("");
   const [scanStatus, setScanStatus] = useState<string | null>(null);
+  const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([]);
+  const [libraryReady, setLibraryReady] = useState(false);
 
   const filteredBooks = useMemo(() => {
-    if (!query) return sampleBooks;
+    const base = libraryItems.length
+      ? libraryItems.map((item) => ({
+          id: item.id,
+          title: item.title ?? "Untitled",
+          author: item.authors.length ? item.authors.join(", ") : "Unknown",
+          format: item.formats[0] ?? "FILE",
+          year: item.published_year ?? "—",
+          status: item.title && item.authors.length ? "Complete" : "Needs Metadata",
+        }))
+      : sampleBooks;
+    if (!query) return base;
     const lowered = query.toLowerCase();
-    return sampleBooks.filter(
+    return base.filter(
       (book) =>
         book.title.toLowerCase().includes(lowered) ||
         book.author.toLowerCase().includes(lowered)
     );
-  }, [query]);
+  }, [query, libraryItems]);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!isTauri()) {
+        setLibraryReady(true);
+        return;
+      }
+      try {
+        const items = await invoke<LibraryItem[]>("get_library_items");
+        setLibraryItems(items);
+      } catch (error) {
+        setScanStatus("Could not load library data.");
+      } finally {
+        setLibraryReady(true);
+      }
+    };
+    load();
+  }, []);
 
   const handleScan = async () => {
     try {
@@ -228,6 +268,9 @@ function App() {
                 placeholder="Search title or author"
               />
             </div>
+            {view === "library" && !libraryReady ? (
+              <div className="library-status">Loading library...</div>
+            ) : null}
             <div className="view-toggle">
               <button
                 className={grid ? "active" : ""}
