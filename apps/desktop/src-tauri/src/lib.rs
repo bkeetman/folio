@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::Read;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri::menu::{Menu, MenuItem, Submenu};
 use uuid::Uuid;
 use walkdir::WalkDir;
