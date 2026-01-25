@@ -315,7 +315,11 @@ function App() {
       setDuplicates([]);
       await refreshLibrary();
     } catch (error) {
-      setScanStatus("Could not clear library.");
+      if (error instanceof Error) {
+        setScanStatus(`Could not clear library: ${error.message}`);
+      } else {
+        setScanStatus("Could not clear library.");
+      }
     }
   };
 

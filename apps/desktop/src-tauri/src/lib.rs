@@ -424,7 +424,8 @@ fn apply_organize(app: tauri::AppHandle, plan: OrganizePlan) -> Result<String, S
 fn clear_library(app: tauri::AppHandle) -> Result<(), String> {
   let conn = open_db(&app)?;
   conn.execute_batch(
-    "PRAGMA foreign_keys = ON;\n\
+    "PRAGMA foreign_keys = OFF;\n\
+     BEGIN IMMEDIATE;\n\
      DELETE FROM scan_entries;\n\
      DELETE FROM scan_sessions;\n\
      DELETE FROM issues;\n\
@@ -436,9 +437,12 @@ fn clear_library(app: tauri::AppHandle) -> Result<(), String> {
      DELETE FROM item_authors;\n\
      DELETE FROM authors;\n\
      DELETE FROM files;\n\
-     DELETE FROM items;"
+     DELETE FROM items;\n\
+     COMMIT;\n\
+     PRAGMA foreign_keys = ON;"
   )
   .map_err(|err| err.to_string())?;
+  conn.execute_batch("VACUUM;").map_err(|err| err.to_string())?;
   Ok(())
 }
 
