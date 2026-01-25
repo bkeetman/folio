@@ -23,7 +23,7 @@
 }
 
 .sidebar {
-  padding: 22px 18px;
+  padding: 18px 16px;
   border-right: 1px solid var(--border);
   background: linear-gradient(180deg, #f6f2ec 0%, #f3eee6 100%);
   display: flex;
@@ -325,7 +325,7 @@
 }
 
 .main {
-  padding: 22px 32px 40px;
+  padding: 18px 28px 36px;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -337,12 +337,31 @@
   align-items: center;
   gap: 20px;
   border-bottom: 1px solid var(--border);
-  padding-bottom: 14px;
+  padding: 10px 0 12px;
   position: sticky;
   top: 0;
   backdrop-filter: blur(10px);
   background: rgba(247, 245, 242, 0.85);
   z-index: 2;
+}
+
+.toolbar-actions .ui-button {
+  white-space: nowrap;
+}
+
+.title-block {
+  max-width: 420px;
+}
+
+.title-block h1 {
+  margin: 0 0 4px;
+  font-family: "SF Pro Display", "Iowan Old Style", "Baskerville", "Georgia", serif;
+  font-size: 28px;
+}
+
+.title-block p {
+  margin: 0;
+  color: var(--ink-soft);
 }
 
 .library-progress {
@@ -406,21 +425,13 @@
   color: var(--ink-soft);
 }
 
-.title-block h1 {
-  margin: 0 0 4px;
-  font-family: "Iowan Old Style", "Baskerville", "Georgia", serif;
-  font-size: 32px;
-}
-
-.title-block p {
-  margin: 0;
-  color: var(--ink-soft);
-}
 
 .toolbar-actions {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .toolbar-group {
@@ -442,7 +453,7 @@
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 10px 14px;
-  min-width: 240px;
+  min-width: 220px;
   background: #fffdf9;
 }
 
@@ -472,7 +483,7 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-columns: minmax(0, 1fr) 280px;
   gap: 18px;
   align-items: start;
 }

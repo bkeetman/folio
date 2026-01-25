@@ -1532,6 +1532,22 @@ pub fn run() {
       }
       let menu = app_menu(app)?;
       app.set_menu(menu)?;
+      let main_window = app.get_webview_window("main");
+      if let Some(window) = main_window {
+        let _ = window.set_focus();
+        let _ = window.set_title("Folio");
+        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+          width: 1360.0,
+          height: 900.0,
+        }));
+        let _ = window.set_min_size(Some(tauri::Size::Logical(
+          tauri::LogicalSize {
+            width: 1100.0,
+            height: 720.0,
+          },
+        )));
+        let _ = window.center();
+      }
       Ok(())
     })
     .plugin(tauri_plugin_dialog::init())
