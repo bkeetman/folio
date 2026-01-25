@@ -28,6 +28,12 @@ pnpm -C packages/core scan "/path/to/books" --db "./folio.db"
 pnpm -C packages/core enrich --item <id> --isbn <isbn> --db "./folio.db"
 ```
 
+## List items
+
+```bash
+pnpm -C packages/core list --db "./folio.db"
+```
+
 ## Workspace layout
 
 - `apps/desktop` — Tauri + React app
