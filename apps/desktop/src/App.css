@@ -96,6 +96,21 @@
   box-shadow: 0 18px 30px rgba(30, 22, 15, 0.08);
 }
 
+.sidebar-panel.danger {
+  border-color: rgba(178, 74, 44, 0.25);
+  background: rgba(255, 247, 242, 0.8);
+}
+
+.ghost.danger {
+  border-color: rgba(178, 74, 44, 0.4);
+  color: #8b3a22;
+}
+
+.danger-note {
+  font-size: 12px;
+  color: #7a5a4e;
+}
+
 .scan-status {
   font-size: 12px;
   color: var(--ink-soft);

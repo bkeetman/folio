@@ -421,6 +421,28 @@ fn apply_organize(app: tauri::AppHandle, plan: OrganizePlan) -> Result<String, S
 }
 
 #[tauri::command]
+fn clear_library(app: tauri::AppHandle) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  conn.execute_batch(
+    "PRAGMA foreign_keys = ON;\n\
+     DELETE FROM scan_entries;\n\
+     DELETE FROM scan_sessions;\n\
+     DELETE FROM issues;\n\
+     DELETE FROM enrichment_results;\n\
+     DELETE FROM enrichment_sources;\n\
+     DELETE FROM identifiers;\n\
+     DELETE FROM item_tags;\n\
+     DELETE FROM tags;\n\
+     DELETE FROM item_authors;\n\
+     DELETE FROM authors;\n\
+     DELETE FROM files;\n\
+     DELETE FROM items;"
+  )
+  .map_err(|err| err.to_string())?;
+  Ok(())
+}
+
+#[tauri::command]
 fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String> {
   let conn = open_db(&app)?;
   let mut stats = ScanStats {
@@ -1457,6 +1479,7 @@ pub fn run() {
       apply_fix_candidate,
       plan_organize,
       apply_organize,
+      clear_library,
       scan_folder
     ])
     .run(tauri::generate_context!())

@@ -290,6 +290,29 @@ function App() {
     }
   }, [refreshLibrary, scanning]);
 
+  const handleClearLibrary = async () => {
+    if (!isTauri()) {
+      setScanStatus("Clear requires the Tauri desktop runtime.");
+      return;
+    }
+    const { confirm } = await import("@tauri-apps/plugin-dialog");
+    const ok = await confirm(
+      "This will delete all items, files, and metadata from Folio. Your book files are not deleted. Continue?",
+      {
+        title: "Clear Library",
+        kind: "warning",
+      }
+    );
+    if (!ok) return;
+    try {
+      await invoke("clear_library");
+      setScanStatus("Library cleared.");
+      await refreshLibrary();
+    } catch (error) {
+      setScanStatus("Could not clear library.");
+    }
+  };
+
   useEffect(() => {
     if (!scanning) return;
     const interval = setInterval(() => {
@@ -440,6 +463,16 @@ function App() {
               ) : null}
             </div>
           ) : null}
+        </div>
+
+        <div className="sidebar-panel danger">
+          <div className="panel-title">Danger Zone</div>
+          <button className="ghost danger" onClick={handleClearLibrary}>
+            Clear Library
+          </button>
+          <div className="danger-note">
+            Removes all Folio data. Your files remain untouched.
+          </div>
         </div>
 
         <div className="sidebar-panel">
