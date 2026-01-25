@@ -22,6 +22,12 @@ pnpm -C packages/core db:migrate
 pnpm -C packages/core scan "/path/to/books" --db "./folio.db"
 ```
 
+## Enrich an item
+
+```bash
+pnpm -C packages/core enrich --item <id> --isbn <isbn> --db "./folio.db"
+```
+
 ## Workspace layout
 
 - `apps/desktop` — Tauri + React app
