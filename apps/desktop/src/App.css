@@ -104,6 +104,12 @@
   padding: 8px 10px;
 }
 
+.scan-timer {
+  margin-top: 6px;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+}
+
 .organizer-row {
   display: flex;
   justify-content: space-between;

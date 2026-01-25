@@ -171,6 +171,8 @@ function App() {
   const [grid, setGrid] = useState(true);
   const [query, setQuery] = useState("");
   const [scanStatus, setScanStatus] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanStartedAt, setScanStartedAt] = useState<number | null>(null);
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([]);
   const [libraryReady, setLibraryReady] = useState(false);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
@@ -251,6 +253,9 @@ function App() {
         setScanStatus("Scan requires the Tauri desktop runtime.");
         return;
       }
+      if (scanning) return;
+      setScanning(true);
+      setScanStartedAt(Date.now());
       const { open } = await import("@tauri-apps/plugin-dialog");
       const selection = await open({ directory: true, multiple: false });
       if (typeof selection === "string") {
@@ -280,8 +285,18 @@ function App() {
       } else {
         setScanStatus("Scan failed.");
       }
+    } finally {
+      setScanning(false);
     }
-  }, [refreshLibrary]);
+  }, [refreshLibrary, scanning]);
+
+  useEffect(() => {
+    if (!scanning) return;
+    const interval = setInterval(() => {
+      setScanStatus((prev) => prev ?? "Scanning...");
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [scanning]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -410,10 +425,21 @@ function App() {
 
         <div className="sidebar-panel">
           <div className="panel-title">Quick Actions</div>
-          <button className="primary" onClick={handleScan}>Scan Folder</button>
+          <button className="primary" onClick={handleScan} disabled={scanning}>
+            {scanning ? "Scanning..." : "Scan Folder"}
+          </button>
           <button className="ghost" onClick={handlePlanOrganize}>Organize Files</button>
           <button className="ghost">Run Enrichment</button>
-          {scanStatus ? <div className="scan-status">{scanStatus}</div> : null}
+          {scanStatus ? (
+            <div className="scan-status">
+              {scanStatus}
+              {scanning && scanStartedAt ? (
+                <div className="scan-timer">
+                  {Math.floor((Date.now() - scanStartedAt) / 1000)}s elapsed
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <div className="sidebar-panel">
