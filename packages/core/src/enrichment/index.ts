@@ -1,7 +1,15 @@
 import { randomUUID } from "crypto";
 import { and, eq, gte } from "drizzle-orm";
 import type { FolioDb } from "../db";
-import { enrichmentResults, enrichmentSources } from "../db/schema";
+import {
+  authors,
+  enrichmentResults,
+  enrichmentSources,
+  identifiers,
+  itemAuthors,
+  itemFieldSources,
+  items,
+} from "../db/schema";
 
 type EnrichmentSourceName = "openlibrary" | "googlebooks";
 
@@ -83,6 +91,86 @@ export async function enrichByTitleAuthor(
     })
     .filter((candidate) => candidate.confidence >= 0.45)
     .sort((a, b) => b.confidence - a.confidence);
+}
+
+export function applyEnrichmentCandidate(
+  db: FolioDb,
+  itemId: string,
+  candidate: EnrichedCandidate
+) {
+  const now = Date.now();
+  const item = db.select().from(items).where(eq(items.id, itemId)).get();
+  if (!item) return;
+
+  const updates: Partial<typeof items.$inferInsert> = {};
+  if (!item.title && candidate.title) updates.title = candidate.title;
+  if (!item.publishedYear && candidate.publishedYear)
+    updates.publishedYear = candidate.publishedYear;
+  if (Object.keys(updates).length) {
+    updates.updatedAt = now;
+    db.update(items).set(updates).where(eq(items.id, itemId));
+    if (updates.title) {
+      db.insert(itemFieldSources).values({
+        id: randomUUID(),
+        itemId,
+        field: "title",
+        source: candidate.source,
+        confidence: candidate.confidence,
+        createdAt: now,
+      });
+    }
+    if (updates.publishedYear) {
+      db.insert(itemFieldSources).values({
+        id: randomUUID(),
+        itemId,
+        field: "published_year",
+        source: candidate.source,
+        confidence: candidate.confidence,
+        createdAt: now,
+      });
+    }
+  }
+
+  if (candidate.authors?.length) {
+    for (const name of candidate.authors) {
+      const existing = db
+        .select()
+        .from(authors)
+        .where(eq(authors.name, name))
+        .get();
+      const authorId = existing?.id ?? randomUUID();
+      if (!existing) {
+        db.insert(authors).values({
+          id: authorId,
+          name,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      db
+        .insert(itemAuthors)
+        .values({ itemId, authorId, role: "author", ord: 0 })
+        .onConflictDoNothing();
+    }
+  }
+
+  if (candidate.identifiers?.length) {
+    for (const raw of candidate.identifiers) {
+      if (!raw) continue;
+      db
+        .insert(identifiers)
+        .values({
+          id: randomUUID(),
+          itemId,
+          type: raw.length === 10 ? "ISBN10" : raw.length === 13 ? "ISBN13" : "OTHER",
+          value: raw,
+          source: candidate.source,
+          confidence: candidate.confidence,
+          createdAt: now,
+        })
+        .onConflictDoNothing();
+    }
+  }
 }
 
 async function fetchWithCache(
