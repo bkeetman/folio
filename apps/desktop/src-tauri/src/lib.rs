@@ -37,6 +37,33 @@ struct DuplicateGroup {
   files: Vec<String>,
 }
 
+#[derive(Serialize, serde::Deserialize, Clone)]
+struct EnrichmentCandidate {
+  id: String,
+  title: Option<String>,
+  authors: Vec<String>,
+  published_year: Option<i64>,
+  identifiers: Vec<String>,
+  source: String,
+  confidence: f64,
+}
+
+#[derive(Serialize, serde::Deserialize)]
+struct OrganizeEntry {
+  file_id: String,
+  source_path: String,
+  target_path: String,
+  action: String,
+}
+
+#[derive(Serialize, serde::Deserialize)]
+struct OrganizePlan {
+  mode: String,
+  library_root: String,
+  template: String,
+  entries: Vec<OrganizeEntry>,
+}
+
 #[derive(Serialize)]
 struct ScanStats {
   added: i64,
@@ -171,6 +198,225 @@ fn get_duplicate_groups(app: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, St
     groups.push(row.map_err(|err| err.to_string())?);
   }
   Ok(groups)
+}
+
+#[tauri::command]
+fn get_fix_candidates(app: tauri::AppHandle, item_id: String) -> Result<Vec<EnrichmentCandidate>, String> {
+  let conn = open_db(&app)?;
+  let title: Option<String> = conn
+    .query_row(
+      "SELECT title FROM items WHERE id = ?1",
+      params![item_id],
+      |row| row.get(0),
+    )
+    .optional()
+    .map_err(|err| err.to_string())?;
+
+  let authors: Vec<String> = conn
+    .prepare("SELECT authors.name FROM item_authors JOIN authors ON authors.id = item_authors.author_id WHERE item_authors.item_id = ?1")
+    .map_err(|err| err.to_string())?
+    .query_map(params![item_id], |row| row.get(0))
+    .map_err(|err| err.to_string())?
+    .collect::<Result<Vec<String>, _>>()
+    .map_err(|err| err.to_string())?;
+
+  let isbn: Option<String> = conn
+    .query_row(
+      "SELECT value FROM identifiers WHERE item_id = ?1 AND (type = 'ISBN13' OR type = 'ISBN10') ORDER BY type = 'ISBN13' DESC LIMIT 1",
+      params![item_id],
+      |row| row.get(0),
+    )
+    .optional()
+    .map_err(|err| err.to_string())?;
+
+  let mut candidates: Vec<EnrichmentCandidate> = vec![];
+  if let Some(isbn) = isbn {
+    candidates.extend(fetch_openlibrary_isbn(&isbn));
+    candidates.extend(fetch_google_isbn(&isbn));
+  } else if let Some(title) = &title {
+    let author = authors.first().cloned();
+    candidates.extend(fetch_openlibrary_search(title, author.as_deref()));
+    candidates.extend(fetch_google_search(title, author.as_deref()));
+    candidates = score_candidates(candidates, title, author.as_deref());
+  }
+
+  Ok(candidates)
+}
+
+#[tauri::command]
+fn apply_fix_candidate(
+  app: tauri::AppHandle,
+  item_id: String,
+  candidate: EnrichmentCandidate,
+) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+  apply_enrichment_candidate(&conn, &item_id, &candidate, now)?;
+  conn.execute(
+    "UPDATE issues SET resolved_at = ?1 WHERE item_id = ?2 AND type = 'missing_metadata' AND resolved_at IS NULL",
+    params![now, item_id],
+  )
+  .map_err(|err| err.to_string())?;
+  Ok(())
+}
+
+#[tauri::command]
+fn plan_organize(
+  app: tauri::AppHandle,
+  mode: String,
+  library_root: String,
+  template: String,
+) -> Result<OrganizePlan, String> {
+  let conn = open_db(&app)?;
+  let mut stmt = conn
+    .prepare(
+      "SELECT files.id, files.path, files.extension, items.title, items.published_year, \
+       GROUP_CONCAT(DISTINCT authors.name) as authors, \
+       MAX(CASE WHEN identifiers.type = 'ISBN13' THEN identifiers.value ELSE NULL END) as isbn13 \
+       FROM files \
+       JOIN items ON items.id = files.item_id \
+       LEFT JOIN item_authors ON item_authors.item_id = items.id \
+       LEFT JOIN authors ON authors.id = item_authors.author_id \
+       LEFT JOIN identifiers ON identifiers.item_id = items.id \
+       WHERE files.status = 'active' \
+       GROUP BY files.id"
+    )
+    .map_err(|err| err.to_string())?;
+
+  let rows = stmt
+    .query_map(params![], |row| {
+      Ok((
+        row.get::<_, String>(0)?,
+        row.get::<_, String>(1)?,
+        row.get::<_, String>(2)?,
+        row.get::<_, Option<String>>(3)?,
+        row.get::<_, Option<i64>>(4)?,
+        row.get::<_, Option<String>>(5)?,
+        row.get::<_, Option<String>>(6)?,
+      ))
+    })
+    .map_err(|err| err.to_string())?;
+
+  let mut entries = Vec::new();
+  for row in rows {
+    let (file_id, source_path, extension, title, published_year, authors, isbn13) =
+      row.map_err(|err| err.to_string())?;
+    let author = authors
+      .unwrap_or_default()
+      .split(',')
+      .next()
+      .unwrap_or("Unknown Author")
+      .to_string();
+    let relative = render_template(
+      &template,
+      &author,
+      title.as_deref().unwrap_or("Untitled"),
+      published_year,
+      isbn13.as_deref(),
+      &extension,
+    );
+    let target = resolve_collision(&library_root, &relative);
+    let action = if mode == "reference" {
+      "skip"
+    } else if mode == "copy" {
+      "copy"
+    } else {
+      "move"
+    };
+
+    entries.push(OrganizeEntry {
+      file_id,
+      source_path,
+      target_path: target,
+      action: action.to_string(),
+    });
+  }
+
+  Ok(OrganizePlan {
+    mode,
+    library_root,
+    template,
+    entries,
+  })
+}
+
+#[tauri::command]
+fn apply_organize(app: tauri::AppHandle, plan: OrganizePlan) -> Result<String, String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+  let mut log_entries: Vec<serde_json::Value> = vec![];
+
+  for entry in &plan.entries {
+    if entry.action == "skip" {
+      continue;
+    }
+    let target_dir = std::path::Path::new(&entry.target_path)
+      .parent()
+      .ok_or("Invalid target path")?;
+    std::fs::create_dir_all(target_dir).map_err(|err| err.to_string())?;
+
+    if entry.action == "copy" {
+      std::fs::copy(&entry.source_path, &entry.target_path).map_err(|err| err.to_string())?;
+      let filename = std::path::Path::new(&entry.target_path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("file")
+        .to_string();
+      let extension = std::path::Path::new(&entry.target_path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| format!(".{}", value.to_lowercase()))
+        .unwrap_or_default();
+
+      let (item_id, size_bytes, sha256, hash_algo, modified_at): (String, Option<i64>, Option<String>, Option<String>, Option<i64>) = conn
+        .query_row(
+          "SELECT item_id, size_bytes, sha256, hash_algo, modified_at FROM files WHERE id = ?1",
+          params![entry.file_id],
+          |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        )
+        .map_err(|err| err.to_string())?;
+
+      let new_id = Uuid::new_v4().to_string();
+      conn.execute(
+        "INSERT INTO files (id, item_id, path, filename, extension, size_bytes, sha256, hash_algo, modified_at, created_at, updated_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, 'active')",
+        params![new_id, item_id, entry.target_path, filename, extension, size_bytes, sha256, hash_algo, modified_at, now],
+      )
+      .map_err(|err| err.to_string())?;
+    } else {
+      std::fs::rename(&entry.source_path, &entry.target_path).map_err(|err| err.to_string())?;
+      let filename = std::path::Path::new(&entry.target_path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("file")
+        .to_string();
+      let extension = std::path::Path::new(&entry.target_path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| format!(".{}", value.to_lowercase()))
+        .unwrap_or_default();
+
+      conn.execute(
+        "UPDATE files SET path = ?1, filename = ?2, extension = ?3, updated_at = ?4, status = 'active' WHERE id = ?5",
+        params![entry.target_path, filename, extension, now, entry.file_id],
+      )
+      .map_err(|err| err.to_string())?;
+    }
+
+    log_entries.push(serde_json::json!({
+      "action": entry.action,
+      "from": entry.source_path,
+      "to": entry.target_path,
+      "timestamp": now
+    }));
+  }
+
+  let log_dir = std::path::Path::new(&plan.library_root).join(".folio");
+  std::fs::create_dir_all(&log_dir).map_err(|err| err.to_string())?;
+  let log_path = log_dir.join(format!("organizer-log-{}.json", now));
+  std::fs::write(&log_path, serde_json::to_vec_pretty(&log_entries).unwrap())
+    .map_err(|err| err.to_string())?;
+
+  Ok(log_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -494,6 +740,18 @@ fn extract_pdf_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, Str
     }
   }
 
+  let pages = doc.get_pages();
+  let page_ids: Vec<lopdf::ObjectId> = pages
+    .values()
+    .take(10)
+    .cloned()
+    .collect();
+  if !page_ids.is_empty() {
+    if let Ok(text) = doc.extract_text(&page_ids) {
+      metadata.identifiers.extend(extract_isbn_candidates(&text));
+    }
+  }
+
   Ok(metadata)
 }
 
@@ -750,6 +1008,395 @@ fn parse_opf_metadata(opf: &str, metadata: &mut ExtractedMetadata) -> Result<(),
   Ok(())
 }
 
+fn fetch_openlibrary_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
+  let url = format!("https://openlibrary.org/isbn/{}.json", isbn);
+  let response = reqwest::blocking::get(url);
+  let response = match response {
+    Ok(value) => value,
+    Err(_) => return vec![],
+  };
+  let data: serde_json::Value = match response.json() {
+    Ok(value) => value,
+    Err(_) => return vec![],
+  };
+  let title = data.get("title").and_then(|value| value.as_str()).map(|value| value.to_string());
+  let published_year = data
+    .get("publish_date")
+    .and_then(|value| value.as_str())
+    .and_then(|value| extract_year(value));
+  let mut authors = Vec::new();
+  if let Some(author_refs) = data.get("authors").and_then(|value| value.as_array()) {
+    for author_ref in author_refs.iter().take(3) {
+      if let Some(key) = author_ref.get("key").and_then(|value| value.as_str()) {
+        if let Ok(resp) = reqwest::blocking::get(format!("https://openlibrary.org{}.json", key)) {
+          if let Ok(author_data) = resp.json::<serde_json::Value>() {
+            if let Some(name) = author_data.get("name").and_then(|value| value.as_str()) {
+              authors.push(name.to_string());
+            }
+          }
+        }
+      }
+    }
+  }
+
+  vec![EnrichmentCandidate {
+    id: Uuid::new_v4().to_string(),
+    title,
+    authors,
+    published_year,
+    identifiers: vec![isbn.to_string()],
+    source: "Open Library".to_string(),
+    confidence: 0.9,
+  }]
+}
+
+fn fetch_google_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
+  let url = format!("https://www.googleapis.com/books/v1/volumes?q=isbn:{}", isbn);
+  let response = reqwest::blocking::get(url);
+  let response = match response {
+    Ok(value) => value,
+    Err(_) => return vec![],
+  };
+  let data: serde_json::Value = match response.json() {
+    Ok(value) => value,
+    Err(_) => return vec![],
+  };
+  let items = data.get("items").and_then(|value| value.as_array()).cloned().unwrap_or_default();
+  items
+    .iter()
+    .take(5)
+    .enumerate()
+    .map(|(index, item)| {
+      let info = item.get("volumeInfo").cloned().unwrap_or(serde_json::Value::Null);
+      let title = info.get("title").and_then(|value| value.as_str()).map(|value| value.to_string());
+      let authors = info
+        .get("authors")
+        .and_then(|value| value.as_array())
+        .map(|values| values.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+      let published_year = info
+        .get("publishedDate")
+        .and_then(|value| value.as_str())
+        .and_then(|value| extract_year(value));
+      let identifiers = info
+        .get("industryIdentifiers")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+          values
+            .iter()
+            .filter_map(|entry| entry.get("identifier").and_then(|value| value.as_str()).map(|s| s.to_string()))
+            .collect()
+        })
+        .unwrap_or_default();
+
+      EnrichmentCandidate {
+        id: Uuid::new_v4().to_string(),
+        title,
+        authors,
+        published_year,
+        identifiers,
+        source: "Google Books".to_string(),
+        confidence: if index == 0 { 0.85 } else { 0.7 },
+      }
+    })
+    .collect()
+}
+
+fn fetch_openlibrary_search(title: &str, author: Option<&str>) -> Vec<EnrichmentCandidate> {
+  let mut url = format!("https://openlibrary.org/search.json?title={}", urlencoding::encode(title));
+  if let Some(author) = author {
+    url.push_str(&format!("&author={}", urlencoding::encode(author)));
+  }
+  let response = reqwest::blocking::get(url);
+  let response = match response {
+    Ok(value) => value,
+    Err(_) => return vec![],
+  };
+  let data: serde_json::Value = match response.json() {
+    Ok(value) => value,
+    Err(_) => return vec![],
+  };
+  let docs = data.get("docs").and_then(|value| value.as_array()).cloned().unwrap_or_default();
+  docs
+    .iter()
+    .take(5)
+    .enumerate()
+    .map(|(index, doc)| {
+      let title = doc.get("title").and_then(|value| value.as_str()).map(|value| value.to_string());
+      let authors = doc
+        .get("author_name")
+        .and_then(|value| value.as_array())
+        .map(|values| values.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+      let published_year = doc.get("first_publish_year").and_then(|value| value.as_i64());
+      let identifiers = doc
+        .get("isbn")
+        .and_then(|value| value.as_array())
+        .map(|values| values.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+
+      EnrichmentCandidate {
+        id: Uuid::new_v4().to_string(),
+        title,
+        authors,
+        published_year,
+        identifiers,
+        source: "Open Library".to_string(),
+        confidence: 0.7 - index as f64 * 0.05,
+      }
+    })
+    .collect()
+}
+
+fn fetch_google_search(title: &str, author: Option<&str>) -> Vec<EnrichmentCandidate> {
+  let mut terms = vec![format!("intitle:{}", title)];
+  if let Some(author) = author {
+    terms.push(format!("inauthor:{}", author));
+  }
+  let url = format!(
+    "https://www.googleapis.com/books/v1/volumes?q={}",
+    urlencoding::encode(&terms.join("+"))
+  );
+  let response = reqwest::blocking::get(url);
+  let response = match response {
+    Ok(value) => value,
+    Err(_) => return vec![],
+  };
+  let data: serde_json::Value = match response.json() {
+    Ok(value) => value,
+    Err(_) => return vec![],
+  };
+  let items = data.get("items").and_then(|value| value.as_array()).cloned().unwrap_or_default();
+  items
+    .iter()
+    .take(5)
+    .enumerate()
+    .map(|(index, item)| {
+      let info = item.get("volumeInfo").cloned().unwrap_or(serde_json::Value::Null);
+      let title = info.get("title").and_then(|value| value.as_str()).map(|value| value.to_string());
+      let authors = info
+        .get("authors")
+        .and_then(|value| value.as_array())
+        .map(|values| values.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+      let published_year = info
+        .get("publishedDate")
+        .and_then(|value| value.as_str())
+        .and_then(|value| extract_year(value));
+      let identifiers = info
+        .get("industryIdentifiers")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+          values
+            .iter()
+            .filter_map(|entry| entry.get("identifier").and_then(|value| value.as_str()).map(|s| s.to_string()))
+            .collect()
+        })
+        .unwrap_or_default();
+
+      EnrichmentCandidate {
+        id: Uuid::new_v4().to_string(),
+        title,
+        authors,
+        published_year,
+        identifiers,
+        source: "Google Books".to_string(),
+        confidence: 0.75 - index as f64 * 0.05,
+      }
+    })
+    .collect()
+}
+
+fn score_candidates(
+  mut candidates: Vec<EnrichmentCandidate>,
+  title: &str,
+  author: Option<&str>,
+) -> Vec<EnrichmentCandidate> {
+  let author = author.unwrap_or("");
+  candidates.iter_mut().for_each(|candidate| {
+    let title_score = similarity(candidate.title.as_deref().unwrap_or(""), title);
+    let author_score = if author.is_empty() {
+      1.0
+    } else {
+      similarity(&candidate.authors.join(" "), author)
+    };
+    let score = (title_score * 0.7) + (author_score * 0.3);
+    candidate.confidence = (candidate.confidence * score).min(0.95);
+  });
+  let mut filtered: Vec<EnrichmentCandidate> = candidates
+    .into_iter()
+    .filter(|candidate| candidate.confidence >= 0.45)
+    .collect();
+  filtered.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+  filtered
+}
+
+fn similarity(a: &str, b: &str) -> f64 {
+  let a_tokens = tokenize(a);
+  let b_tokens = tokenize(b);
+  if a_tokens.is_empty() || b_tokens.is_empty() {
+    return 0.2;
+  }
+  let intersection = a_tokens.iter().filter(|token| b_tokens.contains(*token)).count();
+  let union = a_tokens.union(&b_tokens).count();
+  intersection as f64 / union as f64
+}
+
+fn tokenize(value: &str) -> std::collections::HashSet<String> {
+  value
+    .to_lowercase()
+    .replace(|ch: char| !ch.is_ascii_alphanumeric() && !ch.is_whitespace(), " ")
+    .split_whitespace()
+    .map(|token| token.to_string())
+    .collect()
+}
+
+fn apply_enrichment_candidate(
+  conn: &Connection,
+  item_id: &str,
+  candidate: &EnrichmentCandidate,
+  now: i64,
+) -> Result<(), String> {
+  let existing: (Option<String>, Option<i64>) = conn
+    .query_row(
+      "SELECT title, published_year FROM items WHERE id = ?1",
+      params![item_id],
+      |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .map_err(|err| err.to_string())?;
+
+  let title = existing.0.or_else(|| candidate.title.clone());
+  let published_year = existing.1.or(candidate.published_year);
+  conn.execute(
+    "UPDATE items SET title = ?1, published_year = ?2, updated_at = ?3 WHERE id = ?4",
+    params![title, published_year, now, item_id],
+  )
+  .map_err(|err| err.to_string())?;
+
+  if candidate.title.is_some() {
+    insert_field_source_with_source(conn, item_id, "title", &candidate.source, candidate.confidence, now)?;
+  }
+  if candidate.published_year.is_some() {
+    insert_field_source_with_source(conn, item_id, "published_year", &candidate.source, candidate.confidence, now)?;
+  }
+
+  for author in &candidate.authors {
+    let author_id: Option<String> = conn
+      .query_row(
+        "SELECT id FROM authors WHERE name = ?1",
+        params![author],
+        |row| row.get(0),
+      )
+      .optional()
+      .map_err(|err| err.to_string())?;
+    let author_id = author_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    conn.execute(
+      "INSERT OR IGNORE INTO authors (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
+      params![author_id, author, now],
+    )
+    .map_err(|err| err.to_string())?;
+    conn.execute(
+      "INSERT OR IGNORE INTO item_authors (item_id, author_id, role, ord) VALUES (?1, ?2, 'author', 0)",
+      params![item_id, author_id],
+    )
+    .map_err(|err| err.to_string())?;
+  }
+
+  for raw in &candidate.identifiers {
+    let normalized = normalize_isbn(raw);
+    let value = normalized.unwrap_or_else(|| raw.to_string());
+    let id_type = if value.len() == 10 {
+      "ISBN10"
+    } else if value.len() == 13 {
+      "ISBN13"
+    } else {
+      "OTHER"
+    };
+    let identifier_id = Uuid::new_v4().to_string();
+    conn.execute(
+      "INSERT OR IGNORE INTO identifiers (id, item_id, type, value, source, confidence, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+      params![identifier_id, item_id, id_type, value, candidate.source, candidate.confidence, now],
+    )
+    .map_err(|err| err.to_string())?;
+  }
+
+  Ok(())
+}
+
+fn insert_field_source_with_source(
+  conn: &Connection,
+  item_id: &str,
+  field: &str,
+  source: &str,
+  confidence: f64,
+  now: i64,
+) -> Result<(), String> {
+  conn.execute(
+    "INSERT INTO item_field_sources (id, item_id, field, source, confidence, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    params![Uuid::new_v4().to_string(), item_id, field, source, confidence, now],
+  )
+  .map_err(|err| err.to_string())?;
+  Ok(())
+}
+
+fn render_template(
+  template: &str,
+  author: &str,
+  title: &str,
+  year: Option<i64>,
+  isbn13: Option<&str>,
+  extension: &str,
+) -> String {
+  let author = sanitize(author);
+  let title = sanitize(title);
+  let year = year.map(|value| value.to_string()).unwrap_or_else(|| "Unknown".to_string());
+  let isbn13 = isbn13.unwrap_or("Unknown");
+  let ext = extension.trim_start_matches('.');
+  template
+    .replace("{Author}", &author)
+    .replace("{Title}", &title)
+    .replace("{Year}", &year)
+    .replace("{ISBN13}", isbn13)
+    .replace("{ext}", ext)
+}
+
+fn sanitize(value: &str) -> String {
+  value
+    .chars()
+    .map(|ch| match ch {
+      '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
+      _ => ch,
+    })
+    .collect::<String>()
+    .split_whitespace()
+    .collect::<Vec<&str>>()
+    .join(" ")
+    .trim()
+    .to_string()
+}
+
+fn resolve_collision(library_root: &str, relative: &str) -> String {
+  let base = std::path::Path::new(library_root).join(relative);
+  if !base.exists() {
+    return base.to_string_lossy().to_string();
+  }
+  let mut index = 1;
+  let stem = base.file_stem().and_then(|value| value.to_str()).unwrap_or("file");
+  let ext = base.extension().and_then(|value| value.to_str()).unwrap_or("");
+  loop {
+    let filename = if ext.is_empty() {
+      format!("{} [{}]", stem, index)
+    } else {
+      format!("{} [{}].{}", stem, index, ext)
+    };
+    let candidate = base.with_file_name(filename);
+    if !candidate.exists() {
+      return candidate.to_string_lossy().to_string();
+    }
+    index += 1;
+  }
+}
+
 fn db_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, std::io::Error> {
   let app_dir = app.path().app_data_dir()?;
   std::fs::create_dir_all(&app_dir)?;
@@ -788,6 +1435,10 @@ pub fn run() {
       get_library_items,
       get_inbox_items,
       get_duplicate_groups,
+      get_fix_candidates,
+      apply_fix_candidate,
+      plan_organize,
+      apply_organize,
       scan_folder
     ])
     .run(tauri::generate_context!())

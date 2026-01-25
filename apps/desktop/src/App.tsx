@@ -33,6 +33,28 @@ type DuplicateGroup = {
   files: string[];
 };
 
+type EnrichmentCandidate = {
+  id: string;
+  title: string | null;
+  authors: string[];
+  published_year: number | null;
+  identifiers: string[];
+  source: string;
+  confidence: number;
+};
+
+type OrganizePlan = {
+  mode: string;
+  library_root: string;
+  template: string;
+  entries: Array<{
+    file_id: string;
+    source_path: string;
+    target_path: string;
+    action: string;
+  }>;
+};
+
 const sampleBooks = [
   {
     id: "1",
@@ -95,44 +117,49 @@ const duplicateGroups = [
   },
 ];
 
-const fixCandidates = [
+const sampleFixCandidates: EnrichmentCandidate[] = [
   {
     id: "c1",
     title: "The Left Hand of Darkness",
-    author: "Ursula K. Le Guin",
-    year: 1969,
+    authors: ["Ursula K. Le Guin"],
+    published_year: 1969,
+    identifiers: [],
     confidence: 0.92,
     source: "Open Library",
   },
   {
     id: "c2",
     title: "Left Hand of Darkness",
-    author: "U. K. Le Guin",
-    year: 1969,
+    authors: ["U. K. Le Guin"],
+    published_year: 1969,
+    identifiers: [],
     confidence: 0.86,
     source: "Google Books",
   },
   {
     id: "c3",
     title: "The Left Hand of Darkness (Anniversary)",
-    author: "Ursula Le Guin",
-    year: 2004,
+    authors: ["Ursula Le Guin"],
+    published_year: 2004,
+    identifiers: [],
     confidence: 0.74,
     source: "Open Library",
   },
   {
     id: "c4",
     title: "The Left Hand of Darkness",
-    author: "Ursula K. Le Guin",
-    year: 1976,
+    authors: ["Ursula K. Le Guin"],
+    published_year: 1976,
+    identifiers: [],
     confidence: 0.71,
     source: "Google Books",
   },
   {
     id: "c5",
     title: "The Left Hand of Darkness",
-    author: "Ursula K. LeGuin",
-    year: 1969,
+    authors: ["Ursula K. LeGuin"],
+    published_year: 1969,
+    identifiers: [],
     confidence: 0.67,
     source: "Open Library",
   },
@@ -147,6 +174,15 @@ function App() {
   const [libraryReady, setLibraryReady] = useState(false);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [duplicates, setDuplicates] = useState<DuplicateGroup[]>([]);
+  const [fixCandidates, setFixCandidates] = useState<EnrichmentCandidate[]>([]);
+  const [fixLoading, setFixLoading] = useState(false);
+  const [organizePlan, setOrganizePlan] = useState<OrganizePlan | null>(null);
+  const [organizeStatus, setOrganizeStatus] = useState<string | null>(null);
+  const [organizeMode, setOrganizeMode] = useState("copy");
+  const [organizeTemplate, setOrganizeTemplate] = useState(
+    "{Author}/{Title} ({Year}) [{ISBN13}].{ext}"
+  );
+  const isDesktop = isTauri();
 
   const filteredBooks = useMemo(() => {
     const base = libraryItems.length
@@ -246,6 +282,80 @@ function App() {
     }
   };
 
+  const currentFixItem = inbox.length ? inbox[0] : inboxItems[0] ?? null;
+  const candidateList = isDesktop ? fixCandidates : sampleFixCandidates;
+
+  const handleFetchCandidates = async () => {
+    if (!currentFixItem) return;
+    if (!isTauri()) {
+      setFixCandidates([]);
+      return;
+    }
+    setFixLoading(true);
+    try {
+      const candidates = await invoke<EnrichmentCandidate[]>(
+        "get_fix_candidates",
+        {
+          itemId: currentFixItem.id,
+        }
+      );
+      setFixCandidates(candidates);
+    } catch (error) {
+      setScanStatus("Could not fetch enrichment candidates.");
+    } finally {
+      setFixLoading(false);
+    }
+  };
+
+  const handleApplyCandidate = async (candidate: EnrichmentCandidate) => {
+    if (!currentFixItem || !isTauri()) return;
+    try {
+      await invoke("apply_fix_candidate", {
+        itemId: currentFixItem.id,
+        candidate,
+      });
+      setScanStatus("Metadata updated.");
+      await refreshLibrary();
+      setFixCandidates([]);
+    } catch (error) {
+      setScanStatus("Could not apply metadata.");
+    }
+  };
+
+  const handlePlanOrganize = async () => {
+    if (!isTauri()) {
+      setOrganizeStatus("Organizer requires the Tauri desktop runtime.");
+      return;
+    }
+    try {
+      const { open } = await import("@tauri-apps/api/dialog");
+      const selection = await open({ directory: true, multiple: false });
+      if (typeof selection !== "string") return;
+      const plan = await invoke<OrganizePlan>("plan_organize", {
+        mode: organizeMode,
+        libraryRoot: selection,
+        template: organizeTemplate,
+      });
+      setOrganizePlan(plan);
+      setOrganizeStatus(`Prepared ${plan.entries.length} actions.`);
+    } catch (error) {
+      setOrganizeStatus("Could not prepare organize plan.");
+    }
+  };
+
+  const handleApplyOrganize = async () => {
+    if (!organizePlan || !isTauri()) return;
+    try {
+      const logPath = await invoke<string>("apply_organize", {
+        plan: organizePlan,
+      });
+      setOrganizeStatus(`Organized files. Log saved to ${logPath}`);
+      await refreshLibrary();
+    } catch (error) {
+      setOrganizeStatus("Could not apply organize plan.");
+    }
+  };
+
   return (
     <div className="app">
       <aside className="sidebar">
@@ -287,9 +397,41 @@ function App() {
         <div className="sidebar-panel">
           <div className="panel-title">Quick Actions</div>
           <button className="primary" onClick={handleScan}>Scan Folder</button>
-          <button className="ghost">Organize Files</button>
+          <button className="ghost" onClick={handlePlanOrganize}>Organize Files</button>
           <button className="ghost">Run Enrichment</button>
           {scanStatus ? <div className="scan-status">{scanStatus}</div> : null}
+        </div>
+
+        <div className="sidebar-panel">
+          <div className="panel-title">Organizer</div>
+          <div className="organizer-row">
+            <span>Mode</span>
+            <select
+              value={organizeMode}
+              onChange={(event) => setOrganizeMode(event.target.value)}
+            >
+              <option value="reference">Reference</option>
+              <option value="copy">Copy</option>
+              <option value="move">Move</option>
+            </select>
+          </div>
+          <input
+            className="organizer-input"
+            value={organizeTemplate}
+            onChange={(event) => setOrganizeTemplate(event.target.value)}
+          />
+          {organizePlan ? (
+            <div className="organizer-preview">
+              <div>{organizePlan.entries.length} planned</div>
+              {organizePlan.entries.slice(0, 3).map((entry) => (
+                <div key={entry.file_id} className="organizer-path">
+                  {entry.target_path}
+                </div>
+              ))}
+              <button className="primary" onClick={handleApplyOrganize}>Apply Plan</button>
+            </div>
+          ) : null}
+          {organizeStatus ? <div className="scan-status">{organizeStatus}</div> : null}
         </div>
 
         <div className="sidebar-panel">
@@ -431,43 +573,57 @@ function App() {
             <div className="fix-layout">
               <div className="fix-current">
                 <div className="panel-title">Current Metadata</div>
-                <div className="meta-row">
-                  <span>Title</span>
-                  <strong>The Left Hand of Darkness</strong>
-                </div>
-                <div className="meta-row">
-                  <span>Author</span>
-                  <strong>Ursula K. Le Guin</strong>
-                </div>
-                <div className="meta-row">
-                  <span>ISBN</span>
-                  <strong>Missing</strong>
-                </div>
-                <div className="meta-row">
-                  <span>Year</span>
-                  <strong>Unknown</strong>
-                </div>
-                <button className="primary">Search Sources</button>
+                {currentFixItem ? (
+                  <>
+                    <div className="meta-row">
+                      <span>Title</span>
+                      <strong>{currentFixItem.title}</strong>
+                    </div>
+                    <div className="meta-row">
+                      <span>Issue</span>
+                      <strong>{currentFixItem.reason}</strong>
+                    </div>
+                    <button className="primary" onClick={handleFetchCandidates}>
+                      {fixLoading ? "Searching..." : "Search Sources"}
+                    </button>
+                  </>
+                ) : (
+                  <div className="card-meta">No items need fixes.</div>
+                )}
               </div>
 
               <div className="fix-results">
                 <div className="panel-title">Top Matches</div>
-                <div className="candidate-grid">
-                  {fixCandidates.map((candidate) => (
-                    <div key={candidate.id} className="candidate-card">
-                      <div className="candidate-head">
-                        <span className="candidate-source">{candidate.source}</span>
-                        <span className="candidate-score">
-                          {Math.round(candidate.confidence * 100)}%
-                        </span>
+                {candidateList.length ? (
+                  <div className="candidate-grid">
+                    {candidateList.map((candidate) => (
+                      <div key={candidate.id} className="candidate-card">
+                        <div className="candidate-head">
+                          <span className="candidate-source">{candidate.source}</span>
+                          <span className="candidate-score">
+                            {Math.round(candidate.confidence * 100)}%
+                          </span>
+                        </div>
+                        <div className="card-title">{candidate.title ?? "Untitled"}</div>
+                        <div className="card-meta">{candidate.authors.join(", ")}</div>
+                        <div className="card-meta">
+                          {candidate.published_year ?? "Unknown"}
+                        </div>
+                        <button
+                          className="ghost"
+                          onClick={() => handleApplyCandidate(candidate)}
+                          disabled={!currentFixItem || fixLoading || !isDesktop}
+                        >
+                          Use This
+                        </button>
                       </div>
-                      <div className="card-title">{candidate.title}</div>
-                      <div className="card-meta">{candidate.author}</div>
-                      <div className="card-meta">{candidate.year}</div>
-                      <button className="ghost">Use This</button>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="card-meta">
+                    {fixLoading ? "Searching..." : "No candidates found."}
+                  </div>
+                )}
               </div>
             </div>
           </section>

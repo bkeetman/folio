@@ -32,3 +32,5 @@ zip = "2.2"
 quick-xml = "0.31"
 regex = "1.10"
 lopdf = "0.32"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+urlencoding = "2.1"
