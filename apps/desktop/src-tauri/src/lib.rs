@@ -672,7 +672,16 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
         match crate::extract_epub_cover(path) {
           Ok(Some((bytes, extension))) => {
             log::info!("epub cover found: {}", path_str);
-            let _ = crate::save_cover(&app, &conn, &item_id, bytes, &extension, now);
+            let _ = crate::save_cover(
+              &app,
+              &conn,
+              &item_id,
+              bytes,
+              &extension,
+              now,
+              "embedded",
+              None,
+            );
           }
           Ok(None) => {
             log::info!("epub cover missing: {}", path_str);
@@ -681,6 +690,9 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
             log::warn!("epub cover error {}: {}", path_str, error);
           }
         }
+      }
+      if let Ok(false) = has_cover(&conn, &item_id) {
+        let _ = fetch_cover_fallback(&app, &conn, &item_id, now);
       }
     }
       continue;
@@ -717,19 +729,31 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
     if let Ok(metadata) = extract_metadata(path) {
       apply_metadata(&conn, &item_id, &metadata, now)?;
     }
-    if ext == ".epub" {
-      match crate::extract_epub_cover(path) {
-        Ok(Some((bytes, extension))) => {
-          log::info!("epub cover found: {}", path_str);
-          let _ = crate::save_cover(&app, &conn, &item_id, bytes, &extension, now);
-        }
-        Ok(None) => {
-          log::info!("epub cover missing: {}", path_str);
-        }
-        Err(error) => {
-          log::warn!("epub cover error {}: {}", path_str, error);
+      if ext == ".epub" {
+        match crate::extract_epub_cover(path) {
+          Ok(Some((bytes, extension))) => {
+            log::info!("epub cover found: {}", path_str);
+            let _ = crate::save_cover(
+              &app,
+              &conn,
+              &item_id,
+              bytes,
+              &extension,
+              now,
+              "embedded",
+              None,
+            );
+          }
+          Ok(None) => {
+            log::info!("epub cover missing: {}", path_str);
+          }
+          Err(error) => {
+            log::warn!("epub cover error {}: {}", path_str, error);
+          }
         }
       }
+    if let Ok(false) = has_cover(&conn, &item_id) {
+      let _ = fetch_cover_fallback(&app, &conn, &item_id, now);
     }
   }
 
@@ -1359,6 +1383,8 @@ fn save_cover(
   bytes: Vec<u8>,
   extension: &str,
   now: i64,
+  source: &str,
+  url: Option<&str>,
 ) -> Result<(), String> {
   let app_dir = app
     .path()
@@ -1376,11 +1402,73 @@ fn save_cover(
   )
   .map_err(|err| err.to_string())?;
   conn.execute(
-    "INSERT INTO covers (id, item_id, source, url, local_path, width, height, created_at) VALUES (?1, ?2, ?3, NULL, ?4, NULL, NULL, ?5)",
-    params![Uuid::new_v4().to_string(), item_id, "embedded", cover_path.to_string_lossy(), now],
+    "INSERT INTO covers (id, item_id, source, url, local_path, width, height, created_at) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6)",
+    params![
+      Uuid::new_v4().to_string(),
+      item_id,
+      source,
+      url,
+      cover_path.to_string_lossy(),
+      now,
+    ],
   )
   .map_err(|err| err.to_string())?;
 
+  Ok(())
+}
+
+fn has_cover(conn: &Connection, item_id: &str) -> Result<bool, String> {
+  let existing: Option<String> = conn
+    .query_row(
+      "SELECT id FROM covers WHERE item_id = ?1 LIMIT 1",
+      params![item_id],
+      |row| row.get(0),
+    )
+    .optional()
+    .map_err(|err| err.to_string())?;
+  Ok(existing.is_some())
+}
+
+fn fetch_cover_fallback(
+  app: &tauri::AppHandle,
+  conn: &Connection,
+  item_id: &str,
+  now: i64,
+) -> Result<(), String> {
+  if has_cover(conn, item_id)? {
+    return Ok(());
+  }
+
+  let isbn: Option<String> = conn
+    .query_row(
+      "SELECT value FROM identifiers WHERE item_id = ?1 AND (type = 'ISBN13' OR type = 'ISBN10') ORDER BY type = 'ISBN13' DESC LIMIT 1",
+      params![item_id],
+      |row| row.get(0),
+    )
+    .optional()
+    .map_err(|err| err.to_string())?;
+  let isbn = match isbn {
+    Some(value) => value,
+    None => return Ok(()),
+  };
+
+  let url = format!("https://covers.openlibrary.org/b/isbn/{}-L.jpg", isbn);
+  let response = reqwest::blocking::get(&url).map_err(|err| err.to_string())?;
+  if !response.status().is_success() {
+    return Ok(());
+  }
+  let content_type = response
+    .headers()
+    .get(reqwest::header::CONTENT_TYPE)
+    .and_then(|value| value.to_str().ok())
+    .unwrap_or("image/jpeg");
+  let extension = map_cover_extension(content_type).unwrap_or("jpg");
+  let bytes = response.bytes().map_err(|err| err.to_string())?.to_vec();
+  if bytes.is_empty() {
+    return Ok(());
+  }
+  log::info!("cover fetched from Open Library: {}", url);
+  save_cover(app, conn, item_id, bytes, extension, now, "openlibrary", Some(&url))?;
   Ok(())
 }
 
