@@ -48,6 +48,7 @@ struct LibraryHealth {
   missing_isbn: i64,
   duplicates: i64,
   complete: i64,
+  missing_cover: i64,
 }
 
 #[derive(Serialize, serde::Deserialize, Clone)]
@@ -251,11 +252,19 @@ fn get_library_health(app: tauri::AppHandle) -> Result<LibraryHealth, String> {
       |row| row.get(0),
     )
     .map_err(|err| err.to_string())?;
+  let missing_cover: i64 = conn
+    .query_row(
+      "SELECT COUNT(*) FROM items WHERE id NOT IN (SELECT item_id FROM covers)",
+      params![],
+      |row| row.get(0),
+    )
+    .map_err(|err| err.to_string())?;
   Ok(LibraryHealth {
     total,
     missing_isbn,
     duplicates,
     complete,
+    missing_cover,
   })
 }
 

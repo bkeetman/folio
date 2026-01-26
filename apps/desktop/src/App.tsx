@@ -47,6 +47,7 @@ type LibraryHealth = {
   missing_isbn: number;
   duplicates: number;
   complete: number;
+  missing_cover: number;
 };
 
 type EnrichmentCandidate = {
@@ -621,6 +622,10 @@ function App() {
           <div className="health-row">
             <span>Missing ISBN</span>
             <strong>{libraryHealth ? libraryHealth.missing_isbn : "—"}</strong>
+          </div>
+          <div className="health-row">
+            <span>Missing Cover</span>
+            <strong>{libraryHealth ? libraryHealth.missing_cover : "—"}</strong>
           </div>
           <div className="health-row">
             <span>Duplicates</span>
