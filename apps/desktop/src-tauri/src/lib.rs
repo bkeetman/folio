@@ -1447,6 +1447,7 @@ fn save_cover(
   let filename = format!("cover_{}.{}", item_id, extension);
   let cover_path = covers_dir.join(filename);
   std::fs::write(&cover_path, bytes).map_err(|err| err.to_string())?;
+  log::info!("cover saved: {} ({})", cover_path.display(), source);
 
   conn.execute(
     "DELETE FROM covers WHERE item_id = ?1",
@@ -1465,6 +1466,8 @@ fn save_cover(
     ],
   )
   .map_err(|err| err.to_string())?;
+
+  log::info!("cover record inserted for item {}", item_id);
 
   Ok(())
 }
@@ -1501,7 +1504,10 @@ fn fetch_cover_fallback(
     .map_err(|err| err.to_string())?;
   let isbn = match isbn {
     Some(value) => value,
-    None => return Ok(()),
+    None => {
+      log::info!("cover fallback skipped (no isbn) for item {}", item_id);
+      return Ok(());
+    }
   };
 
   let url = format!("https://covers.openlibrary.org/b/isbn/{}-L.jpg", isbn);

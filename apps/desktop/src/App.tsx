@@ -782,13 +782,19 @@ function App() {
                       >
                         <div className="cover">
                           {book.cover ? (
-                            <img className="cover-image" src={book.cover} alt="" />
-                          ) : (
-                            <>
-                              <div className="cover-badge">{book.format}</div>
-                              <div className="cover-title">{book.title}</div>
-                            </>
-                          )}
+                            <img
+                              className="cover-image"
+                              src={book.cover}
+                              alt=""
+                              onError={(event) => {
+                                event.currentTarget.style.display = "none";
+                              }}
+                            />
+                          ) : null}
+                          <div className="cover-fallback">
+                            <div className="cover-badge">{book.format}</div>
+                            <div className="cover-title">{book.title}</div>
+                          </div>
                         </div>
                         <div className="card-body">
                           <div className="card-title">{book.title}</div>
