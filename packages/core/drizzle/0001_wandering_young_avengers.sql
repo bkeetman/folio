@@ -1,5 +1,4 @@
 CREATE TABLE `covers` (
-CREATE TABLE `covers` (
 	`id` text PRIMARY KEY NOT NULL,
 	`item_id` text NOT NULL,
 	`source` text NOT NULL,
