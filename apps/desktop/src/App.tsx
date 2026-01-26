@@ -314,11 +314,9 @@ function App() {
         setScanProgress(null);
       }
     } catch (error) {
-      if (error instanceof Error) {
-        setScanStatus(error.message);
-      } else {
-        setScanStatus("Scan failed.");
-      }
+      const message =
+        error instanceof Error ? error.message : String(error ?? "Scan failed.");
+      setScanStatus(`Scan failed: ${message}`);
       setScanProgress(null);
     } finally {
       setScanning(false);
@@ -399,9 +397,19 @@ function App() {
       unlistenComplete = stop;
     });
 
+    let unlistenError: (() => void) | undefined;
+    listen<string>("scan-error", (event) => {
+      setScanProgress(null);
+      setScanning(false);
+      setScanStatus(`Scan failed: ${event.payload}`);
+    }).then((stop) => {
+      unlistenError = stop;
+    });
+
     return () => {
       if (unlistenProgress) unlistenProgress();
       if (unlistenComplete) unlistenComplete();
+      if (unlistenError) unlistenError();
     };
   }, [isDesktop, scanStartedAt, scanning]);
 

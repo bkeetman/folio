@@ -464,9 +464,18 @@ fn clear_library(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String> {
   let app_handle = app.clone();
-  tauri::async_runtime::spawn_blocking(move || scan_folder_sync(app_handle, root))
+  let result = tauri::async_runtime::spawn_blocking(move || scan_folder_sync(app_handle, root))
     .await
-    .map_err(|err| err.to_string())?
+    .map_err(|err| err.to_string())?;
+
+  match result {
+    Ok(stats) => Ok(stats),
+    Err(message) => {
+      log::error!("scan failed: {}", message);
+      let _ = app.emit("scan-error", &message);
+      Err(message)
+    }
+  }
 }
 
 fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, String> {
