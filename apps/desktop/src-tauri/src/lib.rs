@@ -752,17 +752,41 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
 
 fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
   let db_path = db_path(app)?;
-  let needs_migration = !db_path.exists();
   let conn = Connection::open(db_path).map_err(|err| err.to_string())?;
-  conn.execute_batch(MIGRATION_SQL)
+  conn.execute_batch(
+    "CREATE TABLE IF NOT EXISTS schema_migrations (
+      id TEXT PRIMARY KEY NOT NULL,
+      applied_at INTEGER NOT NULL
+    );",
+  )
+  .map_err(|err| err.to_string())?;
+
+  apply_migration(&conn, "0000_nebulous_mysterio", MIGRATION_SQL)?;
+  apply_migration(&conn, "0001_wandering_young_avengers", MIGRATION_COVERS_SQL)?;
+  conn.execute_batch("PRAGMA foreign_keys = ON;")
     .map_err(|err| err.to_string())?;
-  conn.execute_batch(MIGRATION_COVERS_SQL)
-    .map_err(|err| err.to_string())?;
-  if needs_migration {
-    conn.execute_batch("PRAGMA foreign_keys = ON;")
-      .map_err(|err| err.to_string())?;
-  }
   Ok(conn)
+}
+
+fn apply_migration(conn: &Connection, id: &str, sql: &str) -> Result<(), String> {
+  let existing: Option<String> = conn
+    .query_row(
+      "SELECT id FROM schema_migrations WHERE id = ?1",
+      params![id],
+      |row| row.get(0),
+    )
+    .optional()
+    .map_err(|err| err.to_string())?;
+  if existing.is_some() {
+    return Ok(());
+  }
+  conn.execute_batch(sql).map_err(|err| err.to_string())?;
+  conn.execute(
+    "INSERT INTO schema_migrations (id, applied_at) VALUES (?1, ?2)",
+    params![id, chrono::Utc::now().timestamp_millis()],
+  )
+  .map_err(|err| err.to_string())?;
+  Ok(())
 }
 
 fn ensure_covers_table(conn: &Connection) -> Result<(), String> {
