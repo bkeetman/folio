@@ -669,8 +669,8 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
         apply_metadata(&conn, &item_id, &metadata, now)?;
       }
       if ext == ".epub" {
-        if let Ok(Some((bytes, extension))) = extract_epub_cover(path) {
-          let _ = save_cover(&app, &conn, &item_id, bytes, &extension, now);
+        if let Ok(Some((bytes, extension))) = crate::extract_epub_cover(path) {
+          let _ = crate::save_cover(&app, &conn, &item_id, bytes, &extension, now);
         }
       }
     }
@@ -709,8 +709,8 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
       apply_metadata(&conn, &item_id, &metadata, now)?;
     }
     if ext == ".epub" {
-      if let Ok(Some((bytes, extension))) = extract_epub_cover(path) {
-        let _ = save_cover(&app, &conn, &item_id, bytes, &extension, now);
+      if let Ok(Some((bytes, extension))) = crate::extract_epub_cover(path) {
+        let _ = crate::save_cover(&app, &conn, &item_id, bytes, &extension, now);
       }
     }
   }
@@ -856,7 +856,7 @@ fn extract_epub_cover(
     .read_to_string(&mut opf)
     .map_err(|err| err.to_string())?;
 
-  let cover = parse_opf_cover(&opf);
+  let cover = crate::parse_opf_cover(&opf);
   let cover = match cover {
     Some(value) => value,
     None => return Ok(None),
@@ -881,7 +881,7 @@ fn extract_epub_cover(
 
   let extension = cover
     .extension
-    .or_else(|| cover.href.split('.').last().map(|value| value.to_string()))
+    .or_else(|| cover.href.split('.').last().map(|value: &str| value.to_string()))
     .unwrap_or_else(|| "jpg".to_string());
 
   Ok(Some((bytes, extension)))
