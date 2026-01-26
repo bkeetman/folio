@@ -42,6 +42,14 @@ struct DuplicateGroup {
   files: Vec<String>,
 }
 
+#[derive(Serialize)]
+struct LibraryHealth {
+  total: i64,
+  missing_isbn: i64,
+  duplicates: i64,
+  complete: i64,
+}
+
 #[derive(Serialize, serde::Deserialize, Clone)]
 struct EnrichmentCandidate {
   id: String,
@@ -214,6 +222,41 @@ fn get_duplicate_groups(app: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, St
     groups.push(row.map_err(|err| err.to_string())?);
   }
   Ok(groups)
+}
+
+#[tauri::command]
+fn get_library_health(app: tauri::AppHandle) -> Result<LibraryHealth, String> {
+  let conn = open_db(&app)?;
+  let total: i64 = conn
+    .query_row("SELECT COUNT(*) FROM items", params![], |row| row.get(0))
+    .map_err(|err| err.to_string())?;
+  let missing_isbn: i64 = conn
+    .query_row(
+      "SELECT COUNT(*) FROM items WHERE id NOT IN (SELECT item_id FROM identifiers WHERE type IN ('ISBN10','ISBN13'))",
+      params![],
+      |row| row.get(0),
+    )
+    .map_err(|err| err.to_string())?;
+  let duplicates: i64 = conn
+    .query_row(
+      "SELECT COUNT(*) FROM (SELECT sha256 FROM files WHERE sha256 IS NOT NULL GROUP BY sha256 HAVING COUNT(*) > 1)",
+      params![],
+      |row| row.get(0),
+    )
+    .map_err(|err| err.to_string())?;
+  let complete: i64 = conn
+    .query_row(
+      "SELECT COUNT(*) FROM items WHERE title IS NOT NULL AND id IN (SELECT item_id FROM item_authors)",
+      params![],
+      |row| row.get(0),
+    )
+    .map_err(|err| err.to_string())?;
+  Ok(LibraryHealth {
+    total,
+    missing_isbn,
+    duplicates,
+    complete,
+  })
 }
 
 #[tauri::command]
@@ -1953,6 +1996,7 @@ pub fn run() {
       get_library_items,
       get_inbox_items,
       get_duplicate_groups,
+      get_library_health,
       get_fix_candidates,
       apply_fix_candidate,
       plan_organize,

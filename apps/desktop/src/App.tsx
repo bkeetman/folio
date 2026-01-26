@@ -42,6 +42,13 @@ type DuplicateGroup = {
   files: string[];
 };
 
+type LibraryHealth = {
+  total: number;
+  missing_isbn: number;
+  duplicates: number;
+  complete: number;
+};
+
 type EnrichmentCandidate = {
   id: string;
   title: string | null;
@@ -195,6 +202,7 @@ function App() {
     "{Author}/{Title} ({Year}) [{ISBN13}].{ext}"
   );
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [libraryHealth, setLibraryHealth] = useState<LibraryHealth | null>(null);
   const isDesktop =
     isTauri() ||
     (typeof window !== "undefined" &&
@@ -252,6 +260,8 @@ function App() {
           "get_duplicate_groups"
         );
         setDuplicates(duplicateGroups);
+        const health = await invoke<LibraryHealth>("get_library_health");
+        setLibraryHealth(health);
       } catch (error) {
         setScanStatus("Could not load library data.");
       } finally {
@@ -272,6 +282,8 @@ function App() {
         "get_duplicate_groups"
       );
       setDuplicates(duplicateGroups);
+      const health = await invoke<LibraryHealth>("get_library_health");
+      setLibraryHealth(health);
     } catch (error) {
       setScanStatus("Could not refresh library data.");
     }
@@ -598,15 +610,21 @@ function App() {
         <Panel title="Library Health">
           <div className="health-row">
             <span>Complete</span>
-            <strong>82%</strong>
+            <strong>
+              {libraryHealth
+                ? `${Math.round(
+                    (libraryHealth.complete / Math.max(1, libraryHealth.total)) * 100
+                  )}%`
+                : "—"}
+            </strong>
           </div>
           <div className="health-row">
             <span>Missing ISBN</span>
-            <strong>12</strong>
+            <strong>{libraryHealth ? libraryHealth.missing_isbn : "—"}</strong>
           </div>
           <div className="health-row">
             <span>Duplicates</span>
-            <strong>4</strong>
+            <strong>{libraryHealth ? libraryHealth.duplicates : "—"}</strong>
           </div>
         </Panel>
 
