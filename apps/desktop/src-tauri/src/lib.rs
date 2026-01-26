@@ -1285,6 +1285,30 @@ fn parse_opf_cover(opf: &str) -> Option<CoverDescriptor> {
       })
       .cloned()
   });
+  let cover_item = cover_item.or_else(|| {
+    manifest
+      .iter()
+      .find(|(id, (href, media_type, _))| {
+        let media_ok = media_type
+          .as_ref()
+          .map(|value| value.starts_with("image/"))
+          .unwrap_or(false);
+        let name = format!("{} {}", id, href).to_lowercase();
+        media_ok && name.contains("cover")
+      })
+      .map(|(_, value)| value.clone())
+  });
+  let cover_item = cover_item.or_else(|| {
+    manifest
+      .values()
+      .find(|(_, media_type, _)| {
+        media_type
+          .as_ref()
+          .map(|value| value.starts_with("image/"))
+          .unwrap_or(false)
+      })
+      .cloned()
+  });
 
   if let Some((href, media_type, _)) = cover_item {
     let extension = media_type
