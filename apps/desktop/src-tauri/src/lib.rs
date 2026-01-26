@@ -669,8 +669,17 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
         apply_metadata(&conn, &item_id, &metadata, now)?;
       }
       if ext == ".epub" {
-        if let Ok(Some((bytes, extension))) = crate::extract_epub_cover(path) {
-          let _ = crate::save_cover(&app, &conn, &item_id, bytes, &extension, now);
+        match crate::extract_epub_cover(path) {
+          Ok(Some((bytes, extension))) => {
+            log::info!("epub cover found: {}", path_str);
+            let _ = crate::save_cover(&app, &conn, &item_id, bytes, &extension, now);
+          }
+          Ok(None) => {
+            log::info!("epub cover missing: {}", path_str);
+          }
+          Err(error) => {
+            log::warn!("epub cover error {}: {}", path_str, error);
+          }
         }
       }
     }
@@ -709,8 +718,17 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
       apply_metadata(&conn, &item_id, &metadata, now)?;
     }
     if ext == ".epub" {
-      if let Ok(Some((bytes, extension))) = crate::extract_epub_cover(path) {
-        let _ = crate::save_cover(&app, &conn, &item_id, bytes, &extension, now);
+      match crate::extract_epub_cover(path) {
+        Ok(Some((bytes, extension))) => {
+          log::info!("epub cover found: {}", path_str);
+          let _ = crate::save_cover(&app, &conn, &item_id, bytes, &extension, now);
+        }
+        Ok(None) => {
+          log::info!("epub cover missing: {}", path_str);
+        }
+        Err(error) => {
+          log::warn!("epub cover error {}: {}", path_str, error);
+        }
       }
     }
   }
@@ -863,6 +881,7 @@ fn extract_epub_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, St
 fn extract_epub_cover(
   path: &std::path::Path,
 ) -> Result<Option<(Vec<u8>, String)>, String> {
+  log::info!("epub cover check: {}", path.display());
   let file = std::fs::File::open(path).map_err(|err| err.to_string())?;
   let mut archive = ZipArchive::new(file).map_err(|err| err.to_string())?;
   let mut container = String::new();
@@ -1273,6 +1292,9 @@ fn parse_opf_cover(opf: &str) -> Option<CoverDescriptor> {
     buf.clear();
   }
 
+  if let Some(ref id) = cover_id {
+    log::info!("epub cover id meta: {}", id);
+  }
   let cover_item = cover_id.and_then(|id| manifest.get(&id).cloned());
   let cover_item = cover_item.or_else(|| {
     manifest
