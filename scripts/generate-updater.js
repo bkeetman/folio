@@ -38,7 +38,24 @@ if (!archiveFiles.length) {
 }
 
 const archiveName = archiveFiles[0];
-const sigPath = join(macDir, `${archiveName}.sig`);
+const findSignature = (dir, fileName) => {
+  const entries = readdirSync(dir);
+  for (const entry of entries) {
+    const fullPath = join(dir, entry);
+    if (statSync(fullPath).isDirectory()) {
+      const nested = findSignature(fullPath, fileName);
+      if (nested) return nested;
+    } else if (entry === `${fileName}.sig`) {
+      return fullPath;
+    }
+  }
+  return null;
+};
+
+const sigPath = findSignature(targetRoot, archiveName);
+if (!sigPath) {
+  throw new Error(`Signature not found for ${archiveName}`);
+}
 const signature = readFileSync(sigPath, "utf8").trim();
 
 const url = `https://github.com/bkeetman/folio/releases/download/${releaseTag}/${archiveName}`;
