@@ -4,6 +4,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::Read;
+use std::io::Write;
 use tauri::{Emitter, Manager};
 use tauri::menu::{Menu, MenuItem, Submenu};
 use uuid::Uuid;
@@ -15,6 +16,9 @@ const MIGRATION_SQL: &str = include_str!(
 );
 const MIGRATION_COVERS_SQL: &str = include_str!(
   "../../../../packages/core/drizzle/0001_wandering_young_avengers.sql"
+);
+const MIGRATION_PENDING_CHANGES_SQL: &str = include_str!(
+  "../../../../packages/core/drizzle/0002_pending_changes.sql"
 );
 
 #[derive(Serialize)]
@@ -40,6 +44,29 @@ struct DuplicateGroup {
   id: String,
   title: String,
   files: Vec<String>,
+  file_ids: Vec<String>,
+  file_paths: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct PendingChange {
+  id: String,
+  file_id: String,
+  change_type: String,
+  from_path: Option<String>,
+  to_path: Option<String>,
+  changes_json: Option<String>,
+  status: String,
+  created_at: i64,
+  applied_at: Option<i64>,
+  error: Option<String>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct EpubChangeSet {
+  title: Option<String>,
+  author: Option<String>,
+  isbn: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -51,6 +78,12 @@ struct LibraryHealth {
   missing_cover: i64,
 }
 
+#[derive(Serialize)]
+struct CoverBlob {
+  mime: String,
+  bytes: Vec<u8>,
+}
+
 #[derive(Serialize, serde::Deserialize, Clone)]
 struct EnrichmentCandidate {
   id: String,
@@ -58,6 +91,7 @@ struct EnrichmentCandidate {
   authors: Vec<String>,
   published_year: Option<i64>,
   identifiers: Vec<String>,
+  cover_url: Option<String>,
   source: String,
   confidence: f64,
 }
@@ -188,12 +222,50 @@ fn get_inbox_items(app: tauri::AppHandle) -> Result<Vec<InboxItem>, String> {
 }
 
 #[tauri::command]
+fn get_cover_blob(app: tauri::AppHandle, item_id: String) -> Result<Option<CoverBlob>, String> {
+  let conn = open_db(&app)?;
+  let path: Option<String> = conn
+    .query_row(
+      "SELECT local_path FROM covers WHERE item_id = ?1 ORDER BY created_at DESC LIMIT 1",
+      params![item_id],
+      |row| row.get(0),
+    )
+    .optional()
+    .map_err(|err| err.to_string())?;
+  let path = match path {
+    Some(value) => value,
+    None => return Ok(None),
+  };
+  let bytes = std::fs::read(&path).map_err(|err| err.to_string())?;
+  if bytes.is_empty() {
+    return Ok(None);
+  }
+  let mime = match std::path::Path::new(&path)
+    .extension()
+    .and_then(|value| value.to_str())
+    .unwrap_or("")
+    .to_lowercase()
+    .as_str()
+  {
+    "png" => "image/png",
+    "webp" => "image/webp",
+    "jpg" | "jpeg" => "image/jpeg",
+    _ => "image/jpeg",
+  }
+  .to_string();
+
+  Ok(Some(CoverBlob { mime, bytes }))
+}
+
+#[tauri::command]
 fn get_duplicate_groups(app: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, String> {
   let conn = open_db(&app)?;
   let mut stmt = conn
     .prepare(
       "SELECT files.sha256, COALESCE(items.title, 'Untitled') as title, \
-       GROUP_CONCAT(files.filename, '|') as filenames \
+       GROUP_CONCAT(files.filename, '|') as filenames, \
+       GROUP_CONCAT(files.id, '|') as file_ids, \
+       GROUP_CONCAT(files.path, '|') as file_paths \
        FROM files \
        LEFT JOIN items ON items.id = files.item_id \
        WHERE files.sha256 IS NOT NULL AND files.status = 'active' \
@@ -205,10 +277,24 @@ fn get_duplicate_groups(app: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, St
   let rows = stmt
     .query_map(params![], |row| {
       let filenames: Option<String> = row.get(2)?;
+      let file_ids: Option<String> = row.get(3)?;
+      let file_paths: Option<String> = row.get(4)?;
       Ok(DuplicateGroup {
         id: row.get(0)?,
         title: row.get(1)?,
         files: filenames
+          .unwrap_or_default()
+          .split('|')
+          .filter(|value| !value.trim().is_empty())
+          .map(|value| value.trim().to_string())
+          .collect(),
+        file_ids: file_ids
+          .unwrap_or_default()
+          .split('|')
+          .filter(|value| !value.trim().is_empty())
+          .map(|value| value.trim().to_string())
+          .collect(),
+        file_paths: file_paths
           .unwrap_or_default()
           .split('|')
           .filter(|value| !value.trim().is_empty())
@@ -223,6 +309,554 @@ fn get_duplicate_groups(app: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, St
     groups.push(row.map_err(|err| err.to_string())?);
   }
   Ok(groups)
+}
+
+#[tauri::command]
+fn get_pending_changes(app: tauri::AppHandle, status: Option<String>) -> Result<Vec<PendingChange>, String> {
+  let conn = open_db(&app)?;
+  let status = status.unwrap_or_else(|| "pending".to_string());
+  let mut stmt = conn
+    .prepare(
+      "SELECT id, file_id, type, from_path, to_path, changes_json, status, created_at, applied_at, error \
+       FROM pending_changes \
+       WHERE status = ?1 \
+       ORDER BY created_at DESC",
+    )
+    .map_err(|err| err.to_string())?;
+  let rows = stmt
+    .query_map(params![status], |row| {
+      Ok(PendingChange {
+        id: row.get(0)?,
+        file_id: row.get(1)?,
+        change_type: row.get(2)?,
+        from_path: row.get(3)?,
+        to_path: row.get(4)?,
+        changes_json: row.get(5)?,
+        status: row.get(6)?,
+        created_at: row.get(7)?,
+        applied_at: row.get(8)?,
+        error: row.get(9)?,
+      })
+    })
+    .map_err(|err| err.to_string())?;
+  let mut changes = Vec::new();
+  for row in rows {
+    changes.push(row.map_err(|err| err.to_string())?);
+  }
+  Ok(changes)
+}
+
+#[tauri::command]
+fn apply_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+  let mut changes: Vec<PendingChange> = Vec::new();
+
+  if ids.is_empty() {
+    let mut stmt = conn
+      .prepare(
+        "SELECT id, file_id, type, from_path, to_path, changes_json, status, created_at, applied_at, error \
+         FROM pending_changes WHERE status = 'pending' ORDER BY created_at ASC",
+      )
+      .map_err(|err| err.to_string())?;
+    let rows = stmt
+      .query_map(params![], |row| {
+        Ok(PendingChange {
+          id: row.get(0)?,
+          file_id: row.get(1)?,
+          change_type: row.get(2)?,
+          from_path: row.get(3)?,
+          to_path: row.get(4)?,
+          changes_json: row.get(5)?,
+          status: row.get(6)?,
+          created_at: row.get(7)?,
+          applied_at: row.get(8)?,
+          error: row.get(9)?,
+        })
+      })
+      .map_err(|err| err.to_string())?;
+    for row in rows {
+      changes.push(row.map_err(|err| err.to_string())?);
+    }
+  } else {
+    let mut stmt = conn
+      .prepare(
+        "SELECT id, file_id, type, from_path, to_path, changes_json, status, created_at, applied_at, error \
+         FROM pending_changes WHERE status = 'pending' AND id = ?1",
+      )
+      .map_err(|err| err.to_string())?;
+    for id in ids {
+      let row = stmt
+        .query_row(params![id], |row| {
+          Ok(PendingChange {
+            id: row.get(0)?,
+            file_id: row.get(1)?,
+            change_type: row.get(2)?,
+            from_path: row.get(3)?,
+            to_path: row.get(4)?,
+            changes_json: row.get(5)?,
+            status: row.get(6)?,
+            created_at: row.get(7)?,
+            applied_at: row.get(8)?,
+            error: row.get(9)?,
+          })
+        })
+        .optional()
+        .map_err(|err| err.to_string())?;
+      if let Some(change) = row {
+        changes.push(change);
+      }
+    }
+  }
+
+  for change in changes {
+    let result = match change.change_type.as_str() {
+      "rename" => apply_rename_change(&conn, &change, now),
+      "epub_meta" => apply_epub_change(&change, now),
+      "delete" => apply_delete_change(&conn, &change, now),
+      _ => Err("Unsupported change type".to_string()),
+    };
+
+    match result {
+      Ok(()) => {
+        conn.execute(
+          "UPDATE pending_changes SET status = 'applied', applied_at = ?1, error = NULL WHERE id = ?2",
+          params![now, change.id],
+        )
+        .map_err(|err| err.to_string())?;
+        log::info!(
+          "applied change {} ({}) for file {}",
+          change.id,
+          change.change_type,
+          change.file_id
+        );
+      }
+      Err(message) => {
+        conn.execute(
+          "UPDATE pending_changes SET status = 'error', error = ?1 WHERE id = ?2",
+          params![message, change.id],
+        )
+        .map_err(|err| err.to_string())?;
+        log::error!(
+          "failed change {} ({}) for file {}: {}",
+          change.id,
+          change.change_type,
+          change.file_id,
+          message
+        );
+      }
+    }
+  }
+
+  Ok(())
+}
+
+#[tauri::command]
+fn resolve_duplicate_group(
+  app: tauri::AppHandle,
+  group_id: String,
+  keep_file_id: String,
+) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+  let valid_keep: Option<String> = conn
+    .query_row(
+      "SELECT id FROM files WHERE sha256 = ?1 AND status = 'active' AND id = ?2 LIMIT 1",
+      params![group_id, keep_file_id],
+      |row| row.get(0),
+    )
+    .optional()
+    .map_err(|err| err.to_string())?;
+  let keep_id = match valid_keep {
+    Some(value) => value,
+    None => return Err("Selected file is not part of this duplicate group.".to_string()),
+  };
+
+  let mut stmt = conn
+    .prepare(
+      "SELECT id, path FROM files WHERE sha256 = ?1 AND status = 'active' AND id != ?2",
+    )
+    .map_err(|err| err.to_string())?;
+  let rows = stmt
+    .query_map(params![group_id, keep_id], |row| {
+      Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })
+    .map_err(|err| err.to_string())?;
+  let mut queued = 0i64;
+  for row in rows {
+    let (file_id, path) = row.map_err(|err| err.to_string())?;
+    let change_id = Uuid::new_v4().to_string();
+    conn.execute(
+      "INSERT INTO pending_changes (id, file_id, type, from_path, to_path, changes_json, status, created_at) \
+       VALUES (?1, ?2, 'delete', ?3, NULL, NULL, 'pending', ?4)",
+      params![change_id, file_id, path, now],
+    )
+    .map_err(|err| err.to_string())?;
+    queued += 1;
+  }
+  if queued > 0 {
+    log::info!("queued delete changes: {} for duplicate group {}", queued, group_id);
+  }
+
+  conn.execute(
+    "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE sha256 = ?2 AND id != ?3",
+    params![now, group_id, keep_id],
+  )
+  .map_err(|err| err.to_string())?;
+
+  conn.execute(
+    "UPDATE issues SET resolved_at = ?1 WHERE type = 'duplicate' AND file_id IN (SELECT id FROM files WHERE sha256 = ?2 AND id != ?3)",
+    params![now, group_id, keep_id],
+  )
+  .map_err(|err| err.to_string())?;
+
+  Ok(())
+}
+
+fn apply_rename_change(
+  conn: &Connection,
+  change: &PendingChange,
+  now: i64,
+) -> Result<(), String> {
+  let from_path = if let Some(value) = change.from_path.as_ref() {
+    value.clone()
+  } else {
+    conn
+      .query_row(
+        "SELECT path FROM files WHERE id = ?1",
+        params![change.file_id],
+        |row| row.get(0),
+      )
+      .map_err(|err| err.to_string())?
+  };
+  let to_path = change
+    .to_path
+    .as_ref()
+    .ok_or_else(|| "Missing target path".to_string())?
+    .clone();
+
+  let target_dir = std::path::Path::new(&to_path)
+    .parent()
+    .ok_or_else(|| "Invalid target path".to_string())?;
+  std::fs::create_dir_all(target_dir).map_err(|err| err.to_string())?;
+  std::fs::rename(&from_path, &to_path).map_err(|err| err.to_string())?;
+
+  let filename = std::path::Path::new(&to_path)
+    .file_name()
+    .and_then(|value| value.to_str())
+    .unwrap_or("file")
+    .to_string();
+  let extension = std::path::Path::new(&to_path)
+    .extension()
+    .and_then(|value| value.to_str())
+    .unwrap_or("")
+    .to_string();
+  conn.execute(
+    "UPDATE files SET path = ?1, filename = ?2, extension = ?3, updated_at = ?4 WHERE id = ?5",
+    params![to_path, filename, extension, now, change.file_id],
+  )
+  .map_err(|err| err.to_string())?;
+  Ok(())
+}
+
+fn apply_epub_change(change: &PendingChange, _now: i64) -> Result<(), String> {
+  let path = change
+    .from_path
+    .as_ref()
+    .ok_or_else(|| "Missing EPUB path".to_string())?;
+  let changes_json = change
+    .changes_json
+    .as_ref()
+    .ok_or_else(|| "Missing changes".to_string())?;
+  let changes: EpubChangeSet = serde_json::from_str(changes_json)
+    .map_err(|err| err.to_string())?;
+  update_epub_metadata(path, &changes)?;
+  Ok(())
+}
+
+fn apply_delete_change(conn: &Connection, change: &PendingChange, now: i64) -> Result<(), String> {
+  let path = change
+    .from_path
+    .as_ref()
+    .ok_or_else(|| "Missing file path".to_string())?;
+  let _ = std::fs::remove_file(path);
+  conn.execute(
+    "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE id = ?2",
+    params![now, change.file_id],
+  )
+  .map_err(|err| err.to_string())?;
+  conn.execute(
+    "UPDATE issues SET resolved_at = ?1 WHERE file_id = ?2 AND type = 'duplicate'",
+    params![now, change.file_id],
+  )
+  .map_err(|err| err.to_string())?;
+  Ok(())
+}
+
+fn update_epub_metadata(path: &str, changes: &EpubChangeSet) -> Result<(), String> {
+  let file = std::fs::File::open(path).map_err(|err| err.to_string())?;
+  let mut archive = ZipArchive::new(file).map_err(|err| err.to_string())?;
+  let mut container_xml = String::new();
+  {
+    let mut container = archive
+      .by_name("META-INF/container.xml")
+      .map_err(|err| err.to_string())?;
+    container
+      .read_to_string(&mut container_xml)
+      .map_err(|err| err.to_string())?;
+  }
+  let rootfile = extract_rootfile(&container_xml)?;
+  let mut opf_file = archive.by_name(&rootfile).map_err(|err| err.to_string())?;
+  let mut opf = String::new();
+  opf_file
+    .read_to_string(&mut opf)
+    .map_err(|err| err.to_string())?;
+
+  let updated_opf = rewrite_opf_metadata(&opf, changes)?;
+  rewrite_epub_with_opf(path, &rootfile, updated_opf)?;
+  Ok(())
+}
+
+fn extract_rootfile(container_xml: &str) -> Result<String, String> {
+  let mut reader = quick_xml::Reader::from_str(container_xml);
+  reader.trim_text(true);
+  let mut buf = Vec::new();
+  loop {
+    match reader.read_event_into(&mut buf) {
+      Ok(quick_xml::events::Event::Empty(ref e))
+      | Ok(quick_xml::events::Event::Start(ref e)) => {
+        let name = e.name().as_ref().to_vec();
+        if name.ends_with(b"rootfile") {
+          for attr in e.attributes().flatten() {
+            if attr.key.as_ref() == b"full-path" {
+              return String::from_utf8(attr.value.to_vec()).map_err(|err| err.to_string());
+            }
+          }
+        }
+      }
+      Ok(quick_xml::events::Event::Eof) => break,
+      Err(err) => return Err(err.to_string()),
+      _ => {}
+    }
+    buf.clear();
+  }
+  Err("Missing rootfile".to_string())
+}
+
+fn rewrite_opf_metadata(opf: &str, changes: &EpubChangeSet) -> Result<String, String> {
+  let mut reader = quick_xml::Reader::from_str(opf);
+  reader.trim_text(false);
+  let mut writer = quick_xml::Writer::new(std::io::Cursor::new(Vec::new()));
+  let mut buf = Vec::new();
+  let mut in_metadata = false;
+  let mut prefix = "dc".to_string();
+  let mut replaced_title = false;
+  let mut replaced_creator = false;
+  let mut replaced_identifier = false;
+
+  loop {
+    match reader.read_event_into(&mut buf) {
+      Ok(quick_xml::events::Event::Start(ref e)) => {
+        let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+        if name.ends_with("metadata") {
+          in_metadata = true;
+        } else if in_metadata && name.contains(':') {
+          let parts: Vec<&str> = name.split(':').collect();
+          if parts.len() == 2 {
+            prefix = parts[0].to_string();
+          }
+        }
+
+        let local = name.split(':').last().unwrap_or(""
+        );
+        if in_metadata && local == "title" && changes.title.is_some() && !replaced_title {
+          writer.write_event(quick_xml::events::Event::Start(e.clone()))
+            .map_err(|err| err.to_string())?;
+          writer.write_event(quick_xml::events::Event::Text(
+            quick_xml::events::BytesText::new(changes.title.as_ref().unwrap()),
+          ))
+          .map_err(|err| err.to_string())?;
+          consume_element(&mut reader, &name)?;
+          writer.write_event(quick_xml::events::Event::End(
+            quick_xml::events::BytesEnd::new(name.as_str()),
+          ))
+          .map_err(|err| err.to_string())?;
+          replaced_title = true;
+        } else if in_metadata && local == "creator" && changes.author.is_some() && !replaced_creator {
+          writer.write_event(quick_xml::events::Event::Start(e.clone()))
+            .map_err(|err| err.to_string())?;
+          writer.write_event(quick_xml::events::Event::Text(
+            quick_xml::events::BytesText::new(changes.author.as_ref().unwrap()),
+          ))
+          .map_err(|err| err.to_string())?;
+          consume_element(&mut reader, &name)?;
+          writer.write_event(quick_xml::events::Event::End(
+            quick_xml::events::BytesEnd::new(name.as_str()),
+          ))
+          .map_err(|err| err.to_string())?;
+          replaced_creator = true;
+        } else if in_metadata && local == "identifier" && changes.isbn.is_some() && !replaced_identifier {
+          writer.write_event(quick_xml::events::Event::Start(e.clone()))
+            .map_err(|err| err.to_string())?;
+          writer.write_event(quick_xml::events::Event::Text(
+            quick_xml::events::BytesText::new(changes.isbn.as_ref().unwrap()),
+          ))
+          .map_err(|err| err.to_string())?;
+          consume_element(&mut reader, &name)?;
+          writer.write_event(quick_xml::events::Event::End(
+            quick_xml::events::BytesEnd::new(name.as_str()),
+          ))
+          .map_err(|err| err.to_string())?;
+          replaced_identifier = true;
+        } else {
+          writer.write_event(quick_xml::events::Event::Start(e.clone()))
+            .map_err(|err| err.to_string())?;
+        }
+      }
+      Ok(quick_xml::events::Event::End(ref e)) => {
+        let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+        if name.ends_with("metadata") {
+          if in_metadata {
+            if changes.title.is_some() && !replaced_title {
+              let tag = format!("{}:title", prefix);
+              writer.write_event(quick_xml::events::Event::Start(
+                quick_xml::events::BytesStart::new(tag.as_str()),
+              ))
+              .map_err(|err| err.to_string())?;
+              writer.write_event(quick_xml::events::Event::Text(
+                quick_xml::events::BytesText::new(changes.title.as_ref().unwrap()),
+              ))
+              .map_err(|err| err.to_string())?;
+              writer.write_event(quick_xml::events::Event::End(
+                quick_xml::events::BytesEnd::new(tag.as_str()),
+              ))
+              .map_err(|err| err.to_string())?;
+            }
+            if changes.author.is_some() && !replaced_creator {
+              let tag = format!("{}:creator", prefix);
+              writer.write_event(quick_xml::events::Event::Start(
+                quick_xml::events::BytesStart::new(tag.as_str()),
+              ))
+              .map_err(|err| err.to_string())?;
+              writer.write_event(quick_xml::events::Event::Text(
+                quick_xml::events::BytesText::new(changes.author.as_ref().unwrap()),
+              ))
+              .map_err(|err| err.to_string())?;
+              writer.write_event(quick_xml::events::Event::End(
+                quick_xml::events::BytesEnd::new(tag.as_str()),
+              ))
+              .map_err(|err| err.to_string())?;
+            }
+            if changes.isbn.is_some() && !replaced_identifier {
+              let tag = format!("{}:identifier", prefix);
+              writer.write_event(quick_xml::events::Event::Start(
+                quick_xml::events::BytesStart::new(tag.as_str()),
+              ))
+              .map_err(|err| err.to_string())?;
+              writer.write_event(quick_xml::events::Event::Text(
+                quick_xml::events::BytesText::new(changes.isbn.as_ref().unwrap()),
+              ))
+              .map_err(|err| err.to_string())?;
+              writer.write_event(quick_xml::events::Event::End(
+                quick_xml::events::BytesEnd::new(tag.as_str()),
+              ))
+              .map_err(|err| err.to_string())?;
+            }
+          }
+          in_metadata = false;
+        }
+        writer.write_event(quick_xml::events::Event::End(e.clone()))
+          .map_err(|err| err.to_string())?;
+      }
+      Ok(quick_xml::events::Event::Empty(ref e)) => {
+        writer.write_event(quick_xml::events::Event::Empty(e.clone()))
+          .map_err(|err| err.to_string())?;
+      }
+      Ok(quick_xml::events::Event::Text(e)) => {
+        writer.write_event(quick_xml::events::Event::Text(e.clone()))
+          .map_err(|err| err.to_string())?;
+      }
+      Ok(quick_xml::events::Event::CData(e)) => {
+        writer.write_event(quick_xml::events::Event::CData(e.clone()))
+          .map_err(|err| err.to_string())?;
+      }
+      Ok(quick_xml::events::Event::Comment(e)) => {
+        writer.write_event(quick_xml::events::Event::Comment(e.clone()))
+          .map_err(|err| err.to_string())?;
+      }
+      Ok(quick_xml::events::Event::Decl(e)) => {
+        writer.write_event(quick_xml::events::Event::Decl(e.clone()))
+          .map_err(|err| err.to_string())?;
+      }
+      Ok(quick_xml::events::Event::PI(e)) => {
+        writer.write_event(quick_xml::events::Event::PI(e.clone()))
+          .map_err(|err| err.to_string())?;
+      }
+      Ok(quick_xml::events::Event::DocType(e)) => {
+        writer.write_event(quick_xml::events::Event::DocType(e.clone()))
+          .map_err(|err| err.to_string())?;
+      }
+      Ok(quick_xml::events::Event::Eof) => break,
+      Err(err) => return Err(err.to_string()),
+    }
+    buf.clear();
+  }
+
+  let result = writer.into_inner().into_inner();
+  String::from_utf8(result).map_err(|err| err.to_string())
+}
+
+fn consume_element(reader: &mut quick_xml::Reader<&[u8]>, name: &str) -> Result<(), String> {
+  let mut buf = Vec::new();
+  let target = name.as_bytes();
+  loop {
+    match reader.read_event_into(&mut buf) {
+      Ok(quick_xml::events::Event::End(e)) => {
+        if e.name().as_ref() == target {
+          break;
+        }
+      }
+      Ok(quick_xml::events::Event::Eof) => break,
+      Err(err) => return Err(err.to_string()),
+      _ => {}
+    }
+    buf.clear();
+  }
+  Ok(())
+}
+
+fn rewrite_epub_with_opf(path: &str, opf_path: &str, updated_opf: String) -> Result<(), String> {
+  let original = std::fs::File::open(path).map_err(|err| err.to_string())?;
+  let mut archive = ZipArchive::new(original).map_err(|err| err.to_string())?;
+  let temp_path = format!("{}.tmp", path);
+  let temp_file = std::fs::File::create(&temp_path).map_err(|err| err.to_string())?;
+  let mut writer = zip::ZipWriter::new(temp_file);
+  let options = zip::write::FileOptions::<()>::default();
+
+  for i in 0..archive.len() {
+    let mut file = archive.by_index(i).map_err(|err| err.to_string())?;
+    let name = file.name().to_string();
+    let mut data = Vec::new();
+    file.read_to_end(&mut data).map_err(|err| err.to_string())?;
+
+    if name == opf_path {
+      writer
+        .start_file(name, options)
+        .map_err(|err| err.to_string())?;
+      writer
+        .write_all(updated_opf.as_bytes())
+        .map_err(|err| err.to_string())?;
+    } else {
+      writer
+        .start_file(name, options)
+        .map_err(|err| err.to_string())?;
+      writer.write_all(&data).map_err(|err| err.to_string())?;
+    }
+  }
+
+  writer.finish().map_err(|err| err.to_string())?;
+  std::fs::rename(&temp_path, path).map_err(|err| err.to_string())?;
+  Ok(())
 }
 
 #[tauri::command]
@@ -312,6 +946,39 @@ fn get_fix_candidates(app: tauri::AppHandle, item_id: String) -> Result<Vec<Enri
 }
 
 #[tauri::command]
+fn search_candidates(
+  app: tauri::AppHandle,
+  query: String,
+  item_id: Option<String>,
+) -> Result<Vec<EnrichmentCandidate>, String> {
+  let trimmed = query.trim();
+  if trimmed.is_empty() {
+    if let Some(item_id) = item_id {
+      return get_fix_candidates(app, item_id);
+    }
+    return Ok(vec![]);
+  }
+
+  if let Some(isbn) = normalize_isbn(trimmed) {
+    let mut candidates: Vec<EnrichmentCandidate> = vec![];
+    candidates.extend(fetch_openlibrary_isbn(&isbn));
+    candidates.extend(fetch_google_isbn(&isbn));
+    candidates
+      .sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.truncate(5);
+    return Ok(candidates);
+  }
+
+  let (title, author) = parse_search_query(trimmed);
+  let mut candidates: Vec<EnrichmentCandidate> = vec![];
+  candidates.extend(fetch_openlibrary_search(&title, author.as_deref()));
+  candidates.extend(fetch_google_search(&title, author.as_deref()));
+  candidates = score_candidates(candidates, &title, author.as_deref());
+  candidates.truncate(5);
+  Ok(candidates)
+}
+
+#[tauri::command]
 fn apply_fix_candidate(
   app: tauri::AppHandle,
   item_id: String,
@@ -319,12 +986,18 @@ fn apply_fix_candidate(
 ) -> Result<(), String> {
   let conn = open_db(&app)?;
   let now = chrono::Utc::now().timestamp_millis();
-  apply_enrichment_candidate(&conn, &item_id, &candidate, now)?;
+  apply_enrichment_candidate(&app, &conn, &item_id, &candidate, now)?;
+  let queued = queue_epub_changes(&conn, &item_id, &candidate, now)?;
+  log::info!("queued epub changes: {} for item {}", queued, item_id);
   conn.execute(
     "UPDATE issues SET resolved_at = ?1 WHERE item_id = ?2 AND type = 'missing_metadata' AND resolved_at IS NULL",
     params![now, item_id],
   )
   .map_err(|err| err.to_string())?;
+  if let Some(url) = candidate.cover_url.as_deref() {
+    let _ = fetch_cover_from_url(&app, &conn, &item_id, url, now);
+  }
+  fetch_cover_fallback(&app, &conn, &item_id, now)?;
   Ok(())
 }
 
@@ -406,6 +1079,30 @@ fn plan_organize(
     template,
     entries,
   })
+}
+
+#[tauri::command]
+fn generate_pending_changes_from_organize(
+  app: tauri::AppHandle,
+  plan: OrganizePlan,
+) -> Result<i64, String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+  let mut created = 0i64;
+  for entry in plan.entries {
+    if entry.action == "skip" {
+      continue;
+    }
+    let id = Uuid::new_v4().to_string();
+    conn.execute(
+      "INSERT INTO pending_changes (id, file_id, type, from_path, to_path, changes_json, status, created_at) \
+       VALUES (?1, ?2, 'rename', ?3, ?4, NULL, 'pending', ?5)",
+      params![id, entry.file_id, entry.source_path, entry.target_path, now],
+    )
+    .map_err(|err| err.to_string())?;
+    created += 1;
+  }
+  Ok(created)
 }
 
 #[tauri::command]
@@ -857,6 +1554,7 @@ fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
 
   apply_migration(&conn, "0000_nebulous_mysterio", MIGRATION_SQL)?;
   apply_migration(&conn, "0001_wandering_young_avengers", MIGRATION_COVERS_SQL)?;
+  apply_migration(&conn, "0002_pending_changes", MIGRATION_PENDING_CHANGES_SQL)?;
   conn.execute_batch("PRAGMA foreign_keys = ON;")
     .map_err(|err| err.to_string())?;
   Ok(conn)
@@ -1484,6 +2182,31 @@ fn has_cover(conn: &Connection, item_id: &str) -> Result<bool, String> {
   Ok(existing.is_some())
 }
 
+fn fetch_cover_from_url(
+  app: &tauri::AppHandle,
+  conn: &Connection,
+  item_id: &str,
+  url: &str,
+  now: i64,
+) -> Result<(), String> {
+  let response = reqwest::blocking::get(url).map_err(|err| err.to_string())?;
+  if !response.status().is_success() {
+    return Ok(());
+  }
+  let content_type = response
+    .headers()
+    .get(reqwest::header::CONTENT_TYPE)
+    .and_then(|value| value.to_str().ok())
+    .unwrap_or("image/jpeg");
+  let extension = map_cover_extension(content_type).unwrap_or("jpg");
+  let bytes = response.bytes().map_err(|err| err.to_string())?.to_vec();
+  if bytes.is_empty() {
+    return Ok(());
+  }
+  save_cover(app, conn, item_id, bytes, extension, now, "candidate", Some(url))?;
+  Ok(())
+}
+
 fn fetch_cover_fallback(
   app: &tauri::AppHandle,
   conn: &Connection,
@@ -1567,6 +2290,7 @@ fn fetch_openlibrary_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
     authors,
     published_year,
     identifiers: vec![isbn.to_string()],
+    cover_url: Some(format!("https://covers.openlibrary.org/b/isbn/{}-M.jpg", isbn)),
     source: "Open Library".to_string(),
     confidence: 0.9,
   }]
@@ -1610,6 +2334,11 @@ fn fetch_google_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
             .collect()
         })
         .unwrap_or_default();
+      let cover_url = info
+        .get("imageLinks")
+        .and_then(|value| value.get("thumbnail").or_else(|| value.get("smallThumbnail")))
+        .and_then(|value| value.as_str())
+        .map(|value| value.replace("http://", "https://"));
 
       EnrichmentCandidate {
         id: Uuid::new_v4().to_string(),
@@ -1617,6 +2346,7 @@ fn fetch_google_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
         authors,
         published_year,
         identifiers,
+        cover_url,
         source: "Google Books".to_string(),
         confidence: if index == 0 { 0.85 } else { 0.7 },
       }
@@ -1656,6 +2386,16 @@ fn fetch_openlibrary_search(title: &str, author: Option<&str>) -> Vec<Enrichment
         .and_then(|value| value.as_array())
         .map(|values| values.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
         .unwrap_or_default();
+      let cover_url = doc
+        .get("cover_i")
+        .and_then(|value| value.as_i64())
+        .map(|value| format!("https://covers.openlibrary.org/b/id/{}-M.jpg", value))
+        .or_else(|| {
+          doc
+            .get("cover_edition_key")
+            .and_then(|value| value.as_str())
+            .map(|value| format!("https://covers.openlibrary.org/b/olid/{}-M.jpg", value))
+        });
 
       EnrichmentCandidate {
         id: Uuid::new_v4().to_string(),
@@ -1663,11 +2403,43 @@ fn fetch_openlibrary_search(title: &str, author: Option<&str>) -> Vec<Enrichment
         authors,
         published_year,
         identifiers,
+        cover_url,
         source: "Open Library".to_string(),
         confidence: 0.7 - index as f64 * 0.05,
       }
     })
     .collect()
+}
+
+fn parse_search_query(query: &str) -> (String, Option<String>) {
+  let lowered = query.to_lowercase();
+  if let Some(result) = split_search_query(query, &lowered, " by ") {
+    return result;
+  }
+  if let Some(result) = split_search_query(query, &lowered, " - ") {
+    return result;
+  }
+  (query.to_string(), None)
+}
+
+fn split_search_query(
+  original: &str,
+  lowered: &str,
+  needle: &str,
+) -> Option<(String, Option<String>)> {
+  let index = lowered.find(needle)?;
+  let (title_part, author_part) = original.split_at(index);
+  let author = author_part.get(needle.len()..).unwrap_or("").trim();
+  let title = title_part.trim();
+  if title.is_empty() {
+    return None;
+  }
+  let author = if author.is_empty() {
+    None
+  } else {
+    Some(author.to_string())
+  };
+  Some((title.to_string(), author))
 }
 
 fn fetch_google_search(title: &str, author: Option<&str>) -> Vec<EnrichmentCandidate> {
@@ -1715,6 +2487,11 @@ fn fetch_google_search(title: &str, author: Option<&str>) -> Vec<EnrichmentCandi
             .collect()
         })
         .unwrap_or_default();
+      let cover_url = info
+        .get("imageLinks")
+        .and_then(|value| value.get("thumbnail").or_else(|| value.get("smallThumbnail")))
+        .and_then(|value| value.as_str())
+        .map(|value| value.replace("http://", "https://"));
 
       EnrichmentCandidate {
         id: Uuid::new_v4().to_string(),
@@ -1722,6 +2499,7 @@ fn fetch_google_search(title: &str, author: Option<&str>) -> Vec<EnrichmentCandi
         authors,
         published_year,
         identifiers,
+        cover_url,
         source: "Google Books".to_string(),
         confidence: 0.75 - index as f64 * 0.05,
       }
@@ -1774,6 +2552,7 @@ fn tokenize(value: &str) -> std::collections::HashSet<String> {
 }
 
 fn apply_enrichment_candidate(
+  app: &tauri::AppHandle,
   conn: &Connection,
   item_id: &str,
   candidate: &EnrichmentCandidate,
@@ -1787,8 +2566,8 @@ fn apply_enrichment_candidate(
     )
     .map_err(|err| err.to_string())?;
 
-  let title = existing.0.or_else(|| candidate.title.clone());
-  let published_year = existing.1.or(candidate.published_year);
+  let title = candidate.title.clone().or(existing.0);
+  let published_year = candidate.published_year.or(existing.1);
   conn.execute(
     "UPDATE items SET title = ?1, published_year = ?2, updated_at = ?3 WHERE id = ?4",
     params![title, published_year, now, item_id],
@@ -1802,26 +2581,32 @@ fn apply_enrichment_candidate(
     insert_field_source_with_source(conn, item_id, "published_year", &candidate.source, candidate.confidence, now)?;
   }
 
-  for author in &candidate.authors {
-    let author_id: Option<String> = conn
-      .query_row(
-        "SELECT id FROM authors WHERE name = ?1",
-        params![author],
-        |row| row.get(0),
-      )
-      .optional()
+  if !candidate.authors.is_empty() {
+    conn
+      .execute("DELETE FROM item_authors WHERE item_id = ?1", params![item_id])
       .map_err(|err| err.to_string())?;
-    let author_id = author_id.unwrap_or_else(|| Uuid::new_v4().to_string());
-    conn.execute(
-      "INSERT OR IGNORE INTO authors (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
-      params![author_id, author, now],
-    )
-    .map_err(|err| err.to_string())?;
-    conn.execute(
-      "INSERT OR IGNORE INTO item_authors (item_id, author_id, role, ord) VALUES (?1, ?2, 'author', 0)",
-      params![item_id, author_id],
-    )
-    .map_err(|err| err.to_string())?;
+
+    for author in &candidate.authors {
+      let author_id: Option<String> = conn
+        .query_row(
+          "SELECT id FROM authors WHERE name = ?1",
+          params![author],
+          |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+      let author_id = author_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+      conn.execute(
+        "INSERT OR IGNORE INTO authors (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
+        params![author_id, author, now],
+      )
+      .map_err(|err| err.to_string())?;
+      conn.execute(
+        "INSERT OR IGNORE INTO item_authors (item_id, author_id, role, ord) VALUES (?1, ?2, 'author', 0)",
+        params![item_id, author_id],
+      )
+      .map_err(|err| err.to_string())?;
+    }
   }
 
   for raw in &candidate.identifiers {
@@ -1842,7 +2627,60 @@ fn apply_enrichment_candidate(
     .map_err(|err| err.to_string())?;
   }
 
+  if let Some(url) = candidate.cover_url.as_deref() {
+    let _ = fetch_cover_from_url(app, conn, item_id, url, now);
+  }
+
   Ok(())
+}
+
+fn queue_epub_changes(
+  conn: &Connection,
+  item_id: &str,
+  candidate: &EnrichmentCandidate,
+  now: i64,
+) -> Result<i64, String> {
+  let mut stmt = conn
+    .prepare(
+      "SELECT id, path FROM files WHERE item_id = ?1 AND status = 'active' AND LOWER(extension) IN ('epub', '.epub')",
+    )
+    .map_err(|err| err.to_string())?;
+  let rows = stmt
+    .query_map(params![item_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+    .map_err(|err| err.to_string())?;
+
+  let isbn = candidate
+    .identifiers
+    .iter()
+    .filter_map(|raw| normalize_isbn(raw).or_else(|| Some(raw.to_string())))
+    .find(|value| value.len() == 10 || value.len() == 13);
+
+  let changes = EpubChangeSet {
+    title: candidate.title.clone(),
+    author: candidate.authors.first().cloned(),
+    isbn,
+  };
+  let changes_json = serde_json::to_string(&changes).map_err(|err| err.to_string())?;
+
+  let mut created = 0i64;
+  for row in rows {
+    let (file_id, path) = row.map_err(|err| err.to_string())?;
+    conn.execute(
+      "DELETE FROM pending_changes WHERE file_id = ?1 AND type = 'epub_meta' AND status = 'pending'",
+      params![file_id],
+    )
+    .map_err(|err| err.to_string())?;
+    let change_id = Uuid::new_v4().to_string();
+    conn.execute(
+      "INSERT INTO pending_changes (id, file_id, type, from_path, to_path, changes_json, status, created_at) \
+       VALUES (?1, ?2, 'epub_meta', ?3, NULL, ?4, 'pending', ?5)",
+      params![change_id, file_id, path, changes_json, now],
+    )
+    .map_err(|err| err.to_string())?;
+    created += 1;
+  }
+
+  Ok(created)
 }
 
 fn insert_field_source_with_source(
@@ -2010,9 +2848,15 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       get_library_items,
       get_inbox_items,
+      get_cover_blob,
       get_duplicate_groups,
+      get_pending_changes,
+      apply_pending_changes,
+      generate_pending_changes_from_organize,
+      resolve_duplicate_group,
       get_library_health,
       get_fix_candidates,
+      search_candidates,
       apply_fix_candidate,
       plan_organize,
       apply_organize,

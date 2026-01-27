@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
-import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Button, Panel, SidebarItem } from "./components/ui";
+import { MatchModal } from "./components/MatchModal";
 
-type View = "library" | "inbox" | "duplicates" | "fix";
+type View = "library" | "inbox" | "duplicates" | "fix" | "changes";
 
 type LibraryItem = {
   id: string;
@@ -40,6 +41,21 @@ type DuplicateGroup = {
   id: string;
   title: string;
   files: string[];
+  file_ids: string[];
+  file_paths: string[];
+};
+
+type PendingChange = {
+  id: string;
+  file_id: string;
+  change_type: string;
+  from_path?: string | null;
+  to_path?: string | null;
+  changes_json?: string | null;
+  status: string;
+  created_at: number;
+  applied_at?: number | null;
+  error?: string | null;
 };
 
 type LibraryHealth = {
@@ -56,6 +72,7 @@ type EnrichmentCandidate = {
   authors: string[];
   published_year: number | null;
   identifiers: string[];
+  cover_url?: string | null;
   source: string;
   confidence: number;
 };
@@ -80,6 +97,7 @@ const sampleBooks = [
     format: "EPUB",
     year: 2010,
     status: "Complete",
+    cover: null,
   },
   {
     id: "2",
@@ -88,6 +106,7 @@ const sampleBooks = [
     format: "PDF",
     year: 1962,
     status: "Complete",
+    cover: null,
   },
   {
     id: "3",
@@ -96,6 +115,7 @@ const sampleBooks = [
     format: "EPUB",
     year: 1969,
     status: "Needs ISBN",
+    cover: null,
   },
   {
     id: "4",
@@ -104,6 +124,7 @@ const sampleBooks = [
     format: "PDF",
     year: 2013,
     status: "Needs Cover",
+    cover: null,
   },
   {
     id: "5",
@@ -112,6 +133,7 @@ const sampleBooks = [
     format: "EPUB",
     year: 1906,
     status: "Complete",
+    cover: null,
   },
 ];
 
@@ -126,11 +148,36 @@ const duplicateGroups = [
     id: "d1",
     title: "The Shallows",
     files: ["The Shallows.epub", "The Shallows (1).epub"],
+    file_ids: ["d1-file-1", "d1-file-2"],
+    file_paths: ["/samples/The Shallows.epub", "/samples/The Shallows (1).epub"],
   },
   {
     id: "d2",
     title: "Silent Spring",
     files: ["Silent Spring.pdf", "Silent Spring - copy.pdf"],
+    file_ids: ["d2-file-1", "d2-file-2"],
+    file_paths: ["/samples/Silent Spring.pdf", "/samples/Silent Spring - copy.pdf"],
+  },
+];
+
+const samplePendingChanges: PendingChange[] = [
+  {
+    id: "pc1",
+    file_id: "f1",
+    change_type: "rename",
+    from_path: "/samples/Old Name.epub",
+    to_path: "/samples/New Name.epub",
+    status: "pending",
+    created_at: Date.now(),
+  },
+  {
+    id: "pc2",
+    file_id: "f2",
+    change_type: "epub_meta",
+    from_path: "/samples/Book.epub",
+    changes_json: "{\"title\":\"New Title\",\"author\":\"New Author\"}",
+    status: "pending",
+    created_at: Date.now(),
   },
 ];
 
@@ -203,7 +250,59 @@ function App() {
     "{Author}/{Title} ({Year}) [{ISBN13}].{ext}"
   );
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [matchOpen, setMatchOpen] = useState(false);
+  const [matchCandidates, setMatchCandidates] = useState<EnrichmentCandidate[]>([]);
+  const [matchLoading, setMatchLoading] = useState(false);
+  const [matchQuery, setMatchQuery] = useState("");
+  const [coverRefreshToken, setCoverRefreshToken] = useState(0);
+  const [coverOverrides, setCoverOverrides] = useState<Record<string, string | null>>({});
+  const coverOverrideRef = useRef<Record<string, string | null>>({});
   const [libraryHealth, setLibraryHealth] = useState<LibraryHealth | null>(null);
+  const [duplicateKeepSelection, setDuplicateKeepSelection] = useState<
+    Record<string, string>
+  >({});
+  const [pendingChanges, setPendingChanges] = useState<PendingChange[]>([]);
+  const [pendingChangesLoading, setPendingChangesLoading] = useState(false);
+  const [pendingChangesApplying, setPendingChangesApplying] = useState(false);
+  const [pendingChangesStatus, setPendingChangesStatus] = useState<
+    "pending" | "applied" | "error"
+  >("pending");
+  const [selectedChangeIds, setSelectedChangeIds] = useState<Set<string>>(
+    new Set()
+  );
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [confirmDeleteIds, setConfirmDeleteIds] = useState<string[]>([]);
+
+  const refreshPendingChanges = useCallback(async () => {
+    if (!isTauri()) return 0;
+    try {
+      const result = await invoke<PendingChange[]>("get_pending_changes", {
+        status: "pending",
+      });
+      if (pendingChangesStatus === "pending") {
+        setPendingChanges(result);
+      }
+      return result.length;
+    } catch {
+      return 0;
+    }
+  }, [pendingChangesStatus]);
+
+  const toggleChangeSelection = (id: string) => {
+    setSelectedChangeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const clearChangeSelection = () => {
+    setSelectedChangeIds(new Set());
+  };
   const isDesktop =
     isTauri() ||
     (typeof window !== "undefined" &&
@@ -212,13 +311,14 @@ function App() {
   const filteredBooks = useMemo(() => {
     const base = isDesktop
       ? libraryItems.map((item) => ({
+          coverOverride: coverOverrides[item.id],
           id: item.id,
           title: item.title ?? "Untitled",
           author: item.authors.length ? item.authors.join(", ") : "Unknown",
           format: item.formats[0] ?? "FILE",
           year: item.published_year ?? "—",
           status: item.title && item.authors.length ? "Complete" : "Needs Metadata",
-          cover: item.cover_path ? convertFileSrc(item.cover_path) : null,
+          cover: typeof coverOverrides[item.id] === "string" ? coverOverrides[item.id] : null,
         }))
       : sampleBooks;
     if (!query) return base;
@@ -228,7 +328,179 @@ function App() {
         book.title.toLowerCase().includes(lowered) ||
         book.author.toLowerCase().includes(lowered)
     );
-  }, [query, libraryItems, isDesktop]);
+  }, [query, libraryItems, isDesktop, coverOverrides]);
+
+  const fetchCoverOverride = useCallback(async (itemId: string) => {
+    if (!isTauri()) return;
+    if (typeof coverOverrideRef.current[itemId] === "string") return;
+    try {
+      const result = await invoke<{ mime: string; bytes: number[] } | null>(
+        "get_cover_blob",
+        { itemId }
+      );
+      if (!result) return;
+      const blob = new Blob([new Uint8Array(result.bytes)], { type: result.mime });
+      const url = URL.createObjectURL(blob);
+      setCoverOverrides((prev) => {
+        const next = { ...prev, [itemId]: url };
+        const previous = prev[itemId];
+        if (previous) URL.revokeObjectURL(previous);
+        coverOverrideRef.current = next;
+        return next;
+      });
+    } catch {
+      return;
+    }
+  }, []);
+
+  const clearCoverOverride = useCallback((itemId: string) => {
+    setCoverOverrides((prev) => {
+      const next = { ...prev, [itemId]: null };
+      const previous = prev[itemId];
+      if (previous) URL.revokeObjectURL(previous);
+      coverOverrideRef.current = next;
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      Object.values(coverOverrideRef.current).forEach((url) => {
+        if (url) URL.revokeObjectURL(url);
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    const activeIds = new Set(libraryItems.map((item) => item.id));
+    setCoverOverrides((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      Object.keys(next).forEach((id) => {
+        if (!activeIds.has(id)) {
+          const previous = next[id];
+          if (previous) URL.revokeObjectURL(previous);
+          delete next[id];
+          changed = true;
+        }
+      });
+      coverOverrideRef.current = next;
+      return changed ? next : prev;
+    });
+
+    const itemsToLoad = libraryItems.filter(
+      (item) =>
+        item.cover_path &&
+        typeof coverOverrideRef.current[item.id] !== "string"
+    );
+    if (!itemsToLoad.length) return;
+    void Promise.all(itemsToLoad.map((item) => fetchCoverOverride(item.id)));
+  }, [libraryItems, isDesktop, fetchCoverOverride]);
+
+  useEffect(() => {
+    if (!isDesktop || view !== "changes") return;
+    if (!isTauri()) return;
+    let active = true;
+    const load = async () => {
+      setPendingChangesLoading(true);
+      try {
+        const result = await invoke<PendingChange[]>("get_pending_changes", {
+          status: pendingChangesStatus,
+        });
+        if (active) setPendingChanges(result);
+      } catch {
+        if (active) setPendingChanges([]);
+      } finally {
+        if (active) setPendingChangesLoading(false);
+      }
+    };
+    void load();
+    const interval = window.setInterval(load, 8000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [view, isDesktop, pendingChangesStatus]);
+
+  const handleApplyChange = async (changeId: string) => {
+    if (!isTauri()) return;
+    try {
+      setPendingChangesApplying(true);
+      await invoke("apply_pending_changes", { ids: [changeId] });
+      const result = await invoke<PendingChange[]>("get_pending_changes", {
+        status: pendingChangesStatus,
+      });
+      setPendingChanges(result);
+    } catch {
+      setScanStatus("Could not apply change.");
+    } finally {
+      setPendingChangesApplying(false);
+    }
+  };
+
+  const handleApplySelectedChanges = async () => {
+    if (!isTauri()) return;
+    const ids = Array.from(selectedChangeIds);
+    if (!ids.length) return;
+    const selectedDeletes = pendingChanges
+      .filter((change) => ids.includes(change.id))
+      .filter((change) => change.change_type === "delete")
+      .map((change) => change.id);
+    if (selectedDeletes.length) {
+      setConfirmDeleteIds(ids);
+      setConfirmDeleteOpen(true);
+      return;
+    }
+    try {
+      setPendingChangesApplying(true);
+      await invoke("apply_pending_changes", { ids });
+      const result = await invoke<PendingChange[]>("get_pending_changes", {
+        status: pendingChangesStatus,
+      });
+      setPendingChanges(result);
+      clearChangeSelection();
+    } catch {
+      setScanStatus("Could not apply changes.");
+    } finally {
+      setPendingChangesApplying(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!confirmDeleteIds.length) return;
+    try {
+      setPendingChangesApplying(true);
+      await invoke("apply_pending_changes", { ids: confirmDeleteIds });
+      const result = await invoke<PendingChange[]>("get_pending_changes", {
+        status: pendingChangesStatus,
+      });
+      setPendingChanges(result);
+      clearChangeSelection();
+    } catch {
+      setScanStatus("Could not apply delete changes.");
+    } finally {
+      setPendingChangesApplying(false);
+      setConfirmDeleteIds([]);
+      setConfirmDeleteOpen(false);
+    }
+  };
+
+  const handleApplyAllChanges = async () => {
+    if (!isTauri()) return;
+    try {
+      setPendingChangesApplying(true);
+      await invoke("apply_pending_changes", { ids: [] });
+      const result = await invoke<PendingChange[]>("get_pending_changes", {
+        status: pendingChangesStatus,
+      });
+      setPendingChanges(result);
+    } catch {
+      setScanStatus("Could not apply changes.");
+    } finally {
+      setPendingChangesApplying(false);
+    }
+  };
 
   const selectedItem = useMemo(() => {
     if (!selectedItemId) return null;
@@ -245,6 +517,15 @@ function App() {
     if (!Number.isFinite(remaining) || remaining < 0) return null;
     return Math.round(remaining);
   }, [scanProgress, scanStartedAt]);
+
+  const getCandidateCoverUrl = (candidate: EnrichmentCandidate) => {
+    if (candidate.cover_url) return candidate.cover_url;
+    const isbn = candidate.identifiers
+      .map((value) => value.replace(/[^0-9Xx]/g, "").toUpperCase())
+      .find((value) => value.length === 13 || value.length === 10);
+    if (!isbn) return null;
+    return `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg`;
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -263,7 +544,8 @@ function App() {
         setDuplicates(duplicateGroups);
         const health = await invoke<LibraryHealth>("get_library_health");
         setLibraryHealth(health);
-      } catch (error) {
+        setCoverRefreshToken((value) => value + 1);
+      } catch {
         setScanStatus("Could not load library data.");
       } finally {
         setLibraryReady(true);
@@ -272,7 +554,7 @@ function App() {
     load();
   }, []);
 
-  const refreshLibrary = async () => {
+  const refreshLibrary = useCallback(async () => {
     if (!isTauri()) return;
     try {
       const items = await invoke<LibraryItem[]>("get_library_items");
@@ -285,10 +567,11 @@ function App() {
       setDuplicates(duplicateGroups);
       const health = await invoke<LibraryHealth>("get_library_health");
       setLibraryHealth(health);
-    } catch (error) {
+      setCoverRefreshToken((value) => value + 1);
+    } catch {
       setScanStatus("Could not refresh library data.");
     }
-  };
+  }, []);
 
   const handleScan = useCallback(async () => {
     try {
@@ -301,21 +584,14 @@ function App() {
       setScanStartedAt(Date.now());
       setScanProgress(null);
       const { open } = await import("@tauri-apps/plugin-dialog");
-      const selection = await open({ directory: true, multiple: false });
+      const selection: string | string[] | null = await open({
+        directory: true,
+        multiple: false,
+      });
       if (typeof selection === "string") {
         setScanStatus("Scanning...");
         const stats = await invoke<ScanStats>("scan_folder", {
           root: selection,
-        });
-        setScanStatus(
-          `Scan complete: ${stats.added} added, ${stats.updated} updated, ${stats.moved} moved.`
-        );
-        await refreshLibrary();
-        setScanProgress(null);
-      } else if (Array.isArray(selection) && selection.length) {
-        setScanStatus("Scanning...");
-        const stats = await invoke<ScanStats>("scan_folder", {
-          root: selection[0],
         });
         setScanStatus(
           `Scan complete: ${stats.added} added, ${stats.updated} updated, ${stats.moved} moved.`
@@ -444,7 +720,7 @@ function App() {
         }
       );
       setFixCandidates(candidates);
-    } catch (error) {
+    } catch {
       setScanStatus("Could not fetch enrichment candidates.");
     } finally {
       setFixLoading(false);
@@ -458,10 +734,84 @@ function App() {
         itemId: currentFixItem.id,
         candidate,
       });
-      setScanStatus("Metadata updated.");
+      const queued = await refreshPendingChanges();
+      setScanStatus(
+        queued > 0
+          ? `Metadata updated. ${queued} file changes queued.`
+          : "Metadata updated."
+      );
+      await fetchCoverOverride(currentFixItem.id);
       await refreshLibrary();
       setFixCandidates([]);
-    } catch (error) {
+    } catch {
+      setScanStatus("Could not apply metadata.");
+    }
+  };
+
+  const handleOpenMatchModal = async () => {
+    if (!selectedItemId) return;
+    setMatchQuery(selectedItem?.title ?? "");
+    setMatchOpen(true);
+    if (!isTauri()) {
+      setMatchCandidates(sampleFixCandidates);
+      return;
+    }
+    setMatchLoading(true);
+    try {
+      const candidates = await invoke<EnrichmentCandidate[]>(
+        "get_fix_candidates",
+        {
+          itemId: selectedItemId,
+        }
+      );
+      setMatchCandidates(candidates.slice(0, 5));
+    } catch {
+      setScanStatus("Could not fetch match candidates.");
+      setMatchCandidates([]);
+    } finally {
+      setMatchLoading(false);
+    }
+  };
+
+  const handleMatchSearch = async () => {
+    if (!matchQuery.trim()) return;
+    if (!isTauri()) {
+      setMatchCandidates(sampleFixCandidates);
+      return;
+    }
+    setMatchLoading(true);
+    try {
+      const candidates = await invoke<EnrichmentCandidate[]>("search_candidates", {
+        query: matchQuery,
+        itemId: selectedItemId ?? undefined,
+      });
+      setMatchCandidates(candidates.slice(0, 5));
+    } catch {
+      setScanStatus("Could not search metadata sources.");
+      setMatchCandidates([]);
+    } finally {
+      setMatchLoading(false);
+    }
+  };
+
+  const handleMatchApply = async (candidate: EnrichmentCandidate) => {
+    if (!selectedItemId || !isTauri()) return;
+    try {
+      await invoke("apply_fix_candidate", {
+        itemId: selectedItemId,
+        candidate,
+      });
+      const queued = await refreshPendingChanges();
+      setScanStatus(
+        queued > 0
+          ? `Metadata updated. ${queued} file changes queued.`
+          : "Metadata updated."
+      );
+      setMatchOpen(false);
+      setMatchCandidates([]);
+      await fetchCoverOverride(selectedItemId);
+      await refreshLibrary();
+    } catch {
       setScanStatus("Could not apply metadata.");
     }
   };
@@ -482,7 +832,7 @@ function App() {
       });
       setOrganizePlan(plan);
       setOrganizeStatus(`Prepared ${plan.entries.length} actions.`);
-    } catch (error) {
+    } catch {
       setOrganizeStatus("Could not prepare organize plan.");
     }
   };
@@ -495,8 +845,37 @@ function App() {
       });
       setOrganizeStatus(`Organized files. Log saved to ${logPath}`);
       await refreshLibrary();
-    } catch (error) {
+    } catch {
       setOrganizeStatus("Could not apply organize plan.");
+    }
+  };
+
+  const handleQueueOrganize = async () => {
+    if (!organizePlan || !isTauri()) return;
+    try {
+      const created = await invoke<number>("generate_pending_changes_from_organize", {
+        plan: organizePlan,
+      });
+      setOrganizeStatus(`Queued ${created} changes for review.`);
+      setView("changes");
+    } catch {
+      setOrganizeStatus("Could not queue organize plan.");
+    }
+  };
+
+  const handleResolveDuplicate = async (groupId: string, keepFileId: string) => {
+    if (!isTauri()) return;
+    try {
+      await invoke("resolve_duplicate_group", { groupId, keepFileId });
+      setScanStatus("Duplicate resolved.");
+      await refreshLibrary();
+      setDuplicateKeepSelection((prev) => {
+        const next = { ...prev };
+        delete next[groupId];
+        return next;
+      });
+    } catch {
+      setScanStatus("Could not resolve duplicate.");
     }
   };
 
@@ -526,6 +905,9 @@ function App() {
           </SidebarItem>
           <SidebarItem active={view === "fix"} onClick={() => setView("fix")}>
             Fix Metadata
+          </SidebarItem>
+          <SidebarItem active={view === "changes"} onClick={() => setView("changes")}>
+            Changes
           </SidebarItem>
         </nav>
 
@@ -600,9 +982,14 @@ function App() {
                   {entry.target_path}
                 </div>
               ))}
-              <Button variant="primary" onClick={handleApplyOrganize}>
-                Apply Plan
-              </Button>
+              <div className="organizer-actions">
+                <Button variant="primary" onClick={handleApplyOrganize}>
+                  Apply Plan
+                </Button>
+                <Button variant="ghost" onClick={handleQueueOrganize}>
+                  Queue Changes
+                </Button>
+              </div>
             </div>
           ) : null}
           {organizeStatus ? <div className="scan-status">{organizeStatus}</div> : null}
@@ -651,12 +1038,14 @@ function App() {
               {view === "inbox" && "Inbox"}
               {view === "duplicates" && "Duplicates"}
               {view === "fix" && "Fix Metadata"}
+              {view === "changes" && "File Changes"}
             </h1>
             <p>
               {view === "library" && "Browse and shape your calm stack."}
               {view === "inbox" && "New or incomplete entries waiting on you."}
               {view === "duplicates" && "Resolve duplicates detected by hash."}
               {view === "fix" && "Choose the best metadata match."}
+              {view === "changes" && "Review and apply planned file updates."}
             </p>
           </div>
 
@@ -673,7 +1062,7 @@ function App() {
               <Button variant="toolbar" size="sm" onClick={handlePlanOrganize}>
                 Organize
               </Button>
-              <Button variant="toolbar" size="sm">
+              <Button variant="toolbar" size="sm" onClick={() => setView("fix")}> 
                 Enrich
               </Button>
             </div>
@@ -780,27 +1169,47 @@ function App() {
                           if (event.key === "Enter") setSelectedItemId(book.id);
                         }}
                       >
-                        <div className="cover">
+                        <div className={`cover ${book.cover ? "has-cover" : ""}`}>
+                            {book.cover ? (
+                              <img
+                                key={`${book.id}-${coverRefreshToken}-${book.cover ?? "none"}`}
+                                className="cover-image"
+                                src={book.cover}
+                                alt=""
+                                onError={() => {
+                                  clearCoverOverride(book.id);
+                                  void fetchCoverOverride(book.id);
+                                }}
+                              />
+                            ) : null}
                           {book.cover ? (
-                            <img
-                              className="cover-image"
-                              src={book.cover}
-                              alt=""
-                              onError={(event) => {
-                                event.currentTarget.style.display = "none";
-                              }}
-                            />
-                          ) : null}
-                          <div className="cover-fallback">
                             <div className="cover-badge">{book.format}</div>
-                            <div className="cover-title">{book.title}</div>
-                          </div>
+                          ) : (
+                            <div className="cover-fallback">
+                              <div className="cover-badge">{book.format}</div>
+                              <div className="cover-title">{book.title}</div>
+                            </div>
+                          )}
                         </div>
                         <div className="card-body">
                           <div className="card-title">{book.title}</div>
-                          <div className="card-meta">{book.author}</div>
-                          <div className="card-meta">
-                            {book.year} · {book.status}
+                          <div className="card-meta-grid">
+                            <div className="meta-row">
+                              <span className="meta-label">Auteur</span>
+                              <span className="meta-value">{book.author}</span>
+                            </div>
+                            <div className="meta-row">
+                              <span className="meta-label">Jaar</span>
+                              <span className="meta-value">{book.year}</span>
+                            </div>
+                            <div className="meta-row">
+                              <span className="meta-label">Formaat</span>
+                              <span className="meta-value">{book.format}</span>
+                            </div>
+                            <div className="meta-row">
+                              <span className="meta-label">Status</span>
+                              <span className="meta-value">{book.status}</span>
+                            </div>
                           </div>
                         </div>
                       </article>
@@ -809,10 +1218,11 @@ function App() {
                 ) : (
                   <div className="list-table">
                     <div className="list-header">
-                      <div>Title</div>
-                      <div>Author</div>
-                      <div>Year</div>
-                      <div>Format</div>
+                      <div></div>
+                      <div>Titel</div>
+                      <div>Auteur</div>
+                      <div>Jaar</div>
+                      <div>Formaat</div>
                       <div>Status</div>
                     </div>
                     {filteredBooks.map((book) => (
@@ -830,10 +1240,26 @@ function App() {
                           if (event.key === "Enter") setSelectedItemId(book.id);
                         }}
                       >
+                        <div className="list-cover">
+                            {book.cover ? (
+                              <img
+                                key={`${book.id}-${coverRefreshToken}-${book.cover ?? "none"}`}
+                                className="list-cover-image"
+                                src={book.cover}
+                                alt=""
+                                onError={() => {
+                                  clearCoverOverride(book.id);
+                                  void fetchCoverOverride(book.id);
+                                }}
+                              />
+                          ) : (
+                            <div className="list-cover-fallback">{book.format}</div>
+                          )}
+                        </div>
                         <div className="list-title">{book.title}</div>
-                        <div>{book.author}</div>
-                        <div>{book.year}</div>
-                        <div>{book.format}</div>
+                        <div className="list-meta">{book.author}</div>
+                        <div className="list-meta">{book.year}</div>
+                        <div className="list-meta">{book.format}</div>
                         <div className="status-pill">{book.status}</div>
                       </div>
                     ))}
@@ -864,22 +1290,56 @@ function App() {
             {view === "duplicates" && (
               <section className="content">
                 <div className="duplicate-list">
-                  {(isDesktop ? duplicates : duplicateGroups).map((group) => (
-                    <div key={group.id} className="duplicate-card">
-                      <div>
-                        <div className="card-title">{group.title}</div>
-                        <div className="card-meta">
-                          {group.files.length} matching files
+                    {(isDesktop ? duplicates : duplicateGroups).map((group) => (
+                      <div key={group.id} className="duplicate-card">
+                        <div>
+                          <div className="card-title">{group.title}</div>
+                          <div className="card-meta">
+                            {group.files.length} matching files
+                          </div>
+                          <ul>
+                            {group.files.map((file, index) => {
+                              const fileId = group.file_ids[index] ?? file;
+                              const filePath = group.file_paths[index] ?? file;
+                              const isSelected =
+                                duplicateKeepSelection[group.id] === fileId;
+                              return (
+                                <li key={fileId} className="duplicate-option">
+                                  <label>
+                                    <input
+                                      type="radio"
+                                      name={`duplicate-${group.id}`}
+                                      value={fileId}
+                                      checked={isSelected}
+                                      onChange={() =>
+                                        setDuplicateKeepSelection((prev) => ({
+                                          ...prev,
+                                          [group.id]: fileId,
+                                        }))
+                                      }
+                                    />
+                                    <span className="duplicate-filename">{file}</span>
+                                    <span className="duplicate-path">{filePath}</span>
+                                  </label>
+                                </li>
+                              );
+                            })}
+                          </ul>
                         </div>
-                        <ul>
-                          {group.files.map((file) => (
-                            <li key={file}>{file}</li>
-                          ))}
-                        </ul>
+                      <Button
+                        variant="ghost"
+                        onClick={() =>
+                          handleResolveDuplicate(
+                            group.id,
+                            duplicateKeepSelection[group.id]
+                          )
+                        }
+                        disabled={!duplicateKeepSelection[group.id]}
+                      >
+                        Resolve
+                      </Button>
                       </div>
-                      <Button variant="ghost">Resolve</Button>
-                    </div>
-                  ))}
+                    ))}
                 </div>
               </section>
             )}
@@ -912,28 +1372,51 @@ function App() {
                     <div className="panel-title">Top Matches</div>
                     {candidateList.length ? (
                       <div className="candidate-grid">
-                        {candidateList.map((candidate) => (
-                          <div key={candidate.id} className="candidate-card">
-                            <div className="candidate-head">
-                              <span className="candidate-source">{candidate.source}</span>
-                              <span className="candidate-score">
-                                {Math.round(candidate.confidence * 100)}%
-                              </span>
+                        {candidateList.map((candidate) => {
+                          const coverUrl = getCandidateCoverUrl(candidate);
+                          return (
+                            <div key={candidate.id} className="candidate-card">
+                              <div className="candidate-cover">
+                                {coverUrl ? (
+                                  <img
+                                    className="candidate-cover-image"
+                                    src={coverUrl}
+                                    alt=""
+                                    onError={(event) => {
+                                      event.currentTarget.style.display = "none";
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="candidate-cover-fallback">No cover</div>
+                                )}
+                              </div>
+                              <div className="candidate-info">
+                                <div className="candidate-head">
+                                  <span className="candidate-source">{candidate.source}</span>
+                                  <span className="candidate-score">
+                                    {Math.round(candidate.confidence * 100)}%
+                                  </span>
+                                </div>
+                                <div className="card-title">
+                                  {candidate.title ?? "Untitled"}
+                                </div>
+                                <div className="card-meta">
+                                  {candidate.authors.join(", ")}
+                                </div>
+                                <div className="card-meta">
+                                  {candidate.published_year ?? "Unknown"}
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  onClick={() => handleApplyCandidate(candidate)}
+                                  disabled={!currentFixItem || fixLoading || !isDesktop}
+                                >
+                                  Use This
+                                </Button>
+                              </div>
                             </div>
-                            <div className="card-title">{candidate.title ?? "Untitled"}</div>
-                            <div className="card-meta">{candidate.authors.join(", ")}</div>
-                            <div className="card-meta">
-                              {candidate.published_year ?? "Unknown"}
-                            </div>
-                            <Button
-                              variant="ghost"
-                              onClick={() => handleApplyCandidate(candidate)}
-                              disabled={!currentFixItem || fixLoading || !isDesktop}
-                            >
-                              Use This
-                            </Button>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : (
                       <div className="card-meta">
@@ -942,6 +1425,133 @@ function App() {
                     )}
                   </div>
                 </div>
+              </section>
+            )}
+
+            {view === "changes" && (
+              <section className="content">
+                <div className="changes-toolbar">
+                  <div className="changes-filters">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setPendingChangesStatus("pending")}
+                      disabled={pendingChangesStatus === "pending"}
+                    >
+                      Pending
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setPendingChangesStatus("applied")}
+                      disabled={pendingChangesStatus === "applied"}
+                    >
+                      Applied
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setPendingChangesStatus("error")}
+                      disabled={pendingChangesStatus === "error"}
+                    >
+                      Errors
+                    </Button>
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleApplyAllChanges}
+                    disabled={pendingChangesApplying}
+                  >
+                    Apply All
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleApplySelectedChanges}
+                    disabled={!selectedChangeIds.size || pendingChangesApplying}
+                  >
+                    Apply Selected
+                  </Button>
+                </div>
+                <div className="change-list">
+                  {(isDesktop ? pendingChanges : samplePendingChanges).length ? (
+                    (isDesktop ? pendingChanges : samplePendingChanges).map((change) => (
+                      <div key={change.id} className="change-card">
+                        <label className="change-select">
+                          <input
+                            type="checkbox"
+                            checked={selectedChangeIds.has(change.id)}
+                            onChange={() => toggleChangeSelection(change.id)}
+                            disabled={change.status !== "pending"}
+                          />
+                        </label>
+                        <div className="change-body">
+                          <div className="card-title">
+                            {change.change_type === "rename"
+                              ? "Rename File"
+                              : change.change_type === "delete"
+                                ? "Delete File"
+                                : "Update EPUB Metadata"}
+                          </div>
+                          <div className="change-status">
+                            {change.status === "error"
+                              ? "Error"
+                              : change.status === "applied"
+                                ? "Applied"
+                                : "Pending"}
+                          </div>
+                          <div className="card-meta">
+                            {change.from_path ?? ""}
+                          </div>
+                          {change.to_path ? (
+                            <div className="card-meta">→ {change.to_path}</div>
+                          ) : null}
+                          {change.changes_json ? (
+                            <div className="card-meta">{change.changes_json}</div>
+                          ) : null}
+                          {change.error ? (
+                            <div className="card-meta">Error: {change.error}</div>
+                          ) : null}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          onClick={() => handleApplyChange(change.id)}
+                          disabled={pendingChangesApplying || change.status !== "pending"}
+                        >
+                          Apply
+                        </Button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="card-meta">
+                      {pendingChangesLoading
+                        ? "Loading changes…"
+                        : "No pending changes."}
+                    </div>
+                  )}
+                </div>
+                {confirmDeleteOpen ? (
+                  <div className="confirm-overlay">
+                    <div className="confirm-card">
+                      <div className="card-title">Delete files?</div>
+                      <div className="card-meta">
+                        You are about to delete {confirmDeleteIds.length} file(s).
+                      </div>
+                      <div className="confirm-actions">
+                        <Button variant="ghost" onClick={() => {
+                          setConfirmDeleteOpen(false);
+                          setConfirmDeleteIds([]);
+                        }}>
+                          Cancel
+                        </Button>
+                        <Button variant="danger" onClick={handleConfirmDelete}>
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </section>
             )}
           </section>
@@ -964,6 +1574,14 @@ function App() {
                   <Button variant="toolbar" size="sm">
                     Edit
                   </Button>
+                  <Button
+                    variant="toolbar"
+                    size="sm"
+                    onClick={handleOpenMatchModal}
+                    disabled={!isDesktop}
+                  >
+                    Match metadata
+                  </Button>
                 </div>
               </div>
             ) : (
@@ -972,6 +1590,18 @@ function App() {
           </aside>
         </div>
 
+        <MatchModal
+          open={matchOpen}
+          itemTitle={selectedItem?.title ?? "Untitled"}
+          itemAuthor={selectedItem?.author ?? "Unknown"}
+          query={matchQuery}
+          loading={matchLoading}
+          candidates={matchCandidates}
+          onQueryChange={setMatchQuery}
+          onSearch={handleMatchSearch}
+          onApply={handleMatchApply}
+          onClose={() => setMatchOpen(false)}
+        />
       </main>
     </div>
   );

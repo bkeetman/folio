@@ -17,6 +17,12 @@ cargo install tauri-cli --locked --version 2.9.6
 pnpm -C apps/desktop dev:tauri
 ```
 
+## Releases
+
+- Tag a release (e.g. `v0.1.0`) and push it to trigger the GitHub Actions release workflow.
+- Installers are published to GitHub Releases.
+- GitHub Pages serves the `docs/` folder as a download page.
+
 ## Database (local)
 
 ```bash
