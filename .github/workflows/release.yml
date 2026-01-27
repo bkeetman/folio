@@ -37,6 +37,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.0-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
       - name: Install Tauri CLI
         run: cargo install tauri-cli --locked --version 2.9.6
 

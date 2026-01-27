@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, basename } from "node:path";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const version = process.env.GITHUB_REF_NAME?.replace(/^v/, "");
 if (!version) {
@@ -10,7 +10,28 @@ const releaseTag = `v${version}`;
 const notes = `Release ${version}`;
 const pubDate = new Date().toISOString();
 
-const dmgDir = "apps/desktop/src-tauri/target/release/bundle/dmg";
+const targetRoot = "apps/desktop/src-tauri/target";
+
+const findDmgDir = (dir) => {
+  const entries = readdirSync(dir);
+  for (const entry of entries) {
+    const fullPath = join(dir, entry);
+    if (statSync(fullPath).isDirectory()) {
+      if (fullPath.endsWith("/bundle/dmg")) {
+        return fullPath;
+      }
+      const found = findDmgDir(fullPath);
+      if (found) return found;
+    }
+  }
+  return null;
+};
+
+const dmgDir = findDmgDir(targetRoot);
+if (!dmgDir) {
+  throw new Error("No dmg directory found under target");
+}
+
 const dmgFiles = readdirSync(dmgDir).filter((file) => file.endsWith(".dmg"));
 if (!dmgFiles.length) {
   throw new Error("No dmg artifacts found");
