@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { Button, Panel, SidebarItem } from "./components/ui";
 import { MatchModal } from "./components/MatchModal";
 
@@ -267,6 +269,7 @@ function App() {
   const [pendingChangesStatus, setPendingChangesStatus] = useState<
     "pending" | "applied" | "error"
   >("pending");
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [selectedChangeIds, setSelectedChangeIds] = useState<Set<string>>(
     new Set()
   );
@@ -287,6 +290,35 @@ function App() {
       return 0;
     }
   }, [pendingChangesStatus]);
+
+  const checkForUpdates = useCallback(async (silent = false) => {
+    if (!isTauri()) return;
+    try {
+      console.info("[updater] check start", { silent });
+      if (!silent) setUpdateStatus("Checking for updates…");
+      const result = await check();
+      if (!result) {
+        console.info("[updater] no update available");
+        if (!silent) setUpdateStatus("No updates found.");
+        return;
+      }
+      console.info("[updater] update available", {
+        version: result.version,
+        currentVersion: result.currentVersion,
+      });
+      setUpdateStatus(`Update ${result.version} available. Downloading…`);
+      await result.downloadAndInstall();
+      console.info("[updater] download complete, relaunching");
+      setUpdateStatus("Update downloaded. Restarting…");
+      await relaunch();
+    } catch (error) {
+      console.error("[updater] check failed", error);
+      if (!silent) {
+        const message = error instanceof Error ? error.message : String(error ?? "Update failed.");
+        setUpdateStatus(`Update failed: ${message}`);
+      }
+    }
+  }, []);
 
   const toggleChangeSelection = (id: string) => {
     setSelectedChangeIds((prev) => {
@@ -422,6 +454,10 @@ function App() {
       window.clearInterval(interval);
     };
   }, [view, isDesktop, pendingChangesStatus]);
+
+  useEffect(() => {
+    void checkForUpdates(true);
+  }, [checkForUpdates]);
 
   const handleApplyChange = async (changeId: string) => {
     if (!isTauri()) return;
@@ -1065,6 +1101,9 @@ function App() {
               <Button variant="toolbar" size="sm" onClick={() => setView("fix")}> 
                 Enrich
               </Button>
+              <Button variant="toolbar" size="sm" onClick={() => checkForUpdates(false)}>
+                Update
+              </Button>
             </div>
             <div className="search">
               <input
@@ -1095,6 +1134,9 @@ function App() {
               </Button>
             </div>
           </div>
+          {updateStatus ? (
+            <div className="scan-status">{updateStatus}</div>
+          ) : null}
         </header>
 
         {scanning && scanProgress ? (
