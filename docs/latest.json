@@ -1,11 +1,11 @@
 {
-  "version": "0.1.0",
-  "notes": "Initial release",
-  "pub_date": "2026-01-27T00:00:00Z",
+  "version": "0.1.14",
+  "notes": "Release 0.1.14",
+  "pub_date": "2026-01-27T20:08:32.173Z",
   "platforms": {
     "darwin-aarch64": {
-      "url": "https://github.com/bkeetman/folio/releases/download/v0.1.0/Folio_0.1.0_aarch64.dmg",
-      "signature": "REPLACE_WITH_SIGNATURE"
+      "url": "https://github.com/bkeetman/folio/releases/download/v0.1.14/Folio.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTTnVFRUU5eldVYXlpMjhQeXhqYVRrdzRiNklJU3RQSlk4d3JZWUdPTjBHeFVkY3R0TlNtT1hkZVpubUNOblVxWTFDdGlpNWpRaUV2OUxXYS8wcDFoNG1sL3Q4NVNoK3dVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5NTQ0NTA0CWZpbGU6Rm9saW8uYXBwLnRhci5negpVUUVqNVZwcmZ1dTJnYmRJUkE2SGQzTXJiVXRGWXVjcWdZNFFlWGQ3QWZFSGFSUFNuSEcrUnI4Nlkwc1dZRThNN2RDS2ZOcUhVU0hIQjJ0bzNROU1Bdz09Cg=="
     }
   }
 }
