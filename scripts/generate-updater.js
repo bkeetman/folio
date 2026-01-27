@@ -34,8 +34,8 @@ if (!macDir) {
 
 const archiveFiles = readdirSync(macDir).filter((file) => file.endsWith(".app.tar.gz"));
 const dmgFiles = readdirSync(macDir).filter((file) => file.endsWith(".dmg"));
-const archiveName = archiveFiles[0] ?? dmgFiles[0];
-if (!archiveName) {
+const candidates = [...archiveFiles, ...dmgFiles];
+if (!candidates.length) {
   throw new Error("No macOS artifacts found");
 }
 const findSignature = (dir, fileName) => {
@@ -52,12 +52,22 @@ const findSignature = (dir, fileName) => {
   return null;
 };
 
-const sigPath = findSignature(targetRoot, archiveName);
-if (!sigPath) {
-  throw new Error(`Signature not found for ${archiveName}`);
+let archiveName = null;
+let sigPath = null;
+for (const candidate of candidates) {
+  const found = findSignature(targetRoot, candidate);
+  if (found) {
+    archiveName = candidate;
+    sigPath = found;
+    break;
+  }
 }
-const signature = readFileSync(sigPath, "utf8").trim();
 
+if (!archiveName || !sigPath) {
+  throw new Error(`Signature not found for any of: ${candidates.join(", ")}`);
+}
+
+const signature = readFileSync(sigPath, "utf8").trim();
 const url = `https://github.com/bkeetman/folio/releases/download/${releaseTag}/${archiveName}`;
 
 const manifest = {
