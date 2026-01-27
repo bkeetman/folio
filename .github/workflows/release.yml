@@ -37,6 +37,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --locked --version 2.9.6
+
       - name: Build and publish Tauri
         uses: tauri-apps/tauri-action@v0.5
         env:
