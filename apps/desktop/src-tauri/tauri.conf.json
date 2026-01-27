@@ -25,9 +25,6 @@
     ],
     "security": {
       "csp": null,
-      "signing": {
-        "key": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk2MjQ2QUU3RjNENTZGRDgKUldUWWI5WHo1Mm9rbHBtOW5FU1RZOUthZzgrRGlIM1VmV1Z5VVNiSi9mYThUTEVLVXR6WDhlSDAK"
-      },
       "assetProtocol": {
         "enable": true,
         "scope": [
@@ -48,5 +45,15 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": true,
+      "endpoints": [
+        "https://bkeetman.github.io/folio/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk2MjQ2QUU3RjNENTZGRDgKUldUWWI5WHo1Mm9rbHBtOW5FU1RZOUthZzgrRGlIM1VmV1Z5VVNiSi9mYThUTEVLVXR6WDhlSDAK"
+    }
   }
 }
