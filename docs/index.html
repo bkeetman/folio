@@ -46,19 +46,64 @@
 
       <section class="downloads" id="downloads">
         <a class="card" data-platform="darwin-aarch64" href="https://github.com/bkeetman/folio/releases/latest" target="_blank" rel="noreferrer">
-          <h2>macOS</h2>
-          <p class="card-subtitle">Download the latest .dmg from GitHub Releases.</p>
-          <p class="card-version" data-version>Latest</p>
+          <div class="card-header">
+            <div class="platform-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" role="img">
+                <path d="M16.4 13.2c0 2.7 2.3 3.6 2.3 3.7-.6 1.7-2.4 4-4.3 4-1.7 0-2.2-1.1-4.1-1.1-1.9 0-2.5 1.1-4.2 1.1-1.8 0-3.1-2.1-3.7-3.8-1-2.7-1.1-5.9.7-7.7 1.2-1.2 2.9-1.5 4.1-.7.8.5 1.5.8 2.4.8.9 0 1.5-.3 2.4-.8 1.2-.8 2.7-.6 3.6.4-1.2.7-2.1 2-2.1 3.4zm-2.5-8.3c0 1-.4 2-1.1 2.7-.7.7-1.7 1.1-2.6 1-.1-.9.3-2 1-2.7.7-.7 1.8-1.2 2.7-1z" />
+              </svg>
+            </div>
+            <div>
+              <h2>macOS</h2>
+              <p class="card-subtitle">Signed DMG installer for Apple Silicon (M-series).</p>
+            </div>
+          </div>
+          <div class="card-meta">
+            <p class="card-file" data-file>DMG</p>
+            <p class="card-version" data-version>Latest</p>
+          </div>
+          <div class="card-links" data-links></div>
         </a>
         <a class="card" data-platform="windows-x86_64" href="https://github.com/bkeetman/folio/releases/latest" target="_blank" rel="noreferrer">
-          <h2>Windows</h2>
-          <p class="card-subtitle">Download the latest .msi or .exe from GitHub Releases.</p>
-          <p class="card-version" data-version>Latest</p>
+          <div class="card-header">
+            <div class="platform-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" role="img">
+                <rect x="2" y="3" width="9" height="8" rx="1" />
+                <rect x="13" y="3" width="9" height="8" rx="1" />
+                <rect x="2" y="13" width="9" height="8" rx="1" />
+                <rect x="13" y="13" width="9" height="8" rx="1" />
+              </svg>
+            </div>
+            <div>
+              <h2>Windows</h2>
+              <p class="card-subtitle">MSI installer with EXE fallback for Windows 10/11.</p>
+            </div>
+          </div>
+          <div class="card-meta">
+            <p class="card-file" data-file>MSI</p>
+            <p class="card-version" data-version>Latest</p>
+          </div>
+          <div class="card-links" data-links></div>
         </a>
         <a class="card" data-platform="linux-x86_64" href="https://github.com/bkeetman/folio/releases/latest" target="_blank" rel="noreferrer">
-          <h2>Linux</h2>
-          <p class="card-subtitle">Download the latest .deb or .AppImage from GitHub Releases.</p>
-          <p class="card-version" data-version>Latest</p>
+          <div class="card-header">
+            <div class="platform-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" role="img">
+                <circle cx="12" cy="9" r="4" />
+                <path d="M6 21c0-4 3-6 6-6s6 2 6 6" />
+                <circle cx="10.5" cy="8.5" r="0.8" fill="#fff" />
+                <circle cx="13.5" cy="8.5" r="0.8" fill="#fff" />
+              </svg>
+            </div>
+            <div>
+              <h2>Linux</h2>
+              <p class="card-subtitle">AppImage with DEB or RPM options for package installs.</p>
+            </div>
+          </div>
+          <div class="card-meta">
+            <p class="card-file" data-file>AppImage</p>
+            <p class="card-version" data-version>Latest</p>
+          </div>
+          <div class="card-links" data-links></div>
         </a>
       </section>
 
@@ -70,30 +115,78 @@
         </ul>
       </section>
     </main>
-    <script>
-      const versionEl = document.getElementById("release-version");
-      const cards = Array.from(document.querySelectorAll("[data-platform]"));
+      <script>
+        const versionEl = document.getElementById("release-version");
+        const cards = Array.from(document.querySelectorAll("[data-platform]"));
 
-      fetch("latest.json", { cache: "no-store" })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (!data) return;
-          if (versionEl) {
-            versionEl.textContent = `Latest release: v${data.version}`;
-          }
-          cards.forEach((card) => {
-            const platform = card.getAttribute("data-platform");
-            const platformInfo = data.platforms?.[platform];
-            if (platformInfo?.url) {
-              card.setAttribute("href", platformInfo.url);
+        fetch("latest.json", { cache: "no-store" })
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (!data) return;
+            if (versionEl) {
+              versionEl.textContent = `Latest release: v${data.version}`;
             }
-            const versionLabel = card.querySelector("[data-version]");
-            if (versionLabel) {
-              versionLabel.textContent = `v${data.version}`;
-            }
-          });
-        })
-        .catch(() => {});
-    </script>
+            const downloads = data.downloads || {};
+            const platformLinks = {
+              "darwin-aarch64": {
+                primary: downloads.macos?.dmg,
+                files: [
+                  { label: "DMG", url: downloads.macos?.dmg },
+                ],
+              },
+              "windows-x86_64": {
+                primary: downloads.windows?.msi || downloads.windows?.exe,
+                files: [
+                  { label: "MSI", url: downloads.windows?.msi },
+                  { label: "EXE", url: downloads.windows?.exe },
+                ],
+              },
+              "linux-x86_64": {
+                primary: downloads.linux?.appimage || downloads.linux?.deb || downloads.linux?.rpm,
+                files: [
+                  { label: "AppImage", url: downloads.linux?.appimage },
+                  { label: "DEB", url: downloads.linux?.deb },
+                  { label: "RPM", url: downloads.linux?.rpm },
+                ],
+              },
+            };
+            cards.forEach((card) => {
+              const platform = card.getAttribute("data-platform");
+              const platformInfo = data.platforms?.[platform];
+              const download = platformLinks[platform];
+              const primaryUrl = download?.primary || platformInfo?.url;
+              if (primaryUrl) {
+                card.setAttribute("href", primaryUrl);
+              }
+              const versionLabel = card.querySelector("[data-version]");
+              if (versionLabel) {
+                versionLabel.textContent = `v${data.version}`;
+              }
+              const fileLabel = card.querySelector("[data-file]");
+              if (fileLabel && download?.primary) {
+                const fileType = download.files.find((file) => file.url === download.primary)?.label;
+                if (fileType) {
+                  fileLabel.textContent = fileType;
+                }
+              }
+              const linksEl = card.querySelector("[data-links]");
+              if (linksEl && download?.files) {
+                linksEl.innerHTML = "";
+                download.files
+                  .filter((file) => file.url)
+                  .forEach((file) => {
+                    const link = document.createElement("a");
+                    link.className = "card-link";
+                    link.href = file.url;
+                    link.target = "_blank";
+                    link.rel = "noreferrer";
+                    link.textContent = file.label;
+                    linksEl.appendChild(link);
+                  });
+              }
+            });
+          })
+          .catch(() => {});
+      </script>
   </body>
 </html>

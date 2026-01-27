@@ -105,6 +105,30 @@ body {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
+.card-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.platform-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: #fff;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.platform-icon svg {
+  width: 22px;
+  height: 22px;
+  fill: var(--accent);
+}
+
 .card:hover {
   transform: translateY(-2px);
   box-shadow: 0 16px 30px rgba(24, 18, 12, 0.12);
@@ -120,11 +144,48 @@ body {
   color: var(--ink-soft);
 }
 
+.card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card-file {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
 .card-version {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--ink-soft);
+}
+
+.card-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.card-link {
+  font-size: 12px;
+  text-decoration: none;
+  color: var(--ink);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #fff;
+}
+
+.card-link:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .notes {
