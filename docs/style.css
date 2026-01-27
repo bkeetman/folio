@@ -25,6 +25,30 @@ body {
   margin: 8px 0 8px;
 }
 
+.hero {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.hero-logo {
+  width: 96px;
+  height: 96px;
+  border-radius: 24px;
+  background: #fff;
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 14px 28px rgba(24, 18, 12, 0.12);
+}
+
+.hero-logo img {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+}
+
 .eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.2em;
@@ -42,6 +66,26 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 18px;
   margin: 32px 0 24px;
+}
+
+.overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+  margin: 24px 0 8px;
+}
+
+.overview-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: 0 8px 18px rgba(24, 18, 12, 0.08);
+}
+
+.overview-card h3 {
+  margin: 0 0 8px;
+  color: var(--accent);
 }
 
 .card {
