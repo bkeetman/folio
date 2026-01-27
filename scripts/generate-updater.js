@@ -33,11 +33,11 @@ if (!macDir) {
 }
 
 const archiveFiles = readdirSync(macDir).filter((file) => file.endsWith(".app.tar.gz"));
-if (!archiveFiles.length) {
-  throw new Error("No macOS app archive found");
+const dmgFiles = readdirSync(macDir).filter((file) => file.endsWith(".dmg"));
+const archiveName = archiveFiles[0] ?? dmgFiles[0];
+if (!archiveName) {
+  throw new Error("No macOS artifacts found");
 }
-
-const archiveName = archiveFiles[0];
 const findSignature = (dir, fileName) => {
   const entries = readdirSync(dir);
   for (const entry of entries) {

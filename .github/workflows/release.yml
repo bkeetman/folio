@@ -17,7 +17,7 @@ jobs:
         include:
           - os: macos-latest
           - os: windows-latest
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -38,12 +38,13 @@ jobs:
         run: pnpm install
 
       - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-22.04'
+        if: matrix.os == 'ubuntu-24.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libgtk-3-dev \
-            libwebkit2gtk-4.0-dev \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf
