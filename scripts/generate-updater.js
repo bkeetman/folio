@@ -68,7 +68,31 @@ if (!archiveName || !sigPath) {
 }
 
 const signature = readFileSync(sigPath, "utf8").trim();
-const url = `https://github.com/bkeetman/folio/releases/download/${releaseTag}/${archiveName}`;
+const resolveArch = () => {
+  const raw = process.env.TAURI_ARCH || process.env.RUNNER_ARCH;
+  if (!raw) return null;
+  const normalized = raw.toLowerCase();
+  if (normalized === "arm64") return "aarch64";
+  if (normalized === "x64") return "x86_64";
+  return normalized;
+};
+
+const toReleaseAssetName = (fileName) => {
+  const arch = resolveArch();
+  if (!arch) return fileName;
+  if (fileName.endsWith(".app.tar.gz")) {
+    const base = fileName.replace(/\.app\.tar\.gz$/, "");
+    return `${base}_${arch}.app.tar.gz`;
+  }
+  if (fileName.endsWith(".dmg")) {
+    const base = fileName.replace(/\.dmg$/, "");
+    if (base.includes(`_${arch}`)) return fileName;
+    return `${base}_${arch}.dmg`;
+  }
+  return fileName;
+};
+
+const url = `https://github.com/bkeetman/folio/releases/download/${releaseTag}/${toReleaseAssetName(archiveName)}`;
 
 const manifest = {
   version,
