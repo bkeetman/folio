@@ -23,6 +23,11 @@ pnpm -C apps/desktop dev:tauri
 - Installers are published to GitHub Releases.
 - GitHub Pages serves the `docs/` folder as a download page.
 
+## Auto-updater
+
+- The updater reads `https://bkeetman.github.io/folio/latest.json`.
+- `docs/latest.json` is now generated and committed by the release workflow.
+
 ## Database (local)
 
 ```bash
