@@ -12,36 +12,36 @@ const pubDate = new Date().toISOString();
 
 const targetRoot = "apps/desktop/src-tauri/target";
 
-const findDmgDir = (dir) => {
+const findMacBundleDir = (dir) => {
   const entries = readdirSync(dir);
   for (const entry of entries) {
     const fullPath = join(dir, entry);
     if (statSync(fullPath).isDirectory()) {
-      if (fullPath.endsWith("/bundle/dmg")) {
+      if (fullPath.endsWith("/bundle/macos")) {
         return fullPath;
       }
-      const found = findDmgDir(fullPath);
+      const found = findMacBundleDir(fullPath);
       if (found) return found;
     }
   }
   return null;
 };
 
-const dmgDir = findDmgDir(targetRoot);
-if (!dmgDir) {
-  throw new Error("No dmg directory found under target");
+const macDir = findMacBundleDir(targetRoot);
+if (!macDir) {
+  throw new Error("No macOS bundle directory found under target");
 }
 
-const dmgFiles = readdirSync(dmgDir).filter((file) => file.endsWith(".dmg"));
-if (!dmgFiles.length) {
-  throw new Error("No dmg artifacts found");
+const archiveFiles = readdirSync(macDir).filter((file) => file.endsWith(".app.tar.gz"));
+if (!archiveFiles.length) {
+  throw new Error("No macOS app archive found");
 }
 
-const dmgName = dmgFiles[0];
-const sigPath = join(dmgDir, `${dmgName}.sig`);
+const archiveName = archiveFiles[0];
+const sigPath = join(macDir, `${archiveName}.sig`);
 const signature = readFileSync(sigPath, "utf8").trim();
 
-const url = `https://github.com/bkeetman/folio/releases/download/${releaseTag}/${dmgName}`;
+const url = `https://github.com/bkeetman/folio/releases/download/${releaseTag}/${archiveName}`;
 
 const manifest = {
   version,
