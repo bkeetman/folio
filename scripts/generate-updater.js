@@ -155,6 +155,8 @@ const main = async () => {
     macArchive?.browser_download_url ??
     `https://github.com/${repo}/releases/download/${releaseTag}/${toReleaseAssetName(archiveName)}`;
 
+  const macDmgArm = findAsset((name) => name.endsWith("_aarch64.dmg"));
+  const macDmgX64 = findAsset((name) => name.endsWith("_x64.dmg") || name.endsWith("_x86_64.dmg"));
   const macDmg = findAsset((name) => name.endsWith(".dmg"));
   const winMsi = findAsset((name) => name.endsWith(".msi"));
   const winExe = findAsset((name) => name.endsWith(".exe"));
@@ -173,7 +175,14 @@ const main = async () => {
       },
     },
     downloads: {
-      macos: macDmg?.browser_download_url ? { dmg: macDmg.browser_download_url } : undefined,
+      macos:
+        macDmgArm?.browser_download_url || macDmgX64?.browser_download_url || macDmg?.browser_download_url
+          ? {
+              arm64: macDmgArm?.browser_download_url,
+              x64: macDmgX64?.browser_download_url,
+              dmg: macDmg?.browser_download_url,
+            }
+          : undefined,
       windows:
         winMsi?.browser_download_url || winExe?.browser_download_url
           ? {
