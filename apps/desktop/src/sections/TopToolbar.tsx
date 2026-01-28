@@ -45,6 +45,7 @@ export function TopToolbar({
         <div className="space-y-1">
           <div className="text-lg font-semibold">
             {view === "library" && "Your Library"}
+            {view === "tags" && "Tags"}
             {view === "inbox" && "Inbox"}
             {view === "duplicates" && "Duplicates"}
             {view === "fix" && "Fix Metadata"}
@@ -52,6 +53,7 @@ export function TopToolbar({
           </div>
           <p className="text-[11px] text-[var(--app-ink-muted)]">
             {view === "library" && "Browse and shape your calm stack."}
+            {view === "tags" && "Create and maintain tags for your library."}
             {view === "inbox" && "New or incomplete entries waiting on you."}
             {view === "duplicates" && "Resolve duplicates detected by hash."}
             {view === "fix" && "Choose the best metadata match."}

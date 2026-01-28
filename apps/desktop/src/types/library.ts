@@ -1,4 +1,4 @@
-export type View = "library" | "inbox" | "duplicates" | "fix" | "changes";
+export type View = "library" | "inbox" | "duplicates" | "fix" | "changes" | "tags";
 export type LibraryFilter = "all" | "epub" | "pdf" | "needs-metadata" | "tagged";
 
 export type Tag = { id: string; name: string; color?: string | null };

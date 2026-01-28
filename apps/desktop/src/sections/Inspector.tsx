@@ -1,7 +1,6 @@
-import type { Dispatch, SetStateAction } from "react";
 import type { Tag } from "../types/library";
-import { Button, Input, Separator } from "../components/ui";
-import { TAG_COLORS, getTagColorClass, getTagSwatchClass } from "../lib/tagColors";
+import { Button, Separator } from "../components/ui";
+import { getTagColorClass } from "../lib/tagColors";
 import { FolderOpen, PencilLine, Sparkles } from "lucide-react";
 
 type InspectorProps = {
@@ -18,11 +17,6 @@ type InspectorProps = {
   availableTags: Tag[];
   handleAddTag: (tagId: string) => void;
   handleRemoveTag: (tagId: string) => void;
-  newTagName: string;
-  setNewTagName: Dispatch<SetStateAction<string>>;
-  newTagColor: string;
-  setNewTagColor: Dispatch<SetStateAction<string>>;
-  handleCreateTag: () => void;
   handleOpenMatchModal: () => void;
   isDesktop: boolean;
   clearCoverOverride: (itemId: string) => void;
@@ -35,11 +29,6 @@ export function Inspector({
   availableTags,
   handleAddTag,
   handleRemoveTag,
-  newTagName,
-  setNewTagName,
-  newTagColor,
-  setNewTagColor,
-  handleCreateTag,
   handleOpenMatchModal,
   isDesktop,
   clearCoverOverride,
@@ -124,32 +113,6 @@ export function Inspector({
                 ) : (
                   <span className="text-xs text-[var(--app-ink-muted)]">No tags available.</span>
                 )}
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <Input
-                  value={newTagName}
-                  onChange={(event) => setNewTagName(event.target.value)}
-                  placeholder="New tag name"
-                  className="h-8 min-w-0 flex-1 text-xs"
-                />
-                <div className="flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-white px-2 py-1">
-                  {TAG_COLORS.map((color) => (
-                    <button
-                      key={color.value}
-                      type="button"
-                      className={`h-5 w-5 rounded-full border ${getTagSwatchClass(color.value)} ${newTagColor === color.value ? "ring-2 ring-[var(--app-accent)]" : ""}`}
-                      onClick={() => setNewTagColor(color.value)}
-                    />
-                  ))}
-                </div>
-                <Button
-                  variant="toolbar"
-                  size="sm"
-                  onClick={handleCreateTag}
-                  disabled={!newTagName.trim()}
-                >
-                  Create
-                </Button>
               </div>
             </div>
           </div>

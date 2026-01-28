@@ -12,6 +12,7 @@ import {
   Copy,
   FileClock,
   Inbox,
+  Tag,
   Wrench,
 } from "lucide-react";
 
@@ -100,6 +101,10 @@ export function Sidebar({
         <SidebarItem active={view === "library"} onClick={() => setView("library")}> 
           <BookOpen size={16} />
           Library
+        </SidebarItem>
+        <SidebarItem active={view === "tags"} onClick={() => setView("tags")}> 
+          <Tag size={16} />
+          Tags
         </SidebarItem>
         <SidebarItem active={view === "inbox"} onClick={() => setView("inbox")}> 
           <Inbox size={16} />

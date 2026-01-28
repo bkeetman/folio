@@ -29,6 +29,7 @@ import { InboxView } from "./sections/InboxView";
 import { DuplicatesView } from "./sections/DuplicatesView";
 import { FixView } from "./sections/FixView";
 import { ChangesView } from "./sections/ChangesView";
+import { TagsView } from "./sections/TagsView";
 
 const sampleBooks = [
   {
@@ -1138,6 +1139,17 @@ function App() {
                 handleConfirmDelete={handleConfirmDelete}
               />
             ) : null}
+
+            {view === "tags" ? (
+              <TagsView
+                tags={tags}
+                newTagName={newTagName}
+                setNewTagName={setNewTagName}
+                newTagColor={newTagColor}
+                setNewTagColor={setNewTagColor}
+                handleCreateTag={handleCreateTag}
+              />
+            ) : null}
           </section>
         </div>
 
@@ -1169,11 +1181,6 @@ function App() {
           availableTags={availableTags}
           handleAddTag={handleAddTag}
           handleRemoveTag={handleRemoveTag}
-          newTagName={newTagName}
-          setNewTagName={setNewTagName}
-          newTagColor={newTagColor}
-          setNewTagColor={setNewTagColor}
-          handleCreateTag={handleCreateTag}
           handleOpenMatchModal={handleOpenMatchModal}
           isDesktop={isDesktop}
           clearCoverOverride={clearCoverOverride}
