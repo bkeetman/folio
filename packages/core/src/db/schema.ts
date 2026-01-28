@@ -87,6 +87,7 @@ export const tags = sqliteTable("tags", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   normalized: text("normalized").notNull(),
+  color: text("color"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 

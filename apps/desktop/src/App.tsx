@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { check } from "@tauri-apps/plugin-updater";
@@ -28,6 +29,8 @@ import {
 import { MatchModal } from "./components/MatchModal";
 
 type View = "library" | "inbox" | "duplicates" | "fix" | "changes";
+type LibraryFilter = "all" | "epub" | "pdf" | "needs-metadata" | "tagged";
+type Tag = { id: string; name: string; color?: string | null };
 
 type LibraryItem = {
   id: string;
@@ -37,6 +40,7 @@ type LibraryItem = {
   file_count: number;
   formats: string[];
   cover_path?: string | null;
+  tags?: Tag[];
 };
 
 type ScanStats = {
@@ -120,6 +124,7 @@ const sampleBooks = [
     year: 2010,
     status: "Complete",
     cover: null,
+    tags: [{ id: "t1", name: "Favorites", color: "amber" }],
   },
   {
     id: "2",
@@ -129,6 +134,7 @@ const sampleBooks = [
     year: 1962,
     status: "Complete",
     cover: null,
+    tags: [],
   },
   {
     id: "3",
@@ -138,6 +144,7 @@ const sampleBooks = [
     year: 1969,
     status: "Needs ISBN",
     cover: null,
+    tags: [{ id: "t2", name: "To Review", color: "sky" }],
   },
   {
     id: "4",
@@ -147,6 +154,7 @@ const sampleBooks = [
     year: 2013,
     status: "Needs Cover",
     cover: null,
+    tags: [],
   },
   {
     id: "5",
@@ -156,8 +164,48 @@ const sampleBooks = [
     year: 1906,
     status: "Complete",
     cover: null,
+    tags: [{ id: "t3", name: "Classic", color: "emerald" }],
   },
 ];
+
+const sampleTags: Tag[] = [
+  { id: "t1", name: "Favorites", color: "amber" },
+  { id: "t2", name: "To Review", color: "sky" },
+  { id: "t3", name: "Classic", color: "emerald" },
+];
+
+const TAG_COLORS = [
+  { name: "Amber", value: "amber" },
+  { name: "Rose", value: "rose" },
+  { name: "Sky", value: "sky" },
+  { name: "Emerald", value: "emerald" },
+  { name: "Violet", value: "violet" },
+  { name: "Slate", value: "slate" },
+];
+
+const TAG_COLOR_CLASSES: Record<string, string> = {
+  amber: "border-tag-amber/40 bg-tag-amber/20",
+  rose: "border-tag-rose/40 bg-tag-rose/20",
+  sky: "border-tag-sky/40 bg-tag-sky/20",
+  emerald: "border-tag-emerald/40 bg-tag-emerald/20",
+  violet: "border-tag-violet/40 bg-tag-violet/20",
+  slate: "border-tag-slate/40 bg-tag-slate/20",
+};
+
+const TAG_COLOR_SWATCH: Record<string, string> = {
+  amber: "bg-tag-amber",
+  rose: "bg-tag-rose",
+  sky: "bg-tag-sky",
+  emerald: "bg-tag-emerald",
+  violet: "bg-tag-violet",
+  slate: "bg-tag-slate",
+};
+
+const getTagColorClass = (color?: string | null) =>
+  TAG_COLOR_CLASSES[color ?? "amber"] ?? TAG_COLOR_CLASSES.amber;
+
+const getTagSwatchClass = (color?: string | null) =>
+  TAG_COLOR_SWATCH[color ?? "amber"] ?? TAG_COLOR_SWATCH.amber;
 
 const inboxItems = [
   { id: "i1", title: "Notes on the Synthesis", reason: "Missing author" },
@@ -255,6 +303,8 @@ function App() {
   const [view, setView] = useState<View>("library");
   const [grid, setGrid] = useState(true);
   const [query, setQuery] = useState("");
+  const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>("all");
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [scanStatus, setScanStatus] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanStartedAt, setScanStartedAt] = useState<number | null>(null);
@@ -290,6 +340,10 @@ function App() {
     "pending" | "applied" | "error"
   >("pending");
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [newTagName, setNewTagName] = useState("");
+  const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0].value);
   const [selectedChangeIds, setSelectedChangeIds] = useState<Set<string>>(
     new Set()
   );
@@ -360,6 +414,15 @@ function App() {
     (typeof window !== "undefined" &&
       Boolean((window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__));
 
+  useEffect(() => {
+    if (!isDesktop) return;
+    getVersion()
+      .then((version) => setAppVersion(version))
+      .catch(() => {
+        setAppVersion(null);
+      });
+  }, [isDesktop]);
+
   const filteredBooks = useMemo(() => {
     const base = isDesktop
       ? libraryItems.map((item) => ({
@@ -371,16 +434,86 @@ function App() {
           year: item.published_year ?? "—",
           status: item.title && item.authors.length ? "Complete" : "Needs Metadata",
           cover: typeof coverOverrides[item.id] === "string" ? coverOverrides[item.id] : null,
+          tags: item.tags ?? [],
         }))
       : sampleBooks;
-    if (!query) return base;
+    const filteredByTag = base.filter((book) => {
+      const normalizedFormat = String(book.format)
+        .replace(".", "")
+        .toLowerCase();
+      switch (libraryFilter) {
+        case "epub":
+          return normalizedFormat.includes("epub");
+        case "pdf":
+          return normalizedFormat.includes("pdf");
+        case "needs-metadata":
+          return book.status !== "Complete";
+        case "tagged":
+          return (book.tags ?? []).length > 0;
+        default:
+          return true;
+      }
+    });
+    const filteredBySpecificTags = selectedTagIds.length
+      ? filteredByTag.filter((book) =>
+          selectedTagIds.every((tagId) =>
+            (book.tags ?? []).some((tag) => tag.id === tagId)
+          )
+        )
+      : filteredByTag;
+    if (!query) return filteredBySpecificTags;
     const lowered = query.toLowerCase();
-    return base.filter(
+    return filteredBySpecificTags.filter(
       (book) =>
         book.title.toLowerCase().includes(lowered) ||
         book.author.toLowerCase().includes(lowered)
     );
-  }, [query, libraryItems, isDesktop, coverOverrides]);
+  }, [
+    query,
+    libraryItems,
+    isDesktop,
+    coverOverrides,
+    libraryFilter,
+    selectedTagIds,
+  ]);
+
+  const refreshTags = useCallback(async () => {
+    if (!isTauri()) {
+      setTags(sampleTags);
+      return;
+    }
+    try {
+      const result = await invoke<Tag[]>("list_tags");
+      setTags(result);
+    } catch {
+      setTags([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    void refreshTags();
+  }, [isDesktop, refreshTags]);
+
+  const handleCreateTag = useCallback(async () => {
+    const name = newTagName.trim();
+    if (!name) return;
+    if (!isTauri()) {
+      setTags((prev) => [
+        ...prev,
+        { id: `local-${Date.now()}`, name, color: newTagColor },
+      ]);
+      setNewTagName("");
+      return;
+    }
+    try {
+      await invoke<Tag>("create_tag", { name, color: newTagColor });
+      setNewTagName("");
+      await refreshTags();
+    } catch {
+      return;
+    }
+  }, [newTagName, newTagColor, refreshTags]);
 
   const fetchCoverOverride = useCallback(async (itemId: string) => {
     if (!isTauri()) return;
@@ -563,6 +696,12 @@ function App() {
     return filteredBooks.find((book) => book.id === selectedItemId) ?? null;
   }, [filteredBooks, selectedItemId]);
 
+  const selectedTags = useMemo(() => selectedItem?.tags ?? [], [selectedItem]);
+  const availableTags = useMemo(
+    () => tags.filter((tag) => !selectedTags.some((selected) => selected.id === tag.id)),
+    [tags, selectedTags]
+  );
+
   const scanEtaSeconds = useMemo(() => {
     if (!scanProgress || !scanStartedAt || scanProgress.total === 0) return null;
     const elapsedSeconds = (Date.now() - scanStartedAt) / 1000;
@@ -628,6 +767,34 @@ function App() {
       setScanStatus("Could not refresh library data.");
     }
   }, []);
+
+  const handleAddTag = useCallback(
+    async (tagId: string) => {
+      if (!selectedItemId) return;
+      if (!isTauri()) return;
+      try {
+        await invoke("add_tag_to_item", { itemId: selectedItemId, tagId });
+        await refreshLibrary();
+      } catch {
+        return;
+      }
+    },
+    [selectedItemId, refreshLibrary]
+  );
+
+  const handleRemoveTag = useCallback(
+    async (tagId: string) => {
+      if (!selectedItemId) return;
+      if (!isTauri()) return;
+      try {
+        await invoke("remove_tag_from_item", { itemId: selectedItemId, tagId });
+        await refreshLibrary();
+      } catch {
+        return;
+      }
+    },
+    [selectedItemId, refreshLibrary]
+  );
 
   const handleScan = useCallback(async () => {
     try {
@@ -953,7 +1120,14 @@ function App() {
             />
           </div>
           <div className="pt-0.5 leading-tight">
-            <div className="text-sm font-semibold tracking-wide">Folio</div>
+            <div className="flex items-center gap-2">
+              <div className="text-sm font-semibold tracking-wide">Folio</div>
+              {appVersion ? (
+                <span className="rounded-full border border-[var(--app-border)] bg-white/70 px-2 py-0.5 text-[10px] text-[var(--app-ink-muted)]">
+                  v{appVersion}
+                </span>
+              ) : null}
+            </div>
             <div className="text-[11px] uppercase tracking-[0.2em] text-[var(--app-ink-muted)]">
               Calm Library
             </div>
@@ -1267,22 +1441,97 @@ function App() {
           <section className="flex flex-col gap-4">
             {view === "library" && (
               <>
-                <div className="flex flex-wrap gap-2">
-                  <button className="rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)] px-3 py-1 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    className={
+                      libraryFilter === "all"
+                        ? "rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)] px-3 py-1 text-xs"
+                        : "rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs hover:bg-white"
+                    }
+                    onClick={() => setLibraryFilter("all")}
+                  >
                     All
                   </button>
-                  <button className="rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs">
+                  <button
+                    className={
+                      libraryFilter === "epub"
+                        ? "rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)] px-3 py-1 text-xs"
+                        : "rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs hover:bg-white"
+                    }
+                    onClick={() => setLibraryFilter("epub")}
+                  >
                     EPUB
                   </button>
-                  <button className="rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs">
+                  <button
+                    className={
+                      libraryFilter === "pdf"
+                        ? "rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)] px-3 py-1 text-xs"
+                        : "rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs hover:bg-white"
+                    }
+                    onClick={() => setLibraryFilter("pdf")}
+                  >
                     PDF
                   </button>
-                  <button className="rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs">
+                  <button
+                    className={
+                      libraryFilter === "needs-metadata"
+                        ? "rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)] px-3 py-1 text-xs"
+                        : "rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs hover:bg-white"
+                    }
+                    onClick={() => setLibraryFilter("needs-metadata")}
+                  >
                     Needs Metadata
                   </button>
-                  <button className="rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs">
+                  <button
+                    className={
+                      libraryFilter === "tagged"
+                        ? "rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)] px-3 py-1 text-xs"
+                        : "rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs hover:bg-white"
+                    }
+                    onClick={() => setLibraryFilter("tagged")}
+                  >
                     Tagged
                   </button>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
+                      Tags
+                    </span>
+                    <button
+                      className="rounded-full border border-[var(--app-border)] bg-white/80 px-2 py-0.5 text-[11px] hover:bg-white"
+                      onClick={() => setSelectedTagIds([])}
+                    >
+                      All
+                    </button>
+                    {tags.length ? (
+                      tags.map((tag) => {
+                        const active = selectedTagIds.includes(tag.id);
+                        return (
+                          <button
+                            key={tag.id}
+                            className={
+                              active
+                                ? "rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.18)] px-2 py-0.5 text-[11px]"
+                                : "rounded-full border border-[var(--app-border)] bg-white/80 px-2 py-0.5 text-[11px] hover:bg-white"
+                            }
+                            style={{ backgroundColor: active ? tag.color ?? undefined : undefined }}
+                            onClick={() => {
+                              setSelectedTagIds((prev) =>
+                                prev.includes(tag.id)
+                                  ? prev.filter((id) => id !== tag.id)
+                                  : [...prev, tag.id]
+                              );
+                            }}
+                          >
+                            {tag.name}
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <span className="text-[11px] text-[var(--app-ink-muted)]">
+                        No tags
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {isDesktop && !libraryItems.length ? (
@@ -1339,6 +1588,19 @@ function App() {
                         </div>
                         <div className="flex flex-col gap-1 px-3 py-2">
                           <div className="text-[13px] font-semibold">{book.title}</div>
+                          {(book.tags ?? []).length ? (
+                            <div className="flex flex-wrap gap-1">
+                              {(book.tags ?? []).slice(0, 3).map((tag) => (
+                                <span
+                                  key={tag.id}
+                                  className="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-[10px]"
+                                  style={{ backgroundColor: tag.color ?? "rgba(201,122,58,0.12)" }}
+                                >
+                                  {tag.name}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
                           <div className="grid gap-1">
                             <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
                               <span className="text-[10px] uppercase tracking-[0.12em]">Auteur</span>
@@ -1404,7 +1666,22 @@ function App() {
                             </div>
                           )}
                         </div>
-                        <div className="text-sm font-semibold">{book.title}</div>
+                        <div className="flex flex-col gap-1">
+                          <div className="text-sm font-semibold">{book.title}</div>
+                          {(book.tags ?? []).length ? (
+                            <div className="flex flex-wrap gap-1">
+                              {(book.tags ?? []).slice(0, 2).map((tag) => (
+                                <span
+                                  key={tag.id}
+                                  className="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-[10px]"
+                                  style={{ backgroundColor: tag.color ?? "rgba(201,122,58,0.12)" }}
+                                >
+                                  {tag.name}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
                         <div className="text-xs text-[var(--app-ink-muted)]">{book.author}</div>
                         <div className="text-xs text-[var(--app-ink-muted)]">{book.year}</div>
                         <div className="text-xs text-[var(--app-ink-muted)]">{book.format}</div>
@@ -1526,7 +1803,14 @@ function App() {
                           </strong>
                         </div>
                         <Button variant="primary" onClick={handleFetchCandidates}>
-                          {fixLoading ? "Searching..." : "Search Sources"}
+                          {fixLoading ? (
+                            <span className="flex items-center gap-2">
+                              <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/60 border-t-white" />
+                              Searching...
+                            </span>
+                          ) : (
+                            "Search Sources"
+                          )}
                         </Button>
                       </>
                     ) : (
@@ -1756,7 +2040,10 @@ function App() {
             <span>{scanStatus ?? updateStatus ?? "Idle"}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span>Folio {isDesktop ? "Desktop" : "Web"}</span>
+            <span>
+              Folio {isDesktop ? "Desktop" : "Web"}
+              {appVersion ? ` · v${appVersion}` : ""}
+            </span>
           </div>
         </footer>
       </main>
@@ -1792,10 +2079,82 @@ function App() {
                 </div>
                 <div className="flex flex-1 flex-col gap-1">
                   <div className="text-[13px] font-semibold">{selectedItem.title}</div>
-              <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.author}</div>
-              <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.year}</div>
-              <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.format}</div>
-              <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.status}</div>
+                  <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.author}</div>
+                  <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.year}</div>
+                  <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.format}</div>
+                  <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.status}</div>
+                </div>
+              </div>
+              <div className="mt-3">
+                <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
+                  Tags
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {selectedTags.length ? (
+                    selectedTags.map((tag) => (
+                      <button
+                        key={tag.id}
+                        className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${getTagColorClass(tag.color)}`}
+                        onClick={() => handleRemoveTag(tag.id)}
+                      >
+                        {tag.name}
+                        <span className="text-[10px]">×</span>
+                      </button>
+                    ))
+                  ) : (
+                    <span className="text-xs text-[var(--app-ink-muted)]">
+                      No tags yet.
+                    </span>
+                  )}
+                </div>
+
+                <div className="mt-3">
+                  <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
+                    Add tag
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {availableTags.length ? (
+                      availableTags.map((tag) => (
+                        <button
+                          key={tag.id}
+                          className={`rounded-full border px-2 py-0.5 text-[11px] hover:bg-white ${getTagColorClass(tag.color)}`}
+                          onClick={() => handleAddTag(tag.id)}
+                        >
+                          {tag.name}
+                        </button>
+                      ))
+                    ) : (
+                      <span className="text-xs text-[var(--app-ink-muted)]">
+                        No tags available.
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Input
+                      value={newTagName}
+                      onChange={(event) => setNewTagName(event.target.value)}
+                      placeholder="New tag name"
+                      className="h-8 min-w-0 flex-1 text-xs"
+                    />
+                    <div className="flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-white px-2 py-1">
+                      {TAG_COLORS.map((color) => (
+                        <button
+                          key={color.value}
+                          type="button"
+                          className={`h-5 w-5 rounded-full border ${getTagSwatchClass(color.value)} ${newTagColor === color.value ? "ring-2 ring-[var(--app-accent)]" : ""}`}
+                          onClick={() => setNewTagColor(color.value)}
+                        />
+                      ))}
+                    </div>
+                    <Button
+                      variant="toolbar"
+                      size="sm"
+                      onClick={handleCreateTag}
+                      disabled={!newTagName.trim()}
+                    >
+                      Create
+                    </Button>
+                  </div>
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">

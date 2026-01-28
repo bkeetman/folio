@@ -20,6 +20,16 @@ const MIGRATION_COVERS_SQL: &str = include_str!(
 const MIGRATION_PENDING_CHANGES_SQL: &str = include_str!(
   "../../../../packages/core/drizzle/0002_pending_changes.sql"
 );
+const MIGRATION_TAG_COLORS_SQL: &str = include_str!(
+  "../../../../packages/core/drizzle/0003_tag_colors.sql"
+);
+
+#[derive(Serialize, Clone)]
+struct Tag {
+  id: String,
+  name: String,
+  color: Option<String>,
+}
 
 #[derive(Serialize)]
 struct LibraryItem {
@@ -30,6 +40,35 @@ struct LibraryItem {
   file_count: i64,
   formats: Vec<String>,
   cover_path: Option<String>,
+  tags: Vec<Tag>,
+}
+
+fn parse_tags(raw: Option<String>) -> Vec<Tag> {
+  let raw = match raw {
+    Some(value) => value,
+    None => return vec![],
+  };
+  raw
+    .split("||")
+    .filter_map(|entry| {
+      let mut parts = entry.splitn(3, '|');
+      let id = parts.next()?.trim();
+      let name = parts.next()?.trim();
+      let color = parts.next().unwrap_or("").trim();
+      if id.is_empty() || name.is_empty() {
+        return None;
+      }
+      Some(Tag {
+        id: id.to_string(),
+        name: name.to_string(),
+        color: if color.is_empty() {
+          None
+        } else {
+          Some(color.to_string())
+        },
+      })
+    })
+    .collect()
 }
 
 #[derive(Serialize)]
@@ -146,12 +185,23 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
        GROUP_CONCAT(DISTINCT authors.name) as authors, \
        COUNT(DISTINCT files.id) as file_count, \
        GROUP_CONCAT(DISTINCT files.extension) as formats, \
-       MAX(covers.local_path) as cover_path \
+       MAX(covers.local_path) as cover_path, \
+       tag_map.tags as tags \
        FROM items \
        LEFT JOIN item_authors ON item_authors.item_id = items.id \
        LEFT JOIN authors ON authors.id = item_authors.author_id \
        LEFT JOIN files ON files.item_id = items.id \
        LEFT JOIN covers ON covers.item_id = items.id \
+       LEFT JOIN ( \
+         SELECT item_id, GROUP_CONCAT(tag_entry, '||') as tags \
+         FROM ( \
+           SELECT DISTINCT item_tags.item_id as item_id, \
+             tags.id || '|' || tags.name || '|' || IFNULL(tags.color, '') as tag_entry \
+           FROM item_tags \
+           JOIN tags ON tags.id = item_tags.tag_id \
+         ) \
+         GROUP BY item_id \
+       ) as tag_map ON tag_map.item_id = items.id \
        GROUP BY items.id"
     )
     .map_err(|err| err.to_string())?;
@@ -161,6 +211,7 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
       let authors: Option<String> = row.get(3)?;
       let formats: Option<String> = row.get(5)?;
       let cover_path: Option<String> = row.get(6)?;
+      let tags: Option<String> = row.get(7)?;
       Ok(LibraryItem {
         id: row.get(0)?,
         title: row.get(1)?,
@@ -179,6 +230,7 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
           .map(|value| value.trim().to_uppercase())
           .collect(),
         cover_path,
+        tags: parse_tags(tags),
       })
     })
     .map_err(|err| err.to_string())?;
@@ -219,6 +271,91 @@ fn get_inbox_items(app: tauri::AppHandle) -> Result<Vec<InboxItem>, String> {
     items.push(row.map_err(|err| err.to_string())?);
   }
   Ok(items)
+}
+
+#[tauri::command]
+fn list_tags(app: tauri::AppHandle) -> Result<Vec<Tag>, String> {
+  let conn = open_db(&app)?;
+  let mut stmt = conn
+    .prepare("SELECT id, name, color FROM tags ORDER BY name")
+    .map_err(|err| err.to_string())?;
+  let rows = stmt
+    .query_map(params![], |row| {
+      Ok(Tag {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        color: row.get(2)?,
+      })
+    })
+    .map_err(|err| err.to_string())?;
+  let mut tags = Vec::new();
+  for row in rows {
+    tags.push(row.map_err(|err| err.to_string())?);
+  }
+  Ok(tags)
+}
+
+#[tauri::command]
+fn create_tag(app: tauri::AppHandle, name: String, color: Option<String>) -> Result<Tag, String> {
+  let conn = open_db(&app)?;
+  let trimmed = name.trim();
+  if trimmed.is_empty() {
+    return Err("Tag name cannot be empty".to_string());
+  }
+  let normalized = trimmed.to_lowercase();
+  if let Some(existing) = conn
+    .query_row(
+      "SELECT id, name, color FROM tags WHERE normalized = ?1",
+      params![normalized],
+      |row| {
+        Ok(Tag {
+          id: row.get(0)?,
+          name: row.get(1)?,
+          color: row.get(2)?,
+        })
+      },
+    )
+    .optional()
+    .map_err(|err| err.to_string())?
+  {
+    return Ok(existing);
+  }
+  let id = Uuid::new_v4().to_string();
+  conn
+    .execute(
+      "INSERT INTO tags (id, name, normalized, color, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+      params![id, trimmed, normalized, color, chrono::Utc::now().timestamp_millis()],
+    )
+    .map_err(|err| err.to_string())?;
+  Ok(Tag {
+    id,
+    name: trimmed.to_string(),
+    color,
+  })
+}
+
+#[tauri::command]
+fn add_tag_to_item(app: tauri::AppHandle, item_id: String, tag_id: String) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  conn
+    .execute(
+      "INSERT OR IGNORE INTO item_tags (item_id, tag_id, source, confidence) VALUES (?1, ?2, 'user', 1)",
+      params![item_id, tag_id],
+    )
+    .map_err(|err| err.to_string())?;
+  Ok(())
+}
+
+#[tauri::command]
+fn remove_tag_from_item(app: tauri::AppHandle, item_id: String, tag_id: String) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  conn
+    .execute(
+      "DELETE FROM item_tags WHERE item_id = ?1 AND tag_id = ?2",
+      params![item_id, tag_id],
+    )
+    .map_err(|err| err.to_string())?;
+  Ok(())
 }
 
 #[tauri::command]
@@ -1555,6 +1692,7 @@ fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
   apply_migration(&conn, "0000_nebulous_mysterio", MIGRATION_SQL)?;
   apply_migration(&conn, "0001_wandering_young_avengers", MIGRATION_COVERS_SQL)?;
   apply_migration(&conn, "0002_pending_changes", MIGRATION_PENDING_CHANGES_SQL)?;
+  apply_migration(&conn, "0003_tag_colors", MIGRATION_TAG_COLORS_SQL)?;
   conn.execute_batch("PRAGMA foreign_keys = ON;")
     .map_err(|err| err.to_string())?;
   Ok(conn)
@@ -2850,6 +2988,10 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       get_library_items,
       get_inbox_items,
+      list_tags,
+      create_tag,
+      add_tag_to_item,
+      remove_tag_from_item,
       get_cover_blob,
       get_duplicate_groups,
       get_pending_changes,
