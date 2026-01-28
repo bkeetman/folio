@@ -1,9 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
+  --app-bg: #f7f4ef;
+  --app-surface: #f6f2ec;
+  --app-panel: #fffdf9;
+  --app-ink: #26211d;
+  --app-ink-muted: #6b625a;
+  --app-border: rgba(44, 38, 33, 0.14);
+  --app-accent: #c97a3a;
+  --app-accent-strong: #a95a2a;
   font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-  color: #2b2520;
-  background: radial-gradient(circle at top, #fffaf2 0%, #f5efe6 60%, #efe6db 100%);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -18,6 +26,14 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background: var(--app-bg);
+  color: var(--app-ink);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+#root {
+  min-height: 100vh;
 }
 
 a {
@@ -26,6 +42,7 @@ a {
 }
 
 button,
-input {
+input,
+select {
   font-family: inherit;
 }
