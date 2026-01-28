@@ -26,20 +26,19 @@
         <div class="overview-card">
           <h3>What it does</h3>
           <p>
-            Folio scans your ebook folders, extracts metadata, and gives you a gentle interface to clean up titles,
-            authors, covers, and duplicates.
+            Scans your library, matches metadata, and lets you approve clean file changes.
           </p>
         </div>
         <div class="overview-card">
           <h3>How it works</h3>
           <p>
-            Point it at a folder, review matches, and apply changes. You decide what gets renamed or written into files.
+            Choose a folder, review suggested fixes, then apply only what you want.
           </p>
         </div>
         <div class="overview-card">
           <h3>Ideal for</h3>
           <p>
-            Long‑term ebook collectors who want stable filenames, consistent metadata, and a quiet library view.
+            Calm, local collectors who want stable filenames and a tidy shelf.
           </p>
         </div>
       </section>
@@ -54,7 +53,7 @@
             </div>
             <div>
               <h2>macOS</h2>
-              <p class="card-subtitle">Signed DMG installer for Apple Silicon (M-series).</p>
+              <p class="card-subtitle">Signed DMG installers for Apple Silicon or Intel.</p>
             </div>
           </div>
           <div class="card-meta">
@@ -129,9 +128,10 @@
             const downloads = data.downloads || {};
             const platformLinks = {
               "darwin-aarch64": {
-                primary: downloads.macos?.dmg,
+                primary: downloads.macos?.arm64 || downloads.macos?.x64 || downloads.macos?.dmg,
                 files: [
-                  { label: "DMG", url: downloads.macos?.dmg },
+                  { label: "DMG (Apple Silicon)", url: downloads.macos?.arm64 || downloads.macos?.dmg },
+                  { label: "DMG (Intel)", url: downloads.macos?.x64 },
                 ],
               },
               "windows-x86_64": {
