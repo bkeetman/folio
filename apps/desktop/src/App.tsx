@@ -1,10 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import "./App.css";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { Button, Panel, SidebarItem } from "./components/ui";
+import {
+  Badge,
+  Button,
+  Input,
+  Panel,
+  Separator,
+  SidebarItem,
+} from "./components/ui";
+import {
+  BookOpen,
+  Copy,
+  Download,
+  FileClock,
+  FolderOpen,
+  Inbox,
+  LayoutGrid,
+  List,
+  PencilLine,
+  Search,
+  Sparkles,
+  Wrench,
+} from "lucide-react";
 import { MatchModal } from "./components/MatchModal";
 
 type View = "library" | "inbox" | "duplicates" | "fix" | "changes";
@@ -916,54 +936,73 @@ function App() {
   };
 
   return (
-    <div className="app">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">F</div>
-          <div>
-            <div className="brand-title">Folio</div>
-            <div className="brand-subtitle">Calm library</div>
+    <div
+      className={
+        view === "library"
+          ? "grid h-screen grid-cols-[210px_minmax(0,1fr)_240px] overflow-hidden bg-[var(--app-bg)] text-[var(--app-ink)]"
+          : "grid h-screen grid-cols-[210px_minmax(0,1fr)] overflow-hidden bg-[var(--app-bg)] text-[var(--app-ink)]"
+      }
+    >
+      <aside className="flex h-screen flex-col gap-3 overflow-hidden border-r border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-4">
+        <div className="flex items-start gap-3 rounded-lg border border-[var(--app-border)] bg-white/70 px-3 py-2 shadow-soft">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white">
+            <img
+              src="/src-tauri/icons/icon.png"
+              alt="Folio"
+              className="h-7 w-7"
+            />
+          </div>
+          <div className="pt-0.5 leading-tight">
+            <div className="text-sm font-semibold tracking-wide">Folio</div>
+            <div className="text-[11px] uppercase tracking-[0.2em] text-[var(--app-ink-muted)]">
+              Calm Library
+            </div>
           </div>
         </div>
 
-        <nav className="nav">
+        <nav className="flex flex-col gap-1">
           <SidebarItem active={view === "library"} onClick={() => setView("library")}>
+            <BookOpen size={16} />
             Library
           </SidebarItem>
           <SidebarItem active={view === "inbox"} onClick={() => setView("inbox")}>
+            <Inbox size={16} />
             Inbox
           </SidebarItem>
           <SidebarItem
             active={view === "duplicates"}
             onClick={() => setView("duplicates")}
           >
+            <Copy size={16} />
             Duplicates
           </SidebarItem>
           <SidebarItem active={view === "fix"} onClick={() => setView("fix")}>
+            <Wrench size={16} />
             Fix Metadata
           </SidebarItem>
           <SidebarItem active={view === "changes"} onClick={() => setView("changes")}>
+            <FileClock size={16} />
             Changes
           </SidebarItem>
         </nav>
 
         <Panel title="Activity">
           {scanStatus ? (
-            <div className="scan-status">
+            <div className="rounded-md bg-[rgba(207,217,210,0.35)] px-2 py-1 text-xs text-[var(--app-ink-muted)]">
               {scanStatus}
               {scanning && scanStartedAt ? (
-                <div className="scan-timer">
+                <div className="mt-1 text-[10px] tracking-[0.3px]">
                   {Math.floor((Date.now() - scanStartedAt) / 1000)}s elapsed
                 </div>
               ) : null}
               {scanProgress ? (
-                <div className="scan-progress">
-                  <div className="scan-progress-label">
+                <div className="mt-2 flex flex-col gap-1.5">
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--app-ink-muted)]">
                     {scanProgress.processed} / {scanProgress.total || "?"}
                   </div>
-                  <div className="scan-progress-bar">
+                  <div className="h-1.5 overflow-hidden rounded-full bg-[rgba(208,138,70,0.2)]">
                     <div
-                      className="scan-progress-fill"
+                      className="h-full rounded-full bg-[linear-gradient(90deg,var(--app-accent),var(--app-accent-strong))] transition-[width] duration-200"
                       style={{
                         width:
                           scanProgress.total > 0
@@ -977,11 +1016,11 @@ function App() {
                       }}
                     />
                   </div>
-                  <div className="scan-progress-file">
+                  <div className="truncate text-[10px] text-[var(--app-ink-muted)]">
                     {scanProgress.current}
                   </div>
                   {scanEtaSeconds !== null ? (
-                    <div className="scan-progress-eta">
+                    <div className="text-[10px] text-[var(--app-ink-muted)]">
                       ETA {formatEta(scanEtaSeconds)}
                     </div>
                   ) : null}
@@ -989,14 +1028,17 @@ function App() {
               ) : null}
             </div>
           ) : (
-            <div className="scan-status muted">No recent activity.</div>
+            <div className="rounded-md bg-[rgba(227,221,214,0.35)] px-2 py-1 text-xs text-[var(--app-ink-muted)]">
+              No recent activity.
+            </div>
           )}
         </Panel>
 
         <Panel title="Organizer">
-          <div className="organizer-row">
+          <div className="flex items-center justify-between text-xs text-[var(--app-ink-muted)]">
             <span>Mode</span>
             <select
+              className="h-7 rounded-md border border-[var(--app-border)] bg-white/80 px-2 text-xs"
               value={organizeMode}
               onChange={(event) => setOrganizeMode(event.target.value)}
             >
@@ -1005,20 +1047,20 @@ function App() {
               <option value="move">Move</option>
             </select>
           </div>
-          <input
-            className="organizer-input"
+          <Input
+            className="text-xs"
             value={organizeTemplate}
             onChange={(event) => setOrganizeTemplate(event.target.value)}
           />
           {organizePlan ? (
-            <div className="organizer-preview">
+            <div className="flex flex-col gap-2 text-xs text-[var(--app-ink-muted)]">
               <div>{organizePlan.entries.length} planned</div>
               {organizePlan.entries.slice(0, 3).map((entry) => (
-                <div key={entry.file_id} className="organizer-path">
+                <div key={entry.file_id} className="truncate">
                   {entry.target_path}
                 </div>
               ))}
-              <div className="organizer-actions">
+              <div className="flex flex-wrap gap-2">
                 <Button variant="primary" onClick={handleApplyOrganize}>
                   Apply Plan
                 </Button>
@@ -1028,55 +1070,63 @@ function App() {
               </div>
             </div>
           ) : null}
-          {organizeStatus ? <div className="scan-status">{organizeStatus}</div> : null}
+          {organizeStatus ? (
+            <div className="rounded-md bg-[rgba(207,217,210,0.35)] px-2 py-1 text-xs text-[var(--app-ink-muted)]">
+              {organizeStatus}
+            </div>
+          ) : null}
         </Panel>
 
         <Panel title="Library Health">
-          <div className="health-row">
-            <span>Complete</span>
-            <strong>
-              {libraryHealth
-                ? `${Math.round(
-                    (libraryHealth.complete / Math.max(1, libraryHealth.total)) * 100
-                  )}%`
-                : "—"}
-            </strong>
-          </div>
-          <div className="health-row">
-            <span>Missing ISBN</span>
-            <strong>{libraryHealth ? libraryHealth.missing_isbn : "—"}</strong>
-          </div>
-          <div className="health-row">
-            <span>Missing Cover</span>
-            <strong>{libraryHealth ? libraryHealth.missing_cover : "—"}</strong>
-          </div>
-          <div className="health-row">
-            <span>Duplicates</span>
-            <strong>{libraryHealth ? libraryHealth.duplicates : "—"}</strong>
+          <div className="grid gap-2">
+            <div className="flex items-baseline justify-between">
+              <span className="text-[11px] uppercase tracking-[0.18em] text-[var(--app-ink-muted)]">
+                Complete
+              </span>
+              <strong className="text-base">
+                {libraryHealth
+                  ? `${Math.round(
+                      (libraryHealth.complete / Math.max(1, libraryHealth.total)) * 100
+                    )}%`
+                  : "—"}
+              </strong>
+            </div>
+            <div className="flex items-center justify-between text-[13px]">
+              <span className="text-[var(--app-ink-muted)]">Missing ISBN</span>
+              <strong className="tabular-nums">{libraryHealth ? libraryHealth.missing_isbn : "—"}</strong>
+            </div>
+            <div className="flex items-center justify-between text-[13px]">
+              <span className="text-[var(--app-ink-muted)]">Missing Cover</span>
+              <strong className="tabular-nums">{libraryHealth ? libraryHealth.missing_cover : "—"}</strong>
+            </div>
+            <div className="flex items-center justify-between text-[13px]">
+              <span className="text-[var(--app-ink-muted)]">Duplicates</span>
+              <strong className="tabular-nums">{libraryHealth ? libraryHealth.duplicates : "—"}</strong>
+            </div>
           </div>
         </Panel>
 
-        <Panel title="Danger Zone" className="danger">
+        <Panel title="Danger Zone" className="border-[rgba(178,74,44,0.25)] bg-[rgba(255,247,242,0.85)]">
           <Button variant="danger" onClick={handleClearLibrary}>
             Clear Library
           </Button>
-          <div className="danger-note">
+          <div className="text-[11px] text-[#7a5a4e]">
             Removes all Folio data. Your files remain untouched.
           </div>
         </Panel>
       </aside>
 
-      <main className="main">
-        <header className="toolbar">
-          <div className="title-block">
-            <h1>
+      <main className="flex h-screen flex-col gap-4 overflow-y-auto px-6 py-4">
+        <header className="flex items-center justify-between gap-6 border-b border-[var(--app-border)] pb-3">
+          <div className="space-y-1">
+            <div className="text-lg font-semibold">
               {view === "library" && "Your Library"}
               {view === "inbox" && "Inbox"}
               {view === "duplicates" && "Duplicates"}
               {view === "fix" && "Fix Metadata"}
               {view === "changes" && "File Changes"}
-            </h1>
-            <p>
+            </div>
+            <p className="text-[11px] text-[var(--app-ink-muted)]">
               {view === "library" && "Browse and shape your calm stack."}
               {view === "inbox" && "New or incomplete entries waiting on you."}
               {view === "duplicates" && "Resolve duplicates detected by hash."}
@@ -1085,68 +1135,100 @@ function App() {
             </p>
           </div>
 
-          <div className="toolbar-actions">
-            <div className="toolbar-group">
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <div className="flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] p-1 shadow-soft">
               <Button
                 variant="toolbar"
                 size="sm"
+                className="hover:bg-white"
                 onClick={handleScan}
                 disabled={scanning}
               >
-                {scanning ? "Scanning…" : "Scan"}
+                <FolderOpen size={14} />
+                {scanning ? "Scanning" : "Scan"}
               </Button>
-              <Button variant="toolbar" size="sm" onClick={handlePlanOrganize}>
+              <Button variant="toolbar" size="sm" className="hover:bg-white" onClick={handlePlanOrganize}>
+                <LayoutGrid size={14} />
                 Organize
               </Button>
-              <Button variant="toolbar" size="sm" onClick={() => setView("fix")}> 
+              <Button variant="toolbar" size="sm" className="hover:bg-white" onClick={() => setView("fix")}>
+                <Sparkles size={14} />
                 Enrich
               </Button>
-              <Button variant="toolbar" size="sm" onClick={() => checkForUpdates(false)}>
-                Update
-              </Button>
-            </div>
-            <div className="search">
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search title or author"
-              />
-            </div>
-            {view === "library" && !libraryReady ? (
-              <div className="library-status">Loading library...</div>
-            ) : null}
-            <div className="view-toggle">
               <Button
                 variant="toolbar"
                 size="sm"
-                className={grid ? "active" : ""}
+                className="hover:bg-white"
+                onClick={() => checkForUpdates(false)}
+              >
+                <Download size={14} />
+                Update
+              </Button>
+            </div>
+
+            <div className="relative w-48">
+              <Search
+                size={14}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--app-ink-muted)]"
+              />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search title or author"
+                className="pl-8"
+              />
+            </div>
+
+            <div className="flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] p-1">
+              <Button
+                variant="toolbar"
+                size="sm"
+                data-active={grid}
+                className={
+                  grid
+                    ? "bg-white shadow-soft"
+                    : "hover:bg-white/80 hover:border-[var(--app-border)]"
+                }
                 onClick={() => setGrid(true)}
               >
+                <LayoutGrid size={14} />
                 Grid
               </Button>
               <Button
                 variant="toolbar"
                 size="sm"
-                className={!grid ? "active" : ""}
+                data-active={!grid}
+                className={
+                  !grid
+                    ? "bg-white shadow-soft"
+                    : "hover:bg-white/80 hover:border-[var(--app-border)]"
+                }
                 onClick={() => setGrid(false)}
               >
+                <List size={14} />
                 List
               </Button>
             </div>
+
+            {view === "library" && !libraryReady ? (
+              <Badge variant="muted">Loading</Badge>
+            ) : null}
           </div>
-          {updateStatus ? (
-            <div className="scan-status">{updateStatus}</div>
-          ) : null}
         </header>
+        {updateStatus ? (
+          <div className="rounded-md bg-[rgba(207,217,210,0.35)] px-2 py-1 text-xs text-[var(--app-ink-muted)]">
+            {updateStatus}
+          </div>
+        ) : null}
 
         {scanning && scanProgress ? (
-          <div className="library-progress">
-            <div className="library-progress-label">
+          <div className="flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-white/70 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--app-ink-muted)]">
               Scanning {scanProgress.processed} of {scanProgress.total || "?"}
             </div>
-            <div className="library-progress-bar">
+            <div className="h-2 overflow-hidden rounded-full bg-[rgba(208,138,70,0.2)]">
               <div
-                className="library-progress-fill"
+                className="h-full rounded-full bg-[linear-gradient(90deg,var(--app-accent),var(--app-accent-strong))] transition-[width] duration-200"
                 style={{
                   width:
                     scanProgress.total > 0
@@ -1160,49 +1242,65 @@ function App() {
                 }}
               />
             </div>
-            <div className="library-progress-file">{scanProgress.current}</div>
+            <div className="truncate text-[10px] text-[var(--app-ink-muted)]">
+              {scanProgress.current}
+            </div>
             {scanEtaSeconds !== null ? (
-              <div className="library-progress-eta">
+              <div className="text-[10px] text-[var(--app-ink-muted)]">
                 ETA {formatEta(scanEtaSeconds)}
               </div>
             ) : null}
           </div>
         ) : scanning ? (
-          <div className="library-progress">
-            <div className="library-progress-label">Preparing scan…</div>
-            <div className="library-progress-bar indeterminate">
-              <div className="library-progress-fill" />
+          <div className="flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-white/70 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--app-ink-muted)]">
+              Preparing scan…
             </div>
-            <div className="library-progress-file">Collecting files…</div>
+            <div className="h-2 overflow-hidden rounded-full bg-[rgba(208,138,70,0.2)]">
+              <div className="h-full w-1/3 animate-pulse rounded-full bg-[linear-gradient(90deg,var(--app-accent),var(--app-accent-strong))]" />
+            </div>
+            <div className="text-[10px] text-[var(--app-ink-muted)]">Collecting files…</div>
           </div>
         ) : null}
 
-        <div className="workspace">
-          <section className="content">
+        <div className="flex flex-col gap-4">
+          <section className="flex flex-col gap-4">
             {view === "library" && (
               <>
-                <div className="filter-row">
-                  <button className="chip active">All</button>
-                  <button className="chip">EPUB</button>
-                  <button className="chip">PDF</button>
-                  <button className="chip">Needs Metadata</button>
-                  <button className="chip">Tagged</button>
+                <div className="flex flex-wrap gap-2">
+                  <button className="rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)] px-3 py-1 text-xs">
+                    All
+                  </button>
+                  <button className="rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs">
+                    EPUB
+                  </button>
+                  <button className="rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs">
+                    PDF
+                  </button>
+                  <button className="rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs">
+                    Needs Metadata
+                  </button>
+                  <button className="rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs">
+                    Tagged
+                  </button>
                 </div>
 
                 {isDesktop && !libraryItems.length ? (
-                  <div className="empty-state">
-                    <div className="card-title">Library is empty</div>
-                    <div className="card-meta">Scan a folder to import books.</div>
+                  <div className="rounded-lg border border-[var(--app-border)] bg-white/70 p-4">
+                    <div className="text-[13px] font-semibold">Library is empty</div>
+                    <div className="text-xs text-[var(--app-ink-muted)]">
+                      Scan a folder to import books.
+                    </div>
                   </div>
                 ) : grid ? (
-                  <div className="grid">
+                  <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3 rounded-lg bg-[linear-gradient(180deg,rgba(255,255,255,0.45),rgba(255,255,255,0.45)),repeating-linear-gradient(to_bottom,rgba(44,38,33,0.05)_0px,rgba(44,38,33,0.05)_2px,transparent_2px,transparent_190px)] p-3">
                     {filteredBooks.map((book) => (
                       <article
                         key={book.id}
                         className={
                           selectedItemId === book.id
-                            ? "card selected"
-                            : "card"
+                            ? "flex cursor-pointer flex-col overflow-hidden rounded-md border border-[rgba(201,122,58,0.6)] bg-[#fffdf9] shadow-[0_16px_24px_rgba(201,122,58,0.18)] transition"
+                            : "flex cursor-pointer flex-col overflow-hidden rounded-md border border-[rgba(44,38,33,0.08)] bg-[#fffdf9] shadow-[0_10px_18px_rgba(30,22,15,0.06)] transition hover:shadow-[0_18px_26px_rgba(24,18,12,0.1)]"
                         }
                         onClick={() => setSelectedItemId(book.id)}
                         role="button"
@@ -1211,11 +1309,11 @@ function App() {
                           if (event.key === "Enter") setSelectedItemId(book.id);
                         }}
                       >
-                        <div className={`cover ${book.cover ? "has-cover" : ""}`}>
+                        <div className="relative aspect-[3/4] overflow-hidden rounded-t-md border-b border-[rgba(44,38,33,0.06)] bg-[linear-gradient(135deg,#efe3d1,#f2e7d9)]">
                             {book.cover ? (
                               <img
                                 key={`${book.id}-${coverRefreshToken}-${book.cover ?? "none"}`}
-                                className="cover-image"
+                                className="absolute inset-0 h-full w-full object-cover bg-[#f7f1e7]"
                                 src={book.cover}
                                 alt=""
                                 onError={() => {
@@ -1224,33 +1322,39 @@ function App() {
                                 }}
                               />
                             ) : null}
-                          {book.cover ? (
-                            <div className="cover-badge">{book.format}</div>
+                            {book.cover ? (
+                            <div className="absolute left-2 top-2 rounded-md bg-[rgba(255,255,255,0.9)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]">
+                              {book.format}
+                            </div>
                           ) : (
-                            <div className="cover-fallback">
-                              <div className="cover-badge">{book.format}</div>
-                              <div className="cover-title">{book.title}</div>
+                            <div className="relative z-10 flex flex-col gap-2 p-3">
+                              <div className="rounded-md bg-[rgba(255,255,255,0.8)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]">
+                                {book.format}
+                              </div>
+                              <div className="text-[13px] font-semibold leading-snug">
+                                {book.title}
+                              </div>
                             </div>
                           )}
                         </div>
-                        <div className="card-body">
-                          <div className="card-title">{book.title}</div>
-                          <div className="card-meta-grid">
-                            <div className="meta-row">
-                              <span className="meta-label">Auteur</span>
-                              <span className="meta-value">{book.author}</span>
+                        <div className="flex flex-col gap-1 px-3 py-2">
+                          <div className="text-[13px] font-semibold">{book.title}</div>
+                          <div className="grid gap-1">
+                            <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
+                              <span className="text-[10px] uppercase tracking-[0.12em]">Auteur</span>
+                              <span className="text-[var(--app-ink)]">{book.author}</span>
                             </div>
-                            <div className="meta-row">
-                              <span className="meta-label">Jaar</span>
-                              <span className="meta-value">{book.year}</span>
+                            <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
+                              <span className="text-[10px] uppercase tracking-[0.12em]">Jaar</span>
+                              <span className="text-[var(--app-ink)]">{book.year}</span>
                             </div>
-                            <div className="meta-row">
-                              <span className="meta-label">Formaat</span>
-                              <span className="meta-value">{book.format}</span>
+                            <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
+                              <span className="text-[10px] uppercase tracking-[0.12em]">Formaat</span>
+                              <span className="text-[var(--app-ink)]">{book.format}</span>
                             </div>
-                            <div className="meta-row">
-                              <span className="meta-label">Status</span>
-                              <span className="meta-value">{book.status}</span>
+                            <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
+                              <span className="text-[10px] uppercase tracking-[0.12em]">Status</span>
+                              <span className="text-[var(--app-ink)]">{book.status}</span>
                             </div>
                           </div>
                         </div>
@@ -1258,8 +1362,8 @@ function App() {
                     ))}
                   </div>
                 ) : (
-                  <div className="list-table">
-                    <div className="list-header">
+                  <div className="overflow-hidden rounded-lg border border-[var(--app-border)] bg-[#fffdf9]">
+                    <div className="grid grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr_1fr] gap-3 bg-[#f9f4ee] px-4 py-2 text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
                       <div></div>
                       <div>Titel</div>
                       <div>Auteur</div>
@@ -1272,8 +1376,8 @@ function App() {
                         key={book.id}
                         className={
                           selectedItemId === book.id
-                            ? "list-row selected"
-                            : "list-row"
+                            ? "grid cursor-pointer grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr_1fr] gap-3 border-t border-[var(--app-border)] bg-[rgba(201,122,58,0.12)] px-4 py-2"
+                            : "grid cursor-pointer grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr_1fr] gap-3 border-t border-[var(--app-border)] px-4 py-2 hover:bg-[rgba(201,122,58,0.06)]"
                         }
                         onClick={() => setSelectedItemId(book.id)}
                         role="button"
@@ -1282,11 +1386,11 @@ function App() {
                           if (event.key === "Enter") setSelectedItemId(book.id);
                         }}
                       >
-                        <div className="list-cover">
+                        <div className="grid h-16 w-12 place-items-center overflow-hidden rounded-md border border-[rgba(44,38,33,0.12)] bg-[#fffaf4]">
                             {book.cover ? (
                               <img
                                 key={`${book.id}-${coverRefreshToken}-${book.cover ?? "none"}`}
-                                className="list-cover-image"
+                                className="h-full w-full object-contain"
                                 src={book.cover}
                                 alt=""
                                 onError={() => {
@@ -1295,14 +1399,18 @@ function App() {
                                 }}
                               />
                           ) : (
-                            <div className="list-cover-fallback">{book.format}</div>
+                            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
+                              {book.format}
+                            </div>
                           )}
                         </div>
-                        <div className="list-title">{book.title}</div>
-                        <div className="list-meta">{book.author}</div>
-                        <div className="list-meta">{book.year}</div>
-                        <div className="list-meta">{book.format}</div>
-                        <div className="status-pill">{book.status}</div>
+                        <div className="text-sm font-semibold">{book.title}</div>
+                        <div className="text-xs text-[var(--app-ink-muted)]">{book.author}</div>
+                        <div className="text-xs text-[var(--app-ink-muted)]">{book.year}</div>
+                        <div className="text-xs text-[var(--app-ink-muted)]">{book.format}</div>
+                        <div className="inline-flex items-center justify-center rounded-full border border-[rgba(201,122,58,0.25)] bg-[rgba(201,122,58,0.08)] px-2 py-0.5 text-[11px]">
+                          {book.status}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1311,15 +1419,18 @@ function App() {
             )}
 
             {view === "inbox" && (
-              <section className="content">
-                <div className="inbox">
+              <section className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2">
                   {(isDesktop ? inbox : inboxItems).map((item) => (
-                    <div key={item.id} className="inbox-row">
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between rounded-md border border-[var(--app-border)] bg-white/70 px-3 py-2"
+                    >
                       <div>
-                        <div className="card-title">{item.title}</div>
-                        <div className="card-meta">{item.reason}</div>
+                        <div className="text-[13px] font-semibold">{item.title}</div>
+                        <div className="text-xs text-[var(--app-ink-muted)]">{item.reason}</div>
                       </div>
-                      <div className="inbox-actions">
+                      <div className="flex gap-2">
                         <Button variant="ghost">Fix</Button>
                         <Button variant="ghost">Ignore</Button>
                       </div>
@@ -1330,13 +1441,16 @@ function App() {
             )}
 
             {view === "duplicates" && (
-              <section className="content">
-                <div className="duplicate-list">
-                    {(isDesktop ? duplicates : duplicateGroups).map((group) => (
-                      <div key={group.id} className="duplicate-card">
-                        <div>
-                          <div className="card-title">{group.title}</div>
-                          <div className="card-meta">
+              <section className="flex flex-col gap-4">
+                <div className="flex flex-col gap-3">
+                  {(isDesktop ? duplicates : duplicateGroups).map((group) => (
+                    <div
+                      key={group.id}
+                      className="flex items-start justify-between gap-4 rounded-md border border-[var(--app-border)] bg-white/70 p-3"
+                    >
+                      <div>
+                        <div className="text-[13px] font-semibold">{group.title}</div>
+                        <div className="text-xs text-[var(--app-ink-muted)]">
                             {group.files.length} matching files
                           </div>
                           <ul>
@@ -1346,8 +1460,8 @@ function App() {
                               const isSelected =
                                 duplicateKeepSelection[group.id] === fileId;
                               return (
-                                <li key={fileId} className="duplicate-option">
-                                  <label>
+                                <li key={fileId} className="mt-2">
+                                  <label className="flex cursor-pointer items-start gap-2 text-xs">
                                     <input
                                       type="radio"
                                       name={`duplicate-${group.id}`}
@@ -1360,8 +1474,12 @@ function App() {
                                         }))
                                       }
                                     />
-                                    <span className="duplicate-filename">{file}</span>
-                                    <span className="duplicate-path">{filePath}</span>
+                                    <span className="font-medium text-[var(--app-ink)]">
+                                      {file}
+                                    </span>
+                                    <span className="truncate text-[10px] text-[var(--app-ink-muted)]">
+                                      {filePath}
+                                    </span>
                                   </label>
                                 </li>
                               );
@@ -1380,74 +1498,88 @@ function App() {
                       >
                         Resolve
                       </Button>
-                      </div>
-                    ))}
+                    </div>
+                  ))}
                 </div>
               </section>
             )}
 
             {view === "fix" && (
-              <section className="content">
-                <div className="fix-layout">
-                  <div className="fix-current">
-                    <div className="panel-title">Current Metadata</div>
+              <section className="flex flex-col gap-4">
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
+                  <div className="rounded-md border border-[var(--app-border)] bg-white/70 p-3">
+                    <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--app-ink-muted)]">
+                      Current Metadata
+                    </div>
                     {currentFixItem ? (
                       <>
-                        <div className="meta-row">
-                          <span>Title</span>
-                          <strong>{currentFixItem.title}</strong>
+                        <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
+                          <span className="text-[10px] uppercase tracking-[0.12em]">Title</span>
+                          <strong className="text-[var(--app-ink)]">
+                            {currentFixItem.title}
+                          </strong>
                         </div>
-                        <div className="meta-row">
-                          <span>Issue</span>
-                          <strong>{currentFixItem.reason}</strong>
+                        <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
+                          <span className="text-[10px] uppercase tracking-[0.12em]">Issue</span>
+                          <strong className="text-[var(--app-ink)]">
+                            {currentFixItem.reason}
+                          </strong>
                         </div>
                         <Button variant="primary" onClick={handleFetchCandidates}>
                           {fixLoading ? "Searching..." : "Search Sources"}
                         </Button>
                       </>
                     ) : (
-                      <div className="card-meta">No items need fixes.</div>
+                      <div className="text-xs text-[var(--app-ink-muted)]">
+                        No items need fixes.
+                      </div>
                     )}
                   </div>
 
-                  <div className="fix-results">
-                    <div className="panel-title">Top Matches</div>
+                  <div className="rounded-md border border-[var(--app-border)] bg-white/70 p-3">
+                    <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--app-ink-muted)]">
+                      Top Matches
+                    </div>
                     {candidateList.length ? (
-                      <div className="candidate-grid">
+                      <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
                         {candidateList.map((candidate) => {
                           const coverUrl = getCandidateCoverUrl(candidate);
                           return (
-                            <div key={candidate.id} className="candidate-card">
-                              <div className="candidate-cover">
-                                {coverUrl ? (
-                                  <img
-                                    className="candidate-cover-image"
-                                    src={coverUrl}
-                                    alt=""
-                                    onError={(event) => {
-                                      event.currentTarget.style.display = "none";
-                                    }}
-                                  />
-                                ) : (
-                                  <div className="candidate-cover-fallback">No cover</div>
-                                )}
+                          <div key={candidate.id} className="flex gap-3 rounded-md border border-[var(--app-border)] bg-white/80 p-3">
+                            <div className="h-20 w-14 overflow-hidden rounded-md border border-[var(--app-border)] bg-[#fffaf4]">
+                              {coverUrl ? (
+                                <img
+                                  className="h-full w-full object-cover"
+                                  src={coverUrl}
+                                  alt=""
+                                  onError={(event) => {
+                                    event.currentTarget.style.display = "none";
+                                  }}
+                                />
+                              ) : (
+                                <div className="grid h-full w-full place-items-center text-[10px] text-[var(--app-ink-muted)]">
+                                  No cover
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-1 flex-col gap-1">
+                              <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
+                                <span className="rounded-full bg-[rgba(201,122,58,0.12)] px-2 py-0.5">
+                                  {candidate.source}
+                                </span>
+                                <span>
+                                  {Math.round(candidate.confidence * 100)}%
+                                </span>
                               </div>
-                              <div className="candidate-info">
-                                <div className="candidate-head">
-                                  <span className="candidate-source">{candidate.source}</span>
-                                  <span className="candidate-score">
-                                    {Math.round(candidate.confidence * 100)}%
-                                  </span>
-                                </div>
-                                <div className="card-title">
-                                  {candidate.title ?? "Untitled"}
-                                </div>
-                                <div className="card-meta">
-                                  {candidate.authors.join(", ")}
-                                </div>
-                                <div className="card-meta">
-                                  {candidate.published_year ?? "Unknown"}
-                                </div>
+                              <div className="text-[13px] font-semibold">
+                                {candidate.title ?? "Untitled"}
+                              </div>
+                              <div className="text-xs text-[var(--app-ink-muted)]">
+                                {candidate.authors.join(", ")}
+                              </div>
+                              <div className="text-xs text-[var(--app-ink-muted)]">
+                                {candidate.published_year ?? "Unknown"}
+                              </div>
                                 <Button
                                   variant="ghost"
                                   onClick={() => handleApplyCandidate(candidate)}
@@ -1461,7 +1593,7 @@ function App() {
                         })}
                       </div>
                     ) : (
-                      <div className="card-meta">
+                      <div className="mt-2 text-xs text-[var(--app-ink-muted)]">
                         {fixLoading ? "Searching..." : "No candidates found."}
                       </div>
                     )}
@@ -1471,9 +1603,9 @@ function App() {
             )}
 
             {view === "changes" && (
-              <section className="content">
-                <div className="changes-toolbar">
-                  <div className="changes-filters">
+              <section className="flex flex-col gap-4">
+                <div className="flex flex-wrap items-center gap-2 rounded-md border border-[var(--app-border)] bg-white/70 p-2">
+                  <div className="flex gap-2">
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1516,11 +1648,11 @@ function App() {
                     Apply Selected
                   </Button>
                 </div>
-                <div className="change-list">
+                <div className="flex flex-col gap-2">
                   {(isDesktop ? pendingChanges : samplePendingChanges).length ? (
                     (isDesktop ? pendingChanges : samplePendingChanges).map((change) => (
-                      <div key={change.id} className="change-card">
-                        <label className="change-select">
+                      <div key={change.id} className="flex items-start gap-3 rounded-md border border-[var(--app-border)] bg-white/70 p-3">
+                        <label className="mt-1">
                           <input
                             type="checkbox"
                             checked={selectedChangeIds.has(change.id)}
@@ -1528,32 +1660,38 @@ function App() {
                             disabled={change.status !== "pending"}
                           />
                         </label>
-                        <div className="change-body">
-                          <div className="card-title">
+                        <div className="flex flex-1 flex-col gap-1">
+                          <div className="text-[13px] font-semibold">
                             {change.change_type === "rename"
                               ? "Rename File"
                               : change.change_type === "delete"
                                 ? "Delete File"
                                 : "Update EPUB Metadata"}
                           </div>
-                          <div className="change-status">
+                          <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
                             {change.status === "error"
                               ? "Error"
                               : change.status === "applied"
                                 ? "Applied"
                                 : "Pending"}
                           </div>
-                          <div className="card-meta">
+                          <div className="text-xs text-[var(--app-ink-muted)]">
                             {change.from_path ?? ""}
                           </div>
                           {change.to_path ? (
-                            <div className="card-meta">→ {change.to_path}</div>
+                            <div className="text-xs text-[var(--app-ink-muted)]">
+                              → {change.to_path}
+                            </div>
                           ) : null}
                           {change.changes_json ? (
-                            <div className="card-meta">{change.changes_json}</div>
+                            <div className="text-xs text-[var(--app-ink-muted)]">
+                              {change.changes_json}
+                            </div>
                           ) : null}
                           {change.error ? (
-                            <div className="card-meta">Error: {change.error}</div>
+                            <div className="text-xs text-[var(--app-ink-muted)]">
+                              Error: {change.error}
+                            </div>
                           ) : null}
                         </div>
                         <Button
@@ -1566,7 +1704,7 @@ function App() {
                       </div>
                     ))
                   ) : (
-                    <div className="card-meta">
+                    <div className="text-xs text-[var(--app-ink-muted)]">
                       {pendingChangesLoading
                         ? "Loading changes…"
                         : "No pending changes."}
@@ -1574,13 +1712,13 @@ function App() {
                   )}
                 </div>
                 {confirmDeleteOpen ? (
-                  <div className="confirm-overlay">
-                    <div className="confirm-card">
-                      <div className="card-title">Delete files?</div>
-                      <div className="card-meta">
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+                    <div className="w-full max-w-sm rounded-md border border-[var(--app-border)] bg-white p-4 shadow-panel">
+                      <div className="text-[13px] font-semibold">Delete files?</div>
+                      <div className="text-xs text-[var(--app-ink-muted)]">
                         You are about to delete {confirmDeleteIds.length} file(s).
                       </div>
-                      <div className="confirm-actions">
+                      <div className="mt-3 flex justify-end gap-2">
                         <Button variant="ghost" onClick={() => {
                           setConfirmDeleteOpen(false);
                           setConfirmDeleteIds([]);
@@ -1597,39 +1735,6 @@ function App() {
               </section>
             )}
           </section>
-
-          <aside className="inspector">
-            <div className="inspector-header">Details</div>
-            {view !== "library" ? (
-              <div className="card-meta">Select Library to inspect items.</div>
-            ) : selectedItem ? (
-              <div className="inspector-card">
-                <div className="inspector-title">{selectedItem.title}</div>
-                <div className="inspector-meta">{selectedItem.author}</div>
-                <div className="inspector-meta">{selectedItem.year}</div>
-                <div className="inspector-meta">{selectedItem.format}</div>
-                <div className="inspector-meta">{selectedItem.status}</div>
-                <div className="inspector-actions">
-                  <Button variant="toolbar" size="sm">
-                    Reveal
-                  </Button>
-                  <Button variant="toolbar" size="sm">
-                    Edit
-                  </Button>
-                  <Button
-                    variant="toolbar"
-                    size="sm"
-                    onClick={handleOpenMatchModal}
-                    disabled={!isDesktop}
-                  >
-                    Match metadata
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="card-meta">Select a book to see details.</div>
-            )}
-          </aside>
         </div>
 
         <MatchModal
@@ -1644,7 +1749,83 @@ function App() {
           onApply={handleMatchApply}
           onClose={() => setMatchOpen(false)}
         />
+
+        <footer className="mt-4 flex items-center justify-between rounded-md border border-[var(--app-border)] bg-white/70 px-3 py-2 text-[11px] text-[var(--app-ink-muted)]">
+          <div className="flex items-center gap-2">
+            <Badge variant="accent">Desktop</Badge>
+            <span>{scanStatus ?? updateStatus ?? "Idle"}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span>Folio {isDesktop ? "Desktop" : "Web"}</span>
+          </div>
+        </footer>
       </main>
+
+      {view === "library" ? (
+        <aside className="flex h-screen flex-col gap-3 overflow-hidden border-l border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-4">
+          <div className="flex items-center justify-between">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--app-ink-muted)]">
+              Details
+            </div>
+            <Badge variant="muted">Inspector</Badge>
+          </div>
+          <Separator />
+          {selectedItem ? (
+            <div className="rounded-md border border-[var(--app-border)] bg-white/80 p-3">
+              <div className="flex gap-3">
+                <div className="h-28 w-20 overflow-hidden rounded-md border border-[var(--app-border)] bg-[#fffaf4]">
+                  {selectedItem.cover ? (
+                    <img
+                      className="h-full w-full object-cover"
+                      src={selectedItem.cover}
+                      alt=""
+                      onError={() => {
+                        clearCoverOverride(selectedItem.id);
+                        void fetchCoverOverride(selectedItem.id);
+                      }}
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
+                      {selectedItem.format}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-1 flex-col gap-1">
+                  <div className="text-[13px] font-semibold">{selectedItem.title}</div>
+              <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.author}</div>
+              <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.year}</div>
+              <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.format}</div>
+              <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.status}</div>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Button variant="toolbar" size="sm" className="w-full justify-center">
+                  <FolderOpen size={14} />
+                  Reveal
+                </Button>
+                <Button variant="toolbar" size="sm" className="w-full justify-center">
+                  <PencilLine size={14} />
+                  Edit
+                </Button>
+                <Button
+                  variant="toolbar"
+                  size="sm"
+                  className="col-span-2 w-full justify-center"
+                  onClick={handleOpenMatchModal}
+                  disabled={!isDesktop}
+                >
+                  <Sparkles size={14} />
+                  Match metadata
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs text-[var(--app-ink-muted)]">
+              Select a book to see details.
+            </div>
+          )}
+        </aside>
+      ) : null}
     </div>
   );
 }
