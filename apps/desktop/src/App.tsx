@@ -4,116 +4,31 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import {
-  Badge,
-  Button,
-  Input,
-  Panel,
-  Separator,
-  SidebarItem,
-} from "./components/ui";
-import {
-  BookOpen,
-  Copy,
-  Download,
-  FileClock,
-  FolderOpen,
-  Inbox,
-  LayoutGrid,
-  List,
-  PencilLine,
-  Search,
-  Sparkles,
-  Wrench,
-} from "lucide-react";
+import type {
+  DuplicateGroup,
+  EnrichmentCandidate,
+  InboxItem,
+  LibraryFilter,
+  LibraryHealth,
+  LibraryItem,
+  OrganizePlan,
+  PendingChange,
+  ScanProgress,
+  ScanStats,
+  Tag,
+  View,
+} from "./types/library";
 import { MatchModal } from "./components/MatchModal";
-
-type View = "library" | "inbox" | "duplicates" | "fix" | "changes";
-type LibraryFilter = "all" | "epub" | "pdf" | "needs-metadata" | "tagged";
-type Tag = { id: string; name: string; color?: string | null };
-
-type LibraryItem = {
-  id: string;
-  title: string | null;
-  published_year: number | null;
-  authors: string[];
-  file_count: number;
-  formats: string[];
-  cover_path?: string | null;
-  tags?: Tag[];
-};
-
-type ScanStats = {
-  added: number;
-  updated: number;
-  moved: number;
-  unchanged: number;
-  missing: number;
-};
-
-type ScanProgress = {
-  processed: number;
-  total: number;
-  current: string;
-};
-
-type InboxItem = {
-  id: string;
-  title: string;
-  reason: string;
-};
-
-type DuplicateGroup = {
-  id: string;
-  title: string;
-  files: string[];
-  file_ids: string[];
-  file_paths: string[];
-};
-
-type PendingChange = {
-  id: string;
-  file_id: string;
-  change_type: string;
-  from_path?: string | null;
-  to_path?: string | null;
-  changes_json?: string | null;
-  status: string;
-  created_at: number;
-  applied_at?: number | null;
-  error?: string | null;
-};
-
-type LibraryHealth = {
-  total: number;
-  missing_isbn: number;
-  duplicates: number;
-  complete: number;
-  missing_cover: number;
-};
-
-type EnrichmentCandidate = {
-  id: string;
-  title: string | null;
-  authors: string[];
-  published_year: number | null;
-  identifiers: string[];
-  cover_url?: string | null;
-  source: string;
-  confidence: number;
-};
-
-type OrganizePlan = {
-  mode: string;
-  library_root: string;
-  template: string;
-  entries: Array<{
-    file_id: string;
-    source_path: string;
-    target_path: string;
-    action: string;
-  }>;
-};
+import { TAG_COLORS } from "./lib/tagColors";
+import { Sidebar } from "./sections/Sidebar";
+import { TopToolbar } from "./sections/TopToolbar";
+import { LibraryView } from "./sections/LibraryView";
+import { Inspector } from "./sections/Inspector";
+import { StatusBar } from "./sections/StatusBar";
+import { InboxView } from "./sections/InboxView";
+import { DuplicatesView } from "./sections/DuplicatesView";
+import { FixView } from "./sections/FixView";
+import { ChangesView } from "./sections/ChangesView";
 
 const sampleBooks = [
   {
@@ -174,38 +89,6 @@ const sampleTags: Tag[] = [
   { id: "t3", name: "Classic", color: "emerald" },
 ];
 
-const TAG_COLORS = [
-  { name: "Amber", value: "amber" },
-  { name: "Rose", value: "rose" },
-  { name: "Sky", value: "sky" },
-  { name: "Emerald", value: "emerald" },
-  { name: "Violet", value: "violet" },
-  { name: "Slate", value: "slate" },
-];
-
-const TAG_COLOR_CLASSES: Record<string, string> = {
-  amber: "border-tag-amber/40 bg-tag-amber/20",
-  rose: "border-tag-rose/40 bg-tag-rose/20",
-  sky: "border-tag-sky/40 bg-tag-sky/20",
-  emerald: "border-tag-emerald/40 bg-tag-emerald/20",
-  violet: "border-tag-violet/40 bg-tag-violet/20",
-  slate: "border-tag-slate/40 bg-tag-slate/20",
-};
-
-const TAG_COLOR_SWATCH: Record<string, string> = {
-  amber: "bg-tag-amber",
-  rose: "bg-tag-rose",
-  sky: "bg-tag-sky",
-  emerald: "bg-tag-emerald",
-  violet: "bg-tag-violet",
-  slate: "bg-tag-slate",
-};
-
-const getTagColorClass = (color?: string | null) =>
-  TAG_COLOR_CLASSES[color ?? "amber"] ?? TAG_COLOR_CLASSES.amber;
-
-const getTagSwatchClass = (color?: string | null) =>
-  TAG_COLOR_SWATCH[color ?? "amber"] ?? TAG_COLOR_SWATCH.amber;
 
 const inboxItems = [
   { id: "i1", title: "Notes on the Synthesis", reason: "Missing author" },
@@ -712,6 +595,7 @@ function App() {
     if (!Number.isFinite(remaining) || remaining < 0) return null;
     return Math.round(remaining);
   }, [scanProgress, scanStartedAt]);
+  const scanEtaLabel = scanEtaSeconds !== null ? formatEta(scanEtaSeconds) : null;
 
   const getCandidateCoverUrl = (candidate: EnrichmentCandidate) => {
     if (candidate.cover_url) return candidate.cover_url;
@@ -1110,290 +994,42 @@ function App() {
           : "grid h-screen grid-cols-[210px_minmax(0,1fr)] overflow-hidden bg-[var(--app-bg)] text-[var(--app-ink)]"
       }
     >
-      <aside className="flex h-screen flex-col gap-3 overflow-hidden border-r border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-4">
-        <div className="flex items-start gap-3 rounded-lg border border-[var(--app-border)] bg-white/70 px-3 py-2 shadow-soft">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white">
-            <img
-              src="/src-tauri/icons/icon.png"
-              alt="Folio"
-              className="h-7 w-7"
-            />
-          </div>
-          <div className="pt-0.5 leading-tight">
-            <div className="flex items-center gap-2">
-              <div className="text-sm font-semibold tracking-wide">Folio</div>
-              {appVersion ? (
-                <span className="rounded-full border border-[var(--app-border)] bg-white/70 px-2 py-0.5 text-[10px] text-[var(--app-ink-muted)]">
-                  v{appVersion}
-                </span>
-              ) : null}
-            </div>
-            <div className="text-[11px] uppercase tracking-[0.2em] text-[var(--app-ink-muted)]">
-              Calm Library
-            </div>
-          </div>
-        </div>
-
-        <nav className="flex flex-col gap-1">
-          <SidebarItem active={view === "library"} onClick={() => setView("library")}>
-            <BookOpen size={16} />
-            Library
-          </SidebarItem>
-          <SidebarItem active={view === "inbox"} onClick={() => setView("inbox")}>
-            <Inbox size={16} />
-            Inbox
-          </SidebarItem>
-          <SidebarItem
-            active={view === "duplicates"}
-            onClick={() => setView("duplicates")}
-          >
-            <Copy size={16} />
-            Duplicates
-          </SidebarItem>
-          <SidebarItem active={view === "fix"} onClick={() => setView("fix")}>
-            <Wrench size={16} />
-            Fix Metadata
-          </SidebarItem>
-          <SidebarItem active={view === "changes"} onClick={() => setView("changes")}>
-            <FileClock size={16} />
-            Changes
-          </SidebarItem>
-        </nav>
-
-        <Panel title="Activity">
-          {scanStatus ? (
-            <div className="rounded-md bg-[rgba(207,217,210,0.35)] px-2 py-1 text-xs text-[var(--app-ink-muted)]">
-              {scanStatus}
-              {scanning && scanStartedAt ? (
-                <div className="mt-1 text-[10px] tracking-[0.3px]">
-                  {Math.floor((Date.now() - scanStartedAt) / 1000)}s elapsed
-                </div>
-              ) : null}
-              {scanProgress ? (
-                <div className="mt-2 flex flex-col gap-1.5">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--app-ink-muted)]">
-                    {scanProgress.processed} / {scanProgress.total || "?"}
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-[rgba(208,138,70,0.2)]">
-                    <div
-                      className="h-full rounded-full bg-[linear-gradient(90deg,var(--app-accent),var(--app-accent-strong))] transition-[width] duration-200"
-                      style={{
-                        width:
-                          scanProgress.total > 0
-                            ? `${Math.min(
-                                100,
-                                Math.round(
-                                  (scanProgress.processed / scanProgress.total) * 100
-                                )
-                              )}%`
-                            : "6%",
-                      }}
-                    />
-                  </div>
-                  <div className="truncate text-[10px] text-[var(--app-ink-muted)]">
-                    {scanProgress.current}
-                  </div>
-                  {scanEtaSeconds !== null ? (
-                    <div className="text-[10px] text-[var(--app-ink-muted)]">
-                      ETA {formatEta(scanEtaSeconds)}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <div className="rounded-md bg-[rgba(227,221,214,0.35)] px-2 py-1 text-xs text-[var(--app-ink-muted)]">
-              No recent activity.
-            </div>
-          )}
-        </Panel>
-
-        <Panel title="Organizer">
-          <div className="flex items-center justify-between text-xs text-[var(--app-ink-muted)]">
-            <span>Mode</span>
-            <select
-              className="h-7 rounded-md border border-[var(--app-border)] bg-white/80 px-2 text-xs"
-              value={organizeMode}
-              onChange={(event) => setOrganizeMode(event.target.value)}
-            >
-              <option value="reference">Reference</option>
-              <option value="copy">Copy</option>
-              <option value="move">Move</option>
-            </select>
-          </div>
-          <Input
-            className="text-xs"
-            value={organizeTemplate}
-            onChange={(event) => setOrganizeTemplate(event.target.value)}
-          />
-          {organizePlan ? (
-            <div className="flex flex-col gap-2 text-xs text-[var(--app-ink-muted)]">
-              <div>{organizePlan.entries.length} planned</div>
-              {organizePlan.entries.slice(0, 3).map((entry) => (
-                <div key={entry.file_id} className="truncate">
-                  {entry.target_path}
-                </div>
-              ))}
-              <div className="flex flex-wrap gap-2">
-                <Button variant="primary" onClick={handleApplyOrganize}>
-                  Apply Plan
-                </Button>
-                <Button variant="ghost" onClick={handleQueueOrganize}>
-                  Queue Changes
-                </Button>
-              </div>
-            </div>
-          ) : null}
-          {organizeStatus ? (
-            <div className="rounded-md bg-[rgba(207,217,210,0.35)] px-2 py-1 text-xs text-[var(--app-ink-muted)]">
-              {organizeStatus}
-            </div>
-          ) : null}
-        </Panel>
-
-        <Panel title="Library Health">
-          <div className="grid gap-2">
-            <div className="flex items-baseline justify-between">
-              <span className="text-[11px] uppercase tracking-[0.18em] text-[var(--app-ink-muted)]">
-                Complete
-              </span>
-              <strong className="text-base">
-                {libraryHealth
-                  ? `${Math.round(
-                      (libraryHealth.complete / Math.max(1, libraryHealth.total)) * 100
-                    )}%`
-                  : "—"}
-              </strong>
-            </div>
-            <div className="flex items-center justify-between text-[13px]">
-              <span className="text-[var(--app-ink-muted)]">Missing ISBN</span>
-              <strong className="tabular-nums">{libraryHealth ? libraryHealth.missing_isbn : "—"}</strong>
-            </div>
-            <div className="flex items-center justify-between text-[13px]">
-              <span className="text-[var(--app-ink-muted)]">Missing Cover</span>
-              <strong className="tabular-nums">{libraryHealth ? libraryHealth.missing_cover : "—"}</strong>
-            </div>
-            <div className="flex items-center justify-between text-[13px]">
-              <span className="text-[var(--app-ink-muted)]">Duplicates</span>
-              <strong className="tabular-nums">{libraryHealth ? libraryHealth.duplicates : "—"}</strong>
-            </div>
-          </div>
-        </Panel>
-
-        <Panel title="Danger Zone" className="border-[rgba(178,74,44,0.25)] bg-[rgba(255,247,242,0.85)]">
-          <Button variant="danger" onClick={handleClearLibrary}>
-            Clear Library
-          </Button>
-          <div className="text-[11px] text-[#7a5a4e]">
-            Removes all Folio data. Your files remain untouched.
-          </div>
-        </Panel>
-      </aside>
+      <Sidebar
+        view={view}
+        setView={setView}
+        scanStatus={scanStatus}
+        scanning={scanning}
+        scanStartedAt={scanStartedAt}
+        scanProgress={scanProgress}
+        scanEtaLabel={scanEtaLabel}
+        organizeMode={organizeMode}
+        setOrganizeMode={setOrganizeMode}
+        organizeTemplate={organizeTemplate}
+        setOrganizeTemplate={setOrganizeTemplate}
+        organizePlan={organizePlan}
+        handleApplyOrganize={handleApplyOrganize}
+        handleQueueOrganize={handleQueueOrganize}
+        organizeStatus={organizeStatus}
+        libraryHealth={libraryHealth}
+        handleClearLibrary={handleClearLibrary}
+        appVersion={appVersion}
+      />
 
       <main className="flex h-screen flex-col gap-4 overflow-y-auto px-6 py-4">
-        <header className="flex items-center justify-between gap-6 border-b border-[var(--app-border)] pb-3">
-          <div className="space-y-1">
-            <div className="text-lg font-semibold">
-              {view === "library" && "Your Library"}
-              {view === "inbox" && "Inbox"}
-              {view === "duplicates" && "Duplicates"}
-              {view === "fix" && "Fix Metadata"}
-              {view === "changes" && "File Changes"}
-            </div>
-            <p className="text-[11px] text-[var(--app-ink-muted)]">
-              {view === "library" && "Browse and shape your calm stack."}
-              {view === "inbox" && "New or incomplete entries waiting on you."}
-              {view === "duplicates" && "Resolve duplicates detected by hash."}
-              {view === "fix" && "Choose the best metadata match."}
-              {view === "changes" && "Review and apply planned file updates."}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            <div className="flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] p-1 shadow-soft">
-              <Button
-                variant="toolbar"
-                size="sm"
-                className="hover:bg-white"
-                onClick={handleScan}
-                disabled={scanning}
-              >
-                <FolderOpen size={14} />
-                {scanning ? "Scanning" : "Scan"}
-              </Button>
-              <Button variant="toolbar" size="sm" className="hover:bg-white" onClick={handlePlanOrganize}>
-                <LayoutGrid size={14} />
-                Organize
-              </Button>
-              <Button variant="toolbar" size="sm" className="hover:bg-white" onClick={() => setView("fix")}>
-                <Sparkles size={14} />
-                Enrich
-              </Button>
-              <Button
-                variant="toolbar"
-                size="sm"
-                className="hover:bg-white"
-                onClick={() => checkForUpdates(false)}
-              >
-                <Download size={14} />
-                Update
-              </Button>
-            </div>
-
-            <div className="relative w-48">
-              <Search
-                size={14}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--app-ink-muted)]"
-              />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search title or author"
-                className="pl-8"
-              />
-            </div>
-
-            <div className="flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] p-1">
-              <Button
-                variant="toolbar"
-                size="sm"
-                data-active={grid}
-                className={
-                  grid
-                    ? "bg-white shadow-soft"
-                    : "hover:bg-white/80 hover:border-[var(--app-border)]"
-                }
-                onClick={() => setGrid(true)}
-              >
-                <LayoutGrid size={14} />
-                Grid
-              </Button>
-              <Button
-                variant="toolbar"
-                size="sm"
-                data-active={!grid}
-                className={
-                  !grid
-                    ? "bg-white shadow-soft"
-                    : "hover:bg-white/80 hover:border-[var(--app-border)]"
-                }
-                onClick={() => setGrid(false)}
-              >
-                <List size={14} />
-                List
-              </Button>
-            </div>
-
-            {view === "library" && !libraryReady ? (
-              <Badge variant="muted">Loading</Badge>
-            ) : null}
-          </div>
-        </header>
-        {updateStatus ? (
-          <div className="rounded-md bg-[rgba(207,217,210,0.35)] px-2 py-1 text-xs text-[var(--app-ink-muted)]">
-            {updateStatus}
-          </div>
-        ) : null}
+        <TopToolbar
+          view={view}
+          scanning={scanning}
+          handleScan={handleScan}
+          handlePlanOrganize={handlePlanOrganize}
+          setView={setView}
+          checkForUpdates={checkForUpdates}
+          query={query}
+          setQuery={setQuery}
+          grid={grid}
+          setGrid={setGrid}
+          libraryReady={libraryReady}
+          updateStatus={updateStatus}
+        />
 
         {scanning && scanProgress ? (
           <div className="flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-white/70 px-3 py-2">
@@ -1439,585 +1075,69 @@ function App() {
 
         <div className="flex flex-col gap-4">
           <section className="flex flex-col gap-4">
-            {view === "library" && (
-              <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    className={
-                      libraryFilter === "all"
-                        ? "rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)] px-3 py-1 text-xs"
-                        : "rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs hover:bg-white"
-                    }
-                    onClick={() => setLibraryFilter("all")}
-                  >
-                    All
-                  </button>
-                  <button
-                    className={
-                      libraryFilter === "epub"
-                        ? "rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)] px-3 py-1 text-xs"
-                        : "rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs hover:bg-white"
-                    }
-                    onClick={() => setLibraryFilter("epub")}
-                  >
-                    EPUB
-                  </button>
-                  <button
-                    className={
-                      libraryFilter === "pdf"
-                        ? "rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)] px-3 py-1 text-xs"
-                        : "rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs hover:bg-white"
-                    }
-                    onClick={() => setLibraryFilter("pdf")}
-                  >
-                    PDF
-                  </button>
-                  <button
-                    className={
-                      libraryFilter === "needs-metadata"
-                        ? "rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)] px-3 py-1 text-xs"
-                        : "rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs hover:bg-white"
-                    }
-                    onClick={() => setLibraryFilter("needs-metadata")}
-                  >
-                    Needs Metadata
-                  </button>
-                  <button
-                    className={
-                      libraryFilter === "tagged"
-                        ? "rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)] px-3 py-1 text-xs"
-                        : "rounded-full border border-[var(--app-border)] bg-white/80 px-3 py-1 text-xs hover:bg-white"
-                    }
-                    onClick={() => setLibraryFilter("tagged")}
-                  >
-                    Tagged
-                  </button>
-                  <div className="flex flex-wrap items-center gap-1">
-                    <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
-                      Tags
-                    </span>
-                    <button
-                      className="rounded-full border border-[var(--app-border)] bg-white/80 px-2 py-0.5 text-[11px] hover:bg-white"
-                      onClick={() => setSelectedTagIds([])}
-                    >
-                      All
-                    </button>
-                    {tags.length ? (
-                      tags.map((tag) => {
-                        const active = selectedTagIds.includes(tag.id);
-                        return (
-                          <button
-                            key={tag.id}
-                            className={
-                              active
-                                ? "rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.18)] px-2 py-0.5 text-[11px]"
-                                : "rounded-full border border-[var(--app-border)] bg-white/80 px-2 py-0.5 text-[11px] hover:bg-white"
-                            }
-                            style={{ backgroundColor: active ? tag.color ?? undefined : undefined }}
-                            onClick={() => {
-                              setSelectedTagIds((prev) =>
-                                prev.includes(tag.id)
-                                  ? prev.filter((id) => id !== tag.id)
-                                  : [...prev, tag.id]
-                              );
-                            }}
-                          >
-                            {tag.name}
-                          </button>
-                        );
-                      })
-                    ) : (
-                      <span className="text-[11px] text-[var(--app-ink-muted)]">
-                        No tags
-                      </span>
-                    )}
-                  </div>
-                </div>
+            {view === "library" ? (
+              <LibraryView
+                isDesktop={isDesktop}
+                libraryItemsLength={libraryItems.length}
+                filteredBooks={filteredBooks}
+                selectedItemId={selectedItemId}
+                setSelectedItemId={setSelectedItemId}
+                libraryFilter={libraryFilter}
+                setLibraryFilter={setLibraryFilter}
+                tags={tags}
+                selectedTagIds={selectedTagIds}
+                setSelectedTagIds={setSelectedTagIds}
+                grid={grid}
+                coverRefreshToken={coverRefreshToken}
+                fetchCoverOverride={fetchCoverOverride}
+                clearCoverOverride={clearCoverOverride}
+              />
+            ) : null}
 
-                {isDesktop && !libraryItems.length ? (
-                  <div className="rounded-lg border border-[var(--app-border)] bg-white/70 p-4">
-                    <div className="text-[13px] font-semibold">Library is empty</div>
-                    <div className="text-xs text-[var(--app-ink-muted)]">
-                      Scan a folder to import books.
-                    </div>
-                  </div>
-                ) : grid ? (
-                  <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3 rounded-lg bg-[linear-gradient(180deg,rgba(255,255,255,0.45),rgba(255,255,255,0.45)),repeating-linear-gradient(to_bottom,rgba(44,38,33,0.05)_0px,rgba(44,38,33,0.05)_2px,transparent_2px,transparent_190px)] p-3">
-                    {filteredBooks.map((book) => (
-                      <article
-                        key={book.id}
-                        className={
-                          selectedItemId === book.id
-                            ? "flex cursor-pointer flex-col overflow-hidden rounded-md border border-[rgba(201,122,58,0.6)] bg-[#fffdf9] shadow-[0_16px_24px_rgba(201,122,58,0.18)] transition"
-                            : "flex cursor-pointer flex-col overflow-hidden rounded-md border border-[rgba(44,38,33,0.08)] bg-[#fffdf9] shadow-[0_10px_18px_rgba(30,22,15,0.06)] transition hover:shadow-[0_18px_26px_rgba(24,18,12,0.1)]"
-                        }
-                        onClick={() => setSelectedItemId(book.id)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") setSelectedItemId(book.id);
-                        }}
-                      >
-                        <div className="relative aspect-[3/4] overflow-hidden rounded-t-md border-b border-[rgba(44,38,33,0.06)] bg-[linear-gradient(135deg,#efe3d1,#f2e7d9)]">
-                            {book.cover ? (
-                              <img
-                                key={`${book.id}-${coverRefreshToken}-${book.cover ?? "none"}`}
-                                className="absolute inset-0 h-full w-full object-cover bg-[#f7f1e7]"
-                                src={book.cover}
-                                alt=""
-                                onError={() => {
-                                  clearCoverOverride(book.id);
-                                  void fetchCoverOverride(book.id);
-                                }}
-                              />
-                            ) : null}
-                            {book.cover ? (
-                            <div className="absolute left-2 top-2 rounded-md bg-[rgba(255,255,255,0.9)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]">
-                              {book.format}
-                            </div>
-                          ) : (
-                            <div className="relative z-10 flex flex-col gap-2 p-3">
-                              <div className="rounded-md bg-[rgba(255,255,255,0.8)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]">
-                                {book.format}
-                              </div>
-                              <div className="text-[13px] font-semibold leading-snug">
-                                {book.title}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex flex-col gap-1 px-3 py-2">
-                          <div className="text-[13px] font-semibold">{book.title}</div>
-                          {(book.tags ?? []).length ? (
-                            <div className="flex flex-wrap gap-1">
-                              {(book.tags ?? []).slice(0, 3).map((tag) => (
-                                <span
-                                  key={tag.id}
-                                  className="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-[10px]"
-                                  style={{ backgroundColor: tag.color ?? "rgba(201,122,58,0.12)" }}
-                                >
-                                  {tag.name}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
-                          <div className="grid gap-1">
-                            <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
-                              <span className="text-[10px] uppercase tracking-[0.12em]">Auteur</span>
-                              <span className="text-[var(--app-ink)]">{book.author}</span>
-                            </div>
-                            <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
-                              <span className="text-[10px] uppercase tracking-[0.12em]">Jaar</span>
-                              <span className="text-[var(--app-ink)]">{book.year}</span>
-                            </div>
-                            <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
-                              <span className="text-[10px] uppercase tracking-[0.12em]">Formaat</span>
-                              <span className="text-[var(--app-ink)]">{book.format}</span>
-                            </div>
-                            <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
-                              <span className="text-[10px] uppercase tracking-[0.12em]">Status</span>
-                              <span className="text-[var(--app-ink)]">{book.status}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="overflow-hidden rounded-lg border border-[var(--app-border)] bg-[#fffdf9]">
-                    <div className="grid grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr_1fr] gap-3 bg-[#f9f4ee] px-4 py-2 text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
-                      <div></div>
-                      <div>Titel</div>
-                      <div>Auteur</div>
-                      <div>Jaar</div>
-                      <div>Formaat</div>
-                      <div>Status</div>
-                    </div>
-                    {filteredBooks.map((book) => (
-                      <div
-                        key={book.id}
-                        className={
-                          selectedItemId === book.id
-                            ? "grid cursor-pointer grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr_1fr] gap-3 border-t border-[var(--app-border)] bg-[rgba(201,122,58,0.12)] px-4 py-2"
-                            : "grid cursor-pointer grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr_1fr] gap-3 border-t border-[var(--app-border)] px-4 py-2 hover:bg-[rgba(201,122,58,0.06)]"
-                        }
-                        onClick={() => setSelectedItemId(book.id)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") setSelectedItemId(book.id);
-                        }}
-                      >
-                        <div className="grid h-16 w-12 place-items-center overflow-hidden rounded-md border border-[rgba(44,38,33,0.12)] bg-[#fffaf4]">
-                            {book.cover ? (
-                              <img
-                                key={`${book.id}-${coverRefreshToken}-${book.cover ?? "none"}`}
-                                className="h-full w-full object-contain"
-                                src={book.cover}
-                                alt=""
-                                onError={() => {
-                                  clearCoverOverride(book.id);
-                                  void fetchCoverOverride(book.id);
-                                }}
-                              />
-                          ) : (
-                            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
-                              {book.format}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex flex-col gap-1">
-                          <div className="text-sm font-semibold">{book.title}</div>
-                          {(book.tags ?? []).length ? (
-                            <div className="flex flex-wrap gap-1">
-                              {(book.tags ?? []).slice(0, 2).map((tag) => (
-                                <span
-                                  key={tag.id}
-                                  className="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-[10px]"
-                                  style={{ backgroundColor: tag.color ?? "rgba(201,122,58,0.12)" }}
-                                >
-                                  {tag.name}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                        <div className="text-xs text-[var(--app-ink-muted)]">{book.author}</div>
-                        <div className="text-xs text-[var(--app-ink-muted)]">{book.year}</div>
-                        <div className="text-xs text-[var(--app-ink-muted)]">{book.format}</div>
-                        <div className="inline-flex items-center justify-center rounded-full border border-[rgba(201,122,58,0.25)] bg-[rgba(201,122,58,0.08)] px-2 py-0.5 text-[11px]">
-                          {book.status}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
+            {view === "inbox" ? (
+              <InboxView items={isDesktop ? inbox : inboxItems} />
+            ) : null}
 
-            {view === "inbox" && (
-              <section className="flex flex-col gap-4">
-                <div className="flex flex-col gap-2">
-                  {(isDesktop ? inbox : inboxItems).map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex items-center justify-between rounded-md border border-[var(--app-border)] bg-white/70 px-3 py-2"
-                    >
-                      <div>
-                        <div className="text-[13px] font-semibold">{item.title}</div>
-                        <div className="text-xs text-[var(--app-ink-muted)]">{item.reason}</div>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="ghost">Fix</Button>
-                        <Button variant="ghost">Ignore</Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
+            {view === "duplicates" ? (
+              <DuplicatesView
+                groups={isDesktop ? duplicates : duplicateGroups}
+                duplicateKeepSelection={duplicateKeepSelection}
+                setDuplicateKeepSelection={setDuplicateKeepSelection}
+                handleResolveDuplicate={handleResolveDuplicate}
+              />
+            ) : null}
 
-            {view === "duplicates" && (
-              <section className="flex flex-col gap-4">
-                <div className="flex flex-col gap-3">
-                  {(isDesktop ? duplicates : duplicateGroups).map((group) => (
-                    <div
-                      key={group.id}
-                      className="flex items-start justify-between gap-4 rounded-md border border-[var(--app-border)] bg-white/70 p-3"
-                    >
-                      <div>
-                        <div className="text-[13px] font-semibold">{group.title}</div>
-                        <div className="text-xs text-[var(--app-ink-muted)]">
-                            {group.files.length} matching files
-                          </div>
-                          <ul>
-                            {group.files.map((file, index) => {
-                              const fileId = group.file_ids[index] ?? file;
-                              const filePath = group.file_paths[index] ?? file;
-                              const isSelected =
-                                duplicateKeepSelection[group.id] === fileId;
-                              return (
-                                <li key={fileId} className="mt-2">
-                                  <label className="flex cursor-pointer items-start gap-2 text-xs">
-                                    <input
-                                      type="radio"
-                                      name={`duplicate-${group.id}`}
-                                      value={fileId}
-                                      checked={isSelected}
-                                      onChange={() =>
-                                        setDuplicateKeepSelection((prev) => ({
-                                          ...prev,
-                                          [group.id]: fileId,
-                                        }))
-                                      }
-                                    />
-                                    <span className="font-medium text-[var(--app-ink)]">
-                                      {file}
-                                    </span>
-                                    <span className="truncate text-[10px] text-[var(--app-ink-muted)]">
-                                      {filePath}
-                                    </span>
-                                  </label>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      <Button
-                        variant="ghost"
-                        onClick={() =>
-                          handleResolveDuplicate(
-                            group.id,
-                            duplicateKeepSelection[group.id]
-                          )
-                        }
-                        disabled={!duplicateKeepSelection[group.id]}
-                      >
-                        Resolve
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
+            {view === "fix" ? (
+              <FixView
+                currentFixItem={currentFixItem}
+                fixLoading={fixLoading}
+                candidateList={candidateList}
+                getCandidateCoverUrl={getCandidateCoverUrl}
+                handleFetchCandidates={handleFetchCandidates}
+                handleApplyCandidate={handleApplyCandidate}
+                isDesktop={isDesktop}
+              />
+            ) : null}
 
-            {view === "fix" && (
-              <section className="flex flex-col gap-4">
-                <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
-                  <div className="rounded-md border border-[var(--app-border)] bg-white/70 p-3">
-                    <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--app-ink-muted)]">
-                      Current Metadata
-                    </div>
-                    {currentFixItem ? (
-                      <>
-                        <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
-                          <span className="text-[10px] uppercase tracking-[0.12em]">Title</span>
-                          <strong className="text-[var(--app-ink)]">
-                            {currentFixItem.title}
-                          </strong>
-                        </div>
-                        <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
-                          <span className="text-[10px] uppercase tracking-[0.12em]">Issue</span>
-                          <strong className="text-[var(--app-ink)]">
-                            {currentFixItem.reason}
-                          </strong>
-                        </div>
-                        <Button variant="primary" onClick={handleFetchCandidates}>
-                          {fixLoading ? (
-                            <span className="flex items-center gap-2">
-                              <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/60 border-t-white" />
-                              Searching...
-                            </span>
-                          ) : (
-                            "Search Sources"
-                          )}
-                        </Button>
-                      </>
-                    ) : (
-                      <div className="text-xs text-[var(--app-ink-muted)]">
-                        No items need fixes.
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="rounded-md border border-[var(--app-border)] bg-white/70 p-3">
-                    <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--app-ink-muted)]">
-                      Top Matches
-                    </div>
-                    {candidateList.length ? (
-                      <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
-                        {candidateList.map((candidate) => {
-                          const coverUrl = getCandidateCoverUrl(candidate);
-                          return (
-                          <div key={candidate.id} className="flex gap-3 rounded-md border border-[var(--app-border)] bg-white/80 p-3">
-                            <div className="h-20 w-14 overflow-hidden rounded-md border border-[var(--app-border)] bg-[#fffaf4]">
-                              {coverUrl ? (
-                                <img
-                                  className="h-full w-full object-cover"
-                                  src={coverUrl}
-                                  alt=""
-                                  onError={(event) => {
-                                    event.currentTarget.style.display = "none";
-                                  }}
-                                />
-                              ) : (
-                                <div className="grid h-full w-full place-items-center text-[10px] text-[var(--app-ink-muted)]">
-                                  No cover
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex flex-1 flex-col gap-1">
-                              <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
-                                <span className="rounded-full bg-[rgba(201,122,58,0.12)] px-2 py-0.5">
-                                  {candidate.source}
-                                </span>
-                                <span>
-                                  {Math.round(candidate.confidence * 100)}%
-                                </span>
-                              </div>
-                              <div className="text-[13px] font-semibold">
-                                {candidate.title ?? "Untitled"}
-                              </div>
-                              <div className="text-xs text-[var(--app-ink-muted)]">
-                                {candidate.authors.join(", ")}
-                              </div>
-                              <div className="text-xs text-[var(--app-ink-muted)]">
-                                {candidate.published_year ?? "Unknown"}
-                              </div>
-                                <Button
-                                  variant="ghost"
-                                  onClick={() => handleApplyCandidate(candidate)}
-                                  disabled={!currentFixItem || fixLoading || !isDesktop}
-                                >
-                                  Use This
-                                </Button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="mt-2 text-xs text-[var(--app-ink-muted)]">
-                        {fixLoading ? "Searching..." : "No candidates found."}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </section>
-            )}
-
-            {view === "changes" && (
-              <section className="flex flex-col gap-4">
-                <div className="flex flex-wrap items-center gap-2 rounded-md border border-[var(--app-border)] bg-white/70 p-2">
-                  <div className="flex gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setPendingChangesStatus("pending")}
-                      disabled={pendingChangesStatus === "pending"}
-                    >
-                      Pending
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setPendingChangesStatus("applied")}
-                      disabled={pendingChangesStatus === "applied"}
-                    >
-                      Applied
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setPendingChangesStatus("error")}
-                      disabled={pendingChangesStatus === "error"}
-                    >
-                      Errors
-                    </Button>
-                  </div>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={handleApplyAllChanges}
-                    disabled={pendingChangesApplying}
-                  >
-                    Apply All
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleApplySelectedChanges}
-                    disabled={!selectedChangeIds.size || pendingChangesApplying}
-                  >
-                    Apply Selected
-                  </Button>
-                </div>
-                <div className="flex flex-col gap-2">
-                  {(isDesktop ? pendingChanges : samplePendingChanges).length ? (
-                    (isDesktop ? pendingChanges : samplePendingChanges).map((change) => (
-                      <div key={change.id} className="flex items-start gap-3 rounded-md border border-[var(--app-border)] bg-white/70 p-3">
-                        <label className="mt-1">
-                          <input
-                            type="checkbox"
-                            checked={selectedChangeIds.has(change.id)}
-                            onChange={() => toggleChangeSelection(change.id)}
-                            disabled={change.status !== "pending"}
-                          />
-                        </label>
-                        <div className="flex flex-1 flex-col gap-1">
-                          <div className="text-[13px] font-semibold">
-                            {change.change_type === "rename"
-                              ? "Rename File"
-                              : change.change_type === "delete"
-                                ? "Delete File"
-                                : "Update EPUB Metadata"}
-                          </div>
-                          <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
-                            {change.status === "error"
-                              ? "Error"
-                              : change.status === "applied"
-                                ? "Applied"
-                                : "Pending"}
-                          </div>
-                          <div className="text-xs text-[var(--app-ink-muted)]">
-                            {change.from_path ?? ""}
-                          </div>
-                          {change.to_path ? (
-                            <div className="text-xs text-[var(--app-ink-muted)]">
-                              → {change.to_path}
-                            </div>
-                          ) : null}
-                          {change.changes_json ? (
-                            <div className="text-xs text-[var(--app-ink-muted)]">
-                              {change.changes_json}
-                            </div>
-                          ) : null}
-                          {change.error ? (
-                            <div className="text-xs text-[var(--app-ink-muted)]">
-                              Error: {change.error}
-                            </div>
-                          ) : null}
-                        </div>
-                        <Button
-                          variant="ghost"
-                          onClick={() => handleApplyChange(change.id)}
-                          disabled={pendingChangesApplying || change.status !== "pending"}
-                        >
-                          Apply
-                        </Button>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-xs text-[var(--app-ink-muted)]">
-                      {pendingChangesLoading
-                        ? "Loading changes…"
-                        : "No pending changes."}
-                    </div>
-                  )}
-                </div>
-                {confirmDeleteOpen ? (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-                    <div className="w-full max-w-sm rounded-md border border-[var(--app-border)] bg-white p-4 shadow-panel">
-                      <div className="text-[13px] font-semibold">Delete files?</div>
-                      <div className="text-xs text-[var(--app-ink-muted)]">
-                        You are about to delete {confirmDeleteIds.length} file(s).
-                      </div>
-                      <div className="mt-3 flex justify-end gap-2">
-                        <Button variant="ghost" onClick={() => {
-                          setConfirmDeleteOpen(false);
-                          setConfirmDeleteIds([]);
-                        }}>
-                          Cancel
-                        </Button>
-                        <Button variant="danger" onClick={handleConfirmDelete}>
-                          Delete
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-              </section>
-            )}
+            {view === "changes" ? (
+              <ChangesView
+                pendingChangesStatus={pendingChangesStatus}
+                setPendingChangesStatus={setPendingChangesStatus}
+                pendingChangesApplying={pendingChangesApplying}
+                pendingChangesLoading={pendingChangesLoading}
+                pendingChanges={isDesktop ? pendingChanges : samplePendingChanges}
+                selectedChangeIds={selectedChangeIds}
+                toggleChangeSelection={toggleChangeSelection}
+                handleApplyAllChanges={handleApplyAllChanges}
+                handleApplySelectedChanges={handleApplySelectedChanges}
+                handleApplyChange={handleApplyChange}
+                confirmDeleteOpen={confirmDeleteOpen}
+                confirmDeleteIds={confirmDeleteIds}
+                setConfirmDeleteOpen={setConfirmDeleteOpen}
+                setConfirmDeleteIds={setConfirmDeleteIds}
+                handleConfirmDelete={handleConfirmDelete}
+              />
+            ) : null}
           </section>
         </div>
 
@@ -2034,156 +1154,31 @@ function App() {
           onClose={() => setMatchOpen(false)}
         />
 
-        <footer className="mt-4 flex items-center justify-between rounded-md border border-[var(--app-border)] bg-white/70 px-3 py-2 text-[11px] text-[var(--app-ink-muted)]">
-          <div className="flex items-center gap-2">
-            <Badge variant="accent">Desktop</Badge>
-            <span>{scanStatus ?? updateStatus ?? "Idle"}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span>
-              Folio {isDesktop ? "Desktop" : "Web"}
-              {appVersion ? ` · v${appVersion}` : ""}
-            </span>
-          </div>
-        </footer>
+        <StatusBar
+          scanStatus={scanStatus}
+          updateStatus={updateStatus}
+          isDesktop={isDesktop}
+          appVersion={appVersion}
+        />
       </main>
 
       {view === "library" ? (
-        <aside className="flex h-screen flex-col gap-3 overflow-hidden border-l border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-4">
-          <div className="flex items-center justify-between">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--app-ink-muted)]">
-              Details
-            </div>
-            <Badge variant="muted">Inspector</Badge>
-          </div>
-          <Separator />
-          {selectedItem ? (
-            <div className="rounded-md border border-[var(--app-border)] bg-white/80 p-3">
-              <div className="flex gap-3">
-                <div className="h-28 w-20 overflow-hidden rounded-md border border-[var(--app-border)] bg-[#fffaf4]">
-                  {selectedItem.cover ? (
-                    <img
-                      className="h-full w-full object-cover"
-                      src={selectedItem.cover}
-                      alt=""
-                      onError={() => {
-                        clearCoverOverride(selectedItem.id);
-                        void fetchCoverOverride(selectedItem.id);
-                      }}
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
-                      {selectedItem.format}
-                    </div>
-                  )}
-                </div>
-                <div className="flex flex-1 flex-col gap-1">
-                  <div className="text-[13px] font-semibold">{selectedItem.title}</div>
-                  <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.author}</div>
-                  <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.year}</div>
-                  <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.format}</div>
-                  <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.status}</div>
-                </div>
-              </div>
-              <div className="mt-3">
-                <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
-                  Tags
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {selectedTags.length ? (
-                    selectedTags.map((tag) => (
-                      <button
-                        key={tag.id}
-                        className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${getTagColorClass(tag.color)}`}
-                        onClick={() => handleRemoveTag(tag.id)}
-                      >
-                        {tag.name}
-                        <span className="text-[10px]">×</span>
-                      </button>
-                    ))
-                  ) : (
-                    <span className="text-xs text-[var(--app-ink-muted)]">
-                      No tags yet.
-                    </span>
-                  )}
-                </div>
-
-                <div className="mt-3">
-                  <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
-                    Add tag
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {availableTags.length ? (
-                      availableTags.map((tag) => (
-                        <button
-                          key={tag.id}
-                          className={`rounded-full border px-2 py-0.5 text-[11px] hover:bg-white ${getTagColorClass(tag.color)}`}
-                          onClick={() => handleAddTag(tag.id)}
-                        >
-                          {tag.name}
-                        </button>
-                      ))
-                    ) : (
-                      <span className="text-xs text-[var(--app-ink-muted)]">
-                        No tags available.
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <Input
-                      value={newTagName}
-                      onChange={(event) => setNewTagName(event.target.value)}
-                      placeholder="New tag name"
-                      className="h-8 min-w-0 flex-1 text-xs"
-                    />
-                    <div className="flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-white px-2 py-1">
-                      {TAG_COLORS.map((color) => (
-                        <button
-                          key={color.value}
-                          type="button"
-                          className={`h-5 w-5 rounded-full border ${getTagSwatchClass(color.value)} ${newTagColor === color.value ? "ring-2 ring-[var(--app-accent)]" : ""}`}
-                          onClick={() => setNewTagColor(color.value)}
-                        />
-                      ))}
-                    </div>
-                    <Button
-                      variant="toolbar"
-                      size="sm"
-                      onClick={handleCreateTag}
-                      disabled={!newTagName.trim()}
-                    >
-                      Create
-                    </Button>
-                  </div>
-                </div>
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <Button variant="toolbar" size="sm" className="w-full justify-center">
-                  <FolderOpen size={14} />
-                  Reveal
-                </Button>
-                <Button variant="toolbar" size="sm" className="w-full justify-center">
-                  <PencilLine size={14} />
-                  Edit
-                </Button>
-                <Button
-                  variant="toolbar"
-                  size="sm"
-                  className="col-span-2 w-full justify-center"
-                  onClick={handleOpenMatchModal}
-                  disabled={!isDesktop}
-                >
-                  <Sparkles size={14} />
-                  Match metadata
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="text-xs text-[var(--app-ink-muted)]">
-              Select a book to see details.
-            </div>
-          )}
-        </aside>
+        <Inspector
+          selectedItem={selectedItem}
+          selectedTags={selectedTags}
+          availableTags={availableTags}
+          handleAddTag={handleAddTag}
+          handleRemoveTag={handleRemoveTag}
+          newTagName={newTagName}
+          setNewTagName={setNewTagName}
+          newTagColor={newTagColor}
+          setNewTagColor={setNewTagColor}
+          handleCreateTag={handleCreateTag}
+          handleOpenMatchModal={handleOpenMatchModal}
+          isDesktop={isDesktop}
+          clearCoverOverride={clearCoverOverride}
+          fetchCoverOverride={fetchCoverOverride}
+        />
       ) : null}
     </div>
   );

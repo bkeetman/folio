@@ -302,6 +302,15 @@ fn create_tag(app: tauri::AppHandle, name: String, color: Option<String>) -> Res
   if trimmed.is_empty() {
     return Err("Tag name cannot be empty".to_string());
   }
+  if trimmed.contains('|') {
+    return Err("Tag name cannot contain |".to_string());
+  }
+  if let Some(value) = color.as_deref() {
+    let allowed = ["amber", "rose", "sky", "emerald", "violet", "slate"];
+    if !allowed.contains(&value) {
+      return Err("Unsupported tag color".to_string());
+    }
+  }
   let normalized = trimmed.to_lowercase();
   if let Some(existing) = conn
     .query_row(
