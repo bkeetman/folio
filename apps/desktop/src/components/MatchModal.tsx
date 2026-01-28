@@ -1,4 +1,4 @@
-import { Button } from "./ui";
+import { Button, Input } from "./ui";
 
 type EnrichmentCandidate = {
   id: string;
@@ -48,17 +48,21 @@ export function MatchModal({
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose} role="presentation">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+      onClick={onClose}
+      role="presentation"
+    >
       <div
-        className="modal"
+        className="w-full max-w-3xl rounded-lg border border-[var(--app-border)] bg-[var(--app-panel)] p-4 shadow-panel"
         role="dialog"
         aria-modal="true"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="modal-header">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="modal-title">Match metadata</div>
-            <div className="modal-subtitle">
+            <div className="text-base font-semibold">Match metadata</div>
+            <div className="text-xs text-[var(--app-ink-muted)]">
               {itemTitle} · {itemAuthor}
             </div>
           </div>
@@ -67,8 +71,8 @@ export function MatchModal({
           </Button>
         </div>
 
-        <div className="modal-search">
-          <input
+        <div className="mt-3 flex gap-2">
+          <Input
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             placeholder="Search by title, author, or ISBN"
@@ -81,17 +85,20 @@ export function MatchModal({
           </Button>
         </div>
 
-        <div className="modal-body">
+        <div className="mt-4">
           {candidates.length ? (
-            <div className="modal-candidates">
+            <div className="grid gap-3 sm:grid-cols-2">
               {candidates.map((candidate) => {
                 const coverUrl = getCoverUrl(candidate);
                 return (
-                  <div key={candidate.id} className="candidate-card">
-                    <div className="candidate-cover">
+                  <div
+                    key={candidate.id}
+                    className="flex gap-3 rounded-md border border-[var(--app-border)] bg-white/80 p-3"
+                  >
+                    <div className="h-20 w-14 overflow-hidden rounded-md border border-[var(--app-border)] bg-[#fffaf4]">
                       {coverUrl ? (
                         <img
-                          className="candidate-cover-image"
+                          className="h-full w-full object-cover"
                           src={coverUrl}
                           alt=""
                           onError={(event) => {
@@ -99,19 +106,25 @@ export function MatchModal({
                           }}
                         />
                       ) : (
-                        <div className="candidate-cover-fallback">No cover</div>
+                        <div className="grid h-full w-full place-items-center text-[10px] text-[var(--app-ink-muted)]">
+                          No cover
+                        </div>
                       )}
                     </div>
-                    <div className="candidate-info">
-                      <div className="candidate-head">
-                        <span className="candidate-source">{candidate.source}</span>
-                        <span className="candidate-score">
-                          {Math.round(candidate.confidence * 100)}%
+                    <div className="flex flex-1 flex-col gap-1">
+                      <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
+                        <span className="rounded-full bg-[rgba(201,122,58,0.12)] px-2 py-0.5">
+                          {candidate.source}
                         </span>
+                        <span>{Math.round(candidate.confidence * 100)}%</span>
                       </div>
-                      <div className="card-title">{candidate.title ?? "Untitled"}</div>
-                      <div className="card-meta">{candidate.authors.join(", ")}</div>
-                      <div className="card-meta">
+                      <div className="text-[13px] font-semibold">
+                        {candidate.title ?? "Untitled"}
+                      </div>
+                      <div className="text-xs text-[var(--app-ink-muted)]">
+                        {candidate.authors.join(", ")}
+                      </div>
+                      <div className="text-xs text-[var(--app-ink-muted)]">
                         {candidate.published_year ?? "Unknown"}
                       </div>
                       <Button
@@ -127,7 +140,7 @@ export function MatchModal({
               })}
             </div>
           ) : (
-            <div className="modal-empty">
+            <div className="rounded-md border border-[var(--app-border)] bg-white/70 p-3 text-xs text-[var(--app-ink-muted)]">
               {loading
                 ? "Searching sources…"
                 : "No matches yet. Try a custom search or ISBN."}
