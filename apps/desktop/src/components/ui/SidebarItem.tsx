@@ -1,12 +1,20 @@
 import type { ButtonHTMLAttributes } from "react";
+import { cn } from "../../lib/utils";
 
 type SidebarItemProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   active?: boolean;
 };
 
 export function SidebarItem({ active, className, ...props }: SidebarItemProps) {
-  const classes = ["sidebar-item", active ? "active" : null, className]
-    .filter(Boolean)
-    .join(" ");
-  return <button className={classes} {...props} />;
+  return (
+    <button
+      className={cn(
+        "flex w-full items-center gap-2 rounded-md border border-transparent px-2.5 py-2 text-left text-[13px] font-medium text-[var(--app-ink)] transition",
+        "hover:bg-white/80 hover:border-[var(--app-border)]",
+        active && "bg-white border-[var(--app-border)] shadow-soft",
+        className
+      )}
+      {...props}
+    />
+  );
 }
