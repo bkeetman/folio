@@ -52,6 +52,11 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --locked --version 2.9.6
 
+      - name: Add Rust targets
+        if: matrix.os == 'macos-latest'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+
       - name: Build and publish Tauri
         uses: tauri-apps/tauri-action@v0.5
         env:
