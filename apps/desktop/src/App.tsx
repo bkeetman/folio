@@ -570,9 +570,10 @@ function App() {
     void checkForUpdates(true);
   }, [checkForUpdates]);
 
-  // Load eReader devices
+  // Load eReader devices (refresh when switching to eReader view to check connection status)
   useEffect(() => {
     if (!isDesktop) return;
+    if (view !== "ereader" && ereaderDevices.length > 0) return; // Only refresh on view switch if we have devices
     const loadEreaderDevices = async () => {
       try {
         const devices = await invoke<EReaderDevice[]>("list_ereader_devices");
@@ -585,7 +586,7 @@ function App() {
       }
     };
     void loadEreaderDevices();
-  }, [isDesktop, selectedEreaderDeviceId]);
+  }, [isDesktop, view, selectedEreaderDeviceId, ereaderDevices.length]);
 
   // Load sync queue when device changes
   useEffect(() => {
@@ -1427,6 +1428,14 @@ function App() {
                 onQueueImport={handleQueueEreaderImport}
                 onRemoveFromQueue={handleRemoveFromEreaderQueue}
                 onExecuteSync={handleOpenSyncDialog}
+                onRefreshDevices={async () => {
+                  try {
+                    const devices = await invoke<EReaderDevice[]>("list_ereader_devices");
+                    setEreaderDevices(devices);
+                  } catch {
+                    // ignore
+                  }
+                }}
                 scanning={ereaderScanning}
               />
             ) : null}

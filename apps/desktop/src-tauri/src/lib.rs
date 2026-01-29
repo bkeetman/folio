@@ -108,6 +108,7 @@ struct PendingChange {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct EReaderDevice {
   id: String,
   name: String,
@@ -119,6 +120,7 @@ struct EReaderDevice {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct EReaderBook {
   path: String,
   filename: String,
@@ -130,6 +132,7 @@ struct EReaderBook {
 }
 
 #[derive(Serialize, serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct SyncQueueItem {
   id: String,
   device_id: String,
@@ -3074,7 +3077,10 @@ fn list_ereader_devices(app: tauri::AppHandle) -> Result<Vec<EReaderDevice>, Str
   let rows = stmt
     .query_map(params![], |row| {
       let mount_path: String = row.get(2)?;
-      let is_connected = std::path::Path::new(&mount_path).exists();
+      let path = std::path::Path::new(&mount_path);
+      let is_connected = path.exists() && path.is_dir();
+      log::info!("eReader device check: path='{}', exists={}, is_dir={}, is_connected={}",
+        mount_path, path.exists(), path.is_dir(), is_connected);
       Ok(EReaderDevice {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -3216,16 +3222,31 @@ fn scan_ereader(app: tauri::AppHandle, device_id: String) -> Result<Vec<EReaderB
       Err(_) => continue,
     };
 
-    // Try to extract metadata
+    // Try to extract metadata, fall back to filename
+    let filename_title = path.file_stem()
+      .and_then(|s| s.to_str())
+      .map(|s| {
+        // Remove .kepub suffix if present (Kobo format)
+        let cleaned = s.trim_end_matches(".kepub");
+        // Clean up common filename patterns
+        cleaned.replace('_', " ").replace('-', " ")
+      });
+
     let (title, authors): (Option<String>, Vec<String>) = if ext == "epub" {
       match extract_epub_metadata(path) {
-        Ok(meta) => (meta.title, meta.authors),
-        Err(_) => (None, vec![]),
+        Ok(meta) => {
+          // Use metadata if available, otherwise fall back to filename
+          let t = meta.title.or(filename_title);
+          (t, meta.authors)
+        }
+        Err(e) => {
+          log::debug!("Could not extract epub metadata from {}: {}", path.display(), e);
+          (filename_title, vec![])
+        }
       }
     } else {
-      // For PDF, try to extract title from filename
-      let stem = path.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string());
-      (stem, vec![])
+      // For PDF, use filename as title
+      (filename_title, vec![])
     };
 
     // Match against library - hash first, then fuzzy title+author
@@ -3550,6 +3571,9 @@ pub fn run() {
             .level(log::LevelFilter::Info)
             .build(),
         )?;
+      } else {
+        // Only enable updater in release mode to avoid restart errors in dev
+        app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
       }
       let menu = app_menu(app)?;
       app.set_menu(menu)?;
@@ -3573,7 +3597,6 @@ pub fn run() {
     })
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_process::init())
-    .plugin(tauri_plugin_updater::Builder::new().build())
     .on_menu_event(|app, event| {
       if event.id().as_ref() == "scan_folder" {
         let _ = app.emit("menu-scan-folder", ());

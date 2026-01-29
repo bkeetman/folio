@@ -20,6 +20,7 @@ type EReaderViewProps = {
   onQueueImport: (ereaderPath: string) => Promise<void>;
   onRemoveFromQueue: (queueId: string) => Promise<void>;
   onExecuteSync: () => void;
+  onRefreshDevices: () => Promise<void>;
   scanning: boolean;
 };
 
@@ -48,6 +49,7 @@ export function EReaderView({
   onQueueImport,
   onRemoveFromQueue,
   onExecuteSync,
+  onRefreshDevices,
   scanning,
 }: EReaderViewProps) {
   const [filter, setFilter] = useState<EReaderFilter>("all");
@@ -213,14 +215,16 @@ export function EReaderView({
           </select>
           {selectedDevice && (
             <>
-              <span
-                className={`flex items-center gap-1.5 text-xs ${selectedDevice.isConnected ? "text-emerald-600" : "text-amber-600"}`}
+              <button
+                onClick={() => onRefreshDevices()}
+                className={`flex items-center gap-1.5 text-xs hover:underline ${selectedDevice.isConnected ? "text-emerald-600" : "text-amber-600"}`}
+                title="Click to refresh connection status"
               >
                 <span
                   className={`w-2 h-2 rounded-full ${selectedDevice.isConnected ? "bg-emerald-500" : "bg-amber-500"}`}
                 />
                 {selectedDevice.isConnected ? "Connected" : "Disconnected"}
-              </span>
+              </button>
               <button
                 onClick={() => {
                   if (confirm(`Remove "${selectedDevice.name}" from Folio?`)) {
