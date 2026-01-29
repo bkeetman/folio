@@ -107,6 +107,47 @@ struct PendingChange {
   error: Option<String>,
 }
 
+#[derive(Serialize, Clone)]
+struct EReaderDevice {
+  id: String,
+  name: String,
+  mount_path: String,
+  device_type: String,
+  books_subfolder: String,
+  last_connected_at: Option<i64>,
+  is_connected: bool,
+}
+
+#[derive(Serialize, Clone)]
+struct EReaderBook {
+  path: String,
+  filename: String,
+  title: Option<String>,
+  authors: Vec<String>,
+  file_hash: String,
+  matched_item_id: Option<String>,
+  match_confidence: Option<String>,
+}
+
+#[derive(Serialize, serde::Deserialize, Clone)]
+struct SyncQueueItem {
+  id: String,
+  device_id: String,
+  action: String,
+  item_id: Option<String>,
+  ereader_path: Option<String>,
+  status: String,
+  created_at: i64,
+}
+
+#[derive(Serialize)]
+struct SyncResult {
+  added: i64,
+  removed: i64,
+  imported: i64,
+  errors: Vec<String>,
+}
+
 #[derive(serde::Deserialize, serde::Serialize)]
 struct EpubChangeSet {
   title: Option<String>,
@@ -2992,6 +3033,106 @@ fn count_scan_targets(root: &str) -> u64 {
     .count() as u64
 }
 
+// eReader device management commands
+
+#[tauri::command]
+fn add_ereader_device(
+  app: tauri::AppHandle,
+  name: String,
+  mount_path: String,
+) -> Result<EReaderDevice, String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+  let id = Uuid::new_v4().to_string();
+  let is_connected = std::path::Path::new(&mount_path).exists();
+
+  conn.execute(
+    "INSERT INTO ereader_devices (id, name, mount_path, device_type, books_subfolder, last_connected_at, created_at) VALUES (?1, ?2, ?3, 'generic', '', ?4, ?5)",
+    params![id, name, mount_path, if is_connected { Some(now) } else { None }, now],
+  ).map_err(|err| err.to_string())?;
+
+  log::info!("added ereader device: {} at {}", name, mount_path);
+
+  Ok(EReaderDevice {
+    id,
+    name,
+    mount_path,
+    device_type: "generic".to_string(),
+    books_subfolder: String::new(),
+    last_connected_at: if is_connected { Some(now) } else { None },
+    is_connected,
+  })
+}
+
+#[tauri::command]
+fn list_ereader_devices(app: tauri::AppHandle) -> Result<Vec<EReaderDevice>, String> {
+  let conn = open_db(&app)?;
+  let mut stmt = conn
+    .prepare("SELECT id, name, mount_path, device_type, books_subfolder, last_connected_at FROM ereader_devices ORDER BY name")
+    .map_err(|err| err.to_string())?;
+
+  let rows = stmt
+    .query_map(params![], |row| {
+      let mount_path: String = row.get(2)?;
+      let is_connected = std::path::Path::new(&mount_path).exists();
+      Ok(EReaderDevice {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        mount_path,
+        device_type: row.get(3)?,
+        books_subfolder: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+        last_connected_at: row.get(5)?,
+        is_connected,
+      })
+    })
+    .map_err(|err| err.to_string())?;
+
+  let mut devices = Vec::new();
+  for row in rows {
+    devices.push(row.map_err(|err| err.to_string())?);
+  }
+  Ok(devices)
+}
+
+#[tauri::command]
+fn remove_ereader_device(app: tauri::AppHandle, device_id: String) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  conn.execute("DELETE FROM ereader_sync_queue WHERE device_id = ?1", params![device_id])
+    .map_err(|err| err.to_string())?;
+  conn.execute("DELETE FROM ereader_devices WHERE id = ?1", params![device_id])
+    .map_err(|err| err.to_string())?;
+  log::info!("removed ereader device: {}", device_id);
+  Ok(())
+}
+
+#[tauri::command]
+fn check_device_connected(app: tauri::AppHandle, device_id: String) -> Result<bool, String> {
+  let conn = open_db(&app)?;
+  let mount_path: Option<String> = conn
+    .query_row(
+      "SELECT mount_path FROM ereader_devices WHERE id = ?1",
+      params![device_id],
+      |row| row.get(0),
+    )
+    .optional()
+    .map_err(|err| err.to_string())?;
+
+  match mount_path {
+    Some(path) => {
+      let connected = std::path::Path::new(&path).exists();
+      if connected {
+        let now = chrono::Utc::now().timestamp_millis();
+        conn.execute(
+          "UPDATE ereader_devices SET last_connected_at = ?1 WHERE id = ?2",
+          params![now, device_id],
+        ).ok();
+      }
+      Ok(connected)
+    }
+    None => Err("Device not found".to_string()),
+  }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let app_menu = |app: &tauri::App| {
@@ -3061,7 +3202,11 @@ pub fn run() {
       plan_organize,
       apply_organize,
       clear_library,
-      scan_folder
+      scan_folder,
+      add_ereader_device,
+      list_ereader_devices,
+      remove_ereader_device,
+      check_device_connected
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
