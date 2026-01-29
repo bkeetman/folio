@@ -1,22 +1,17 @@
 {
-  "version": "0.1.20",
-  "notes": "Release 0.1.20",
-  "pub_date": "2026-01-28T06:37:46.927Z",
+  "version": "0.1.21",
+  "notes": "Release 0.1.21",
+  "pub_date": "2026-01-29T12:50:39.999Z",
   "platforms": {
     "darwin-aarch64": {
-      "url": "https://github.com/bkeetman/folio/releases/download/v0.1.20/Folio_aarch64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTTnVFRUU5eldVYXgxVW90Q1p4S2pVU1FTMWR5N2R4UG5UQk1LMzBnZWJtRzcrSStXQ1loR2hNWXJvZWJodTBIMDhJRGZhaFgzMGxxaDRNTUN4aURkSVk4TGhlMjFOTWdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5NTgyMjYwCWZpbGU6Rm9saW8uYXBwLnRhci5negpxN0h2aThwa0pFWjJsNGNrZTJVQy9CMmp4UWpDL3lGb1l1SWlxaFVVMVlPT3l3TmZDUlpOYlp2bFhGbDFCL0ZJVWF5c0RKODVQbUtvK0IxV1NNdzNEdz09Cg=="
+      "url": "https://github.com/bkeetman/folio/releases/download/v0.1.21/Folio_aarch64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTTnVFRUU5eldVYXd3MnBUMVJidVVZSnFGWWVwV05qUXZ3eGFKaFZpc2hGejNLQUFwMDFwZkJkZ2pkWk1HcFhyMXBPdnJLQTd4eERzRUdRdXN4VlNSRTJCSEtWVXErM1FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5NjkxMDM0CWZpbGU6Rm9saW8uYXBwLnRhci5negpVRkdVVTBXckVqbTAyd3U0N1V3S2dTTHo4RTVLWjdFeDgwTitmV1lENGRIdnh6ZXp2a1dXMmJSYytrMlRPS2Z3Tk51UnNFR1h5bUtjVWgvN1BQVGZCZz09Cg=="
     }
   },
   "downloads": {
     "macos": {
-      "arm64": "https://github.com/bkeetman/folio/releases/download/v0.1.20/Folio_0.1.20_aarch64.dmg",
-      "dmg": "https://github.com/bkeetman/folio/releases/download/v0.1.20/Folio_0.1.20_aarch64.dmg"
-    },
-    "linux": {
-      "appimage": "https://github.com/bkeetman/folio/releases/download/v0.1.20/Folio_0.1.20_amd64.AppImage",
-      "deb": "https://github.com/bkeetman/folio/releases/download/v0.1.20/Folio_0.1.20_amd64.deb",
-      "rpm": "https://github.com/bkeetman/folio/releases/download/v0.1.20/Folio-0.1.20-1.x86_64.rpm"
+      "arm64": "https://github.com/bkeetman/folio/releases/download/v0.1.21/Folio_0.1.20_aarch64.dmg",
+      "dmg": "https://github.com/bkeetman/folio/releases/download/v0.1.21/Folio_0.1.20_aarch64.dmg"
     }
   }
 }
