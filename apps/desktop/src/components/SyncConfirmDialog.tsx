@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import type { SyncQueueItem, LibraryItem } from "@/types/library";
+import { Button } from "./ui";
+import type { SyncQueueItem, LibraryItem } from "../types/library";
 
 type SyncConfirmDialogProps = {
   open: boolean;

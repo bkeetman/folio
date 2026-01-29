@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { HardDrive, FolderOpen, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import type { EReaderDevice, EReaderBook, SyncQueueItem, LibraryItem } from "@/types/library";
+import { Button } from "../components/ui";
+import type { EReaderDevice, EReaderBook, SyncQueueItem, LibraryItem } from "../types/library";
 
 type EReaderFilter = "all" | "in-library" | "not-on-device" | "device-only" | "queued";
 
