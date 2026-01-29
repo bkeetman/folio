@@ -11,6 +11,7 @@ import {
   BookOpen,
   Copy,
   FileClock,
+  HardDrive,
   Inbox,
   Library,
   Tag,
@@ -127,6 +128,10 @@ export function Sidebar({
         <SidebarItem active={view === "tags"} onClick={() => setView("tags")}>
           <Tag size={16} />
           Tags
+        </SidebarItem>
+        <SidebarItem active={view === "ereader"} onClick={() => setView("ereader")}>
+          <HardDrive size={16} />
+          eReader
         </SidebarItem>
         <SidebarItem active={view === "inbox"} onClick={() => setView("inbox")}> 
           <Inbox size={16} />
