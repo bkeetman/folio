@@ -17,6 +17,7 @@ type MatchModalProps = {
   itemAuthor: string;
   query: string;
   loading: boolean;
+  applyingId: string | null;
   candidates: EnrichmentCandidate[];
   onQueryChange: (value: string) => void;
   onSearch: () => void;
@@ -30,6 +31,7 @@ export function MatchModal({
   itemAuthor,
   query,
   loading,
+  applyingId,
   candidates,
   onQueryChange,
   onSearch,
@@ -137,9 +139,16 @@ export function MatchModal({
                       <Button
                         variant="ghost"
                         onClick={() => onApply(candidate)}
-                        disabled={loading}
+                        disabled={loading || applyingId !== null}
                       >
-                        Use This
+                        {applyingId === candidate.id ? (
+                          <span className="flex items-center gap-2">
+                            <span className="h-3 w-3 animate-spin rounded-full border-2 border-[var(--app-accent)]/40 border-t-[var(--app-accent)]" />
+                            Applying…
+                          </span>
+                        ) : (
+                          "Use This"
+                        )}
                       </Button>
                     </div>
                   </div>

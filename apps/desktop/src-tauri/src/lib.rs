@@ -41,6 +41,9 @@ struct LibraryItem {
   formats: Vec<String>,
   cover_path: Option<String>,
   tags: Vec<Tag>,
+  language: Option<String>,
+  series: Option<String>,
+  series_index: Option<f64>,
 }
 
 fn parse_tags(raw: Option<String>) -> Vec<Tag> {
@@ -186,7 +189,8 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
        COUNT(DISTINCT files.id) as file_count, \
        GROUP_CONCAT(DISTINCT files.extension) as formats, \
        MAX(covers.local_path) as cover_path, \
-       tag_map.tags as tags \
+       tag_map.tags as tags, \
+       items.language, items.series, items.series_index \
        FROM items \
        LEFT JOIN item_authors ON item_authors.item_id = items.id \
        LEFT JOIN authors ON authors.id = item_authors.author_id \
@@ -231,6 +235,9 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
           .collect(),
         cover_path,
         tags: parse_tags(tags),
+        language: row.get(8)?,
+        series: row.get(9)?,
+        series_index: row.get(10)?,
       })
     })
     .map_err(|err| err.to_string())?;
@@ -1132,6 +1139,8 @@ fn apply_fix_candidate(
 ) -> Result<(), String> {
   let conn = open_db(&app)?;
   let now = chrono::Utc::now().timestamp_millis();
+  log::info!("applying fix candidate for item {}: {:?}", item_id, candidate.title);
+
   apply_enrichment_candidate(&app, &conn, &item_id, &candidate, now)?;
   let queued = queue_epub_changes(&conn, &item_id, &candidate, now)?;
   log::info!("queued epub changes: {} for item {}", queued, item_id);
@@ -1140,10 +1149,20 @@ fn apply_fix_candidate(
     params![now, item_id],
   )
   .map_err(|err| err.to_string())?;
+
+  // Try to fetch cover from candidate URL first
+  let mut cover_fetched = false;
   if let Some(url) = candidate.cover_url.as_deref() {
-    let _ = fetch_cover_from_url(&app, &conn, &item_id, url, now);
+    cover_fetched = fetch_cover_from_url(&app, &conn, &item_id, url, now)?;
   }
-  fetch_cover_fallback(&app, &conn, &item_id, now)?;
+
+  // If candidate cover failed or wasn't available, try fallback using ISBN
+  if !cover_fetched {
+    log::info!("trying cover fallback for item {}", item_id);
+    let _ = fetch_cover_fallback(&app, &conn, &item_id, now);
+  }
+
+  log::info!("fix candidate applied for item {}", item_id);
   Ok(())
 }
 
@@ -2335,10 +2354,18 @@ fn fetch_cover_from_url(
   item_id: &str,
   url: &str,
   now: i64,
-) -> Result<(), String> {
-  let response = reqwest::blocking::get(url).map_err(|err| err.to_string())?;
+) -> Result<bool, String> {
+  log::info!("fetching cover from url: {} for item {}", url, item_id);
+  let response = match reqwest::blocking::get(url) {
+    Ok(resp) => resp,
+    Err(err) => {
+      log::warn!("cover fetch failed for {}: {}", url, err);
+      return Ok(false);
+    }
+  };
   if !response.status().is_success() {
-    return Ok(());
+    log::warn!("cover fetch returned status {} for {}", response.status(), url);
+    return Ok(false);
   }
   let content_type = response
     .headers()
@@ -2347,11 +2374,17 @@ fn fetch_cover_from_url(
     .unwrap_or("image/jpeg");
   let extension = map_cover_extension(content_type).unwrap_or("jpg");
   let bytes = response.bytes().map_err(|err| err.to_string())?.to_vec();
-  if bytes.is_empty() {
-    return Ok(());
+
+  // Check for empty or placeholder images (Open Library returns tiny placeholders)
+  // A real cover image should be at least 1KB
+  if bytes.len() < 1024 {
+    log::info!("cover too small ({} bytes), likely a placeholder: {}", bytes.len(), url);
+    return Ok(false);
   }
+
   save_cover(app, conn, item_id, bytes, extension, now, "candidate", Some(url))?;
-  Ok(())
+  log::info!("cover saved successfully for item {}", item_id);
+  Ok(true)
 }
 
 fn fetch_cover_fallback(
@@ -2359,9 +2392,10 @@ fn fetch_cover_fallback(
   conn: &Connection,
   item_id: &str,
   now: i64,
-) -> Result<(), String> {
+) -> Result<bool, String> {
   if has_cover(conn, item_id)? {
-    return Ok(());
+    log::info!("cover fallback skipped (already has cover) for item {}", item_id);
+    return Ok(false);
   }
 
   let isbn: Option<String> = conn
@@ -2376,14 +2410,22 @@ fn fetch_cover_fallback(
     Some(value) => value,
     None => {
       log::info!("cover fallback skipped (no isbn) for item {}", item_id);
-      return Ok(());
+      return Ok(false);
     }
   };
 
   let url = format!("https://covers.openlibrary.org/b/isbn/{}-L.jpg", isbn);
-  let response = reqwest::blocking::get(&url).map_err(|err| err.to_string())?;
+  log::info!("fetching cover fallback from Open Library: {}", url);
+  let response = match reqwest::blocking::get(&url) {
+    Ok(resp) => resp,
+    Err(err) => {
+      log::warn!("cover fallback fetch failed for {}: {}", url, err);
+      return Ok(false);
+    }
+  };
   if !response.status().is_success() {
-    return Ok(());
+    log::warn!("cover fallback returned status {} for {}", response.status(), url);
+    return Ok(false);
   }
   let content_type = response
     .headers()
@@ -2392,12 +2434,16 @@ fn fetch_cover_fallback(
     .unwrap_or("image/jpeg");
   let extension = map_cover_extension(content_type).unwrap_or("jpg");
   let bytes = response.bytes().map_err(|err| err.to_string())?.to_vec();
-  if bytes.is_empty() {
-    return Ok(());
+
+  // Check for empty or placeholder images (Open Library returns tiny placeholders)
+  if bytes.len() < 1024 {
+    log::info!("cover fallback too small ({} bytes), likely a placeholder: {}", bytes.len(), url);
+    return Ok(false);
   }
-  log::info!("cover fetched from Open Library: {}", url);
+
+  log::info!("cover fetched from Open Library: {} ({} bytes)", url, bytes.len());
   save_cover(app, conn, item_id, bytes, extension, now, "openlibrary", Some(&url))?;
-  Ok(())
+  Ok(true)
 }
 
 fn fetch_openlibrary_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
@@ -2699,7 +2745,7 @@ fn tokenize(value: &str) -> std::collections::HashSet<String> {
 }
 
 fn apply_enrichment_candidate(
-  app: &tauri::AppHandle,
+  _app: &tauri::AppHandle,
   conn: &Connection,
   item_id: &str,
   candidate: &EnrichmentCandidate,
@@ -2774,10 +2820,7 @@ fn apply_enrichment_candidate(
     .map_err(|err| err.to_string())?;
   }
 
-  if let Some(url) = candidate.cover_url.as_deref() {
-    let _ = fetch_cover_from_url(app, conn, item_id, url, now);
-  }
-
+  // Cover fetching is handled separately in apply_fix_candidate with proper error handling
   Ok(())
 }
 

@@ -1,4 +1,5 @@
-import type { Tag } from "../types/library";
+import type { Dispatch, SetStateAction } from "react";
+import type { Tag, View } from "../types/library";
 import { Button, Separator } from "../components/ui";
 import { getTagColorClass } from "../lib/tagColors";
 import { FolderOpen, PencilLine, Sparkles } from "lucide-react";
@@ -8,10 +9,12 @@ type InspectorProps = {
     id: string;
     title: string;
     author: string;
+    authors?: string[];
     year: number | string;
     format: string;
     status: string;
     cover: string | null;
+    series?: string | null;
   } | null;
   selectedTags: Tag[];
   availableTags: Tag[];
@@ -21,6 +24,10 @@ type InspectorProps = {
   isDesktop: boolean;
   clearCoverOverride: (itemId: string) => void;
   fetchCoverOverride: (itemId: string) => void;
+  // Navigation
+  setView: Dispatch<SetStateAction<View>>;
+  setSelectedAuthorNames: Dispatch<SetStateAction<string[]>>;
+  setSelectedSeries: Dispatch<SetStateAction<string[]>>;
 };
 
 export function Inspector({
@@ -33,7 +40,21 @@ export function Inspector({
   isDesktop,
   clearCoverOverride,
   fetchCoverOverride,
+  setView,
+  setSelectedAuthorNames,
+  setSelectedSeries,
 }: InspectorProps) {
+  const handleAuthorClick = (authorName: string) => {
+    setSelectedAuthorNames([authorName]);
+    setSelectedSeries([]);
+    setView("library-books");
+  };
+
+  const handleSeriesClick = (seriesName: string) => {
+    setSelectedSeries([seriesName]);
+    setSelectedAuthorNames([]);
+    setView("library-books");
+  };
   return (
     <aside className="flex h-screen flex-col gap-3 overflow-hidden border-l border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-4">
       <div className="flex items-center justify-between">
@@ -67,10 +88,35 @@ export function Inspector({
             </div>
             <div className="flex flex-1 flex-col gap-1">
               <div className="text-[13px] font-semibold">{selectedItem.title}</div>
-              <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.author}</div>
+              {selectedItem.authors && selectedItem.authors.length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  {selectedItem.authors.map((author, i) => (
+                    <span key={author}>
+                      <button
+                        className="text-xs text-[var(--app-accent-strong)] hover:underline"
+                        onClick={() => handleAuthorClick(author)}
+                      >
+                        {author}
+                      </button>
+                      {i < selectedItem.authors!.length - 1 && (
+                        <span className="text-xs text-[var(--app-ink-muted)]">, </span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.author}</div>
+              )}
               <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.year}</div>
+              {selectedItem.series && (
+                <button
+                  className="text-left text-xs text-[var(--app-accent-strong)] hover:underline"
+                  onClick={() => handleSeriesClick(selectedItem.series!)}
+                >
+                  Serie: {selectedItem.series}
+                </button>
+              )}
               <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.format}</div>
-              <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.status}</div>
             </div>
           </div>
 

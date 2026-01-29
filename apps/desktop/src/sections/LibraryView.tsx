@@ -26,6 +26,11 @@ type LibraryViewProps = {
   coverRefreshToken: number;
   fetchCoverOverride: (itemId: string) => void;
   clearCoverOverride: (itemId: string) => void;
+  // Active navigation filters
+  selectedAuthorNames: string[];
+  setSelectedAuthorNames: Dispatch<SetStateAction<string[]>>;
+  selectedSeries: string[];
+  setSelectedSeries: Dispatch<SetStateAction<string[]>>;
 };
 
 export function LibraryView({
@@ -43,9 +48,59 @@ export function LibraryView({
   coverRefreshToken,
   fetchCoverOverride,
   clearCoverOverride,
+  selectedAuthorNames,
+  setSelectedAuthorNames,
+  selectedSeries,
+  setSelectedSeries,
 }: LibraryViewProps) {
+  const hasActiveFilter = selectedAuthorNames.length > 0 || selectedSeries.length > 0;
+
   return (
     <>
+      {/* Active filter indicator */}
+      {hasActiveFilter && (
+        <div className="flex items-center gap-2 rounded-lg border border-[rgba(208,138,70,0.4)] bg-[rgba(208,138,70,0.08)] px-3 py-2">
+          <span className="text-xs text-[var(--app-ink-muted)]">Filter:</span>
+          {selectedAuthorNames.map((name) => (
+            <span
+              key={name}
+              className="inline-flex items-center gap-1 rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)] px-2 py-0.5 text-xs"
+            >
+              Auteur: {name}
+              <button
+                className="ml-1 text-[var(--app-ink-muted)] hover:text-[var(--app-ink)]"
+                onClick={() => setSelectedAuthorNames((prev) => prev.filter((n) => n !== name))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          {selectedSeries.map((name) => (
+            <span
+              key={name}
+              className="inline-flex items-center gap-1 rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)] px-2 py-0.5 text-xs"
+            >
+              Serie: {name}
+              <button
+                className="ml-1 text-[var(--app-ink-muted)] hover:text-[var(--app-ink)]"
+                onClick={() => setSelectedSeries((prev) => prev.filter((n) => n !== name))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          <button
+            className="text-xs text-[var(--app-ink-muted)] hover:text-[var(--app-ink)] hover:underline"
+            onClick={() => {
+              setSelectedAuthorNames([]);
+              setSelectedSeries([]);
+            }}
+          >
+            Wis filters
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
         <button
           className={
@@ -97,16 +152,22 @@ export function LibraryView({
         >
           Tagged
         </button>
-        <div className="flex flex-wrap items-center gap-1">
-          <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">Tags</span>
-          <button
-            className="rounded-full border border-[var(--app-border)] bg-white/80 px-2 py-0.5 text-[11px] hover:bg-white"
-            onClick={() => setSelectedTagIds([])}
-          >
-            All
-          </button>
-          {tags.length ? (
-            tags.map((tag) => {
+        {tags.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
+              Tags
+            </span>
+            <button
+              className={
+                selectedTagIds.length === 0
+                  ? "rounded-full border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)] px-2 py-0.5 text-[11px]"
+                  : "rounded-full border border-[var(--app-border)] bg-white/80 px-2 py-0.5 text-[11px] hover:bg-white"
+              }
+              onClick={() => setSelectedTagIds([])}
+            >
+              All
+            </button>
+            {tags.map((tag) => {
               const active = selectedTagIds.includes(tag.id);
               return (
                 <button
@@ -127,11 +188,9 @@ export function LibraryView({
                   {tag.name}
                 </button>
               );
-            })
-          ) : (
-            <span className="text-[11px] text-[var(--app-ink-muted)]">No tags</span>
-          )}
-        </div>
+            })}
+          </div>
+        )}
       </div>
 
       {isDesktop && !libraryItemsLength ? (
@@ -182,7 +241,9 @@ export function LibraryView({
                     <div className="rounded-md bg-[rgba(255,255,255,0.8)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]">
                       {book.format}
                     </div>
-                    <div className="text-[13px] font-semibold leading-snug">{book.title}</div>
+                    <div className="text-[13px] font-semibold leading-snug">
+                      {book.title}
+                    </div>
                   </div>
                 )}
               </div>
@@ -202,20 +263,16 @@ export function LibraryView({
                 ) : null}
                 <div className="grid gap-1">
                   <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
-                    <span className="text-[10px] uppercase tracking-[0.12em]">Auteur</span>
+                    <span className="text-[10px] uppercase tracking-[0.12em]">
+                      Auteur
+                    </span>
                     <span className="text-[var(--app-ink)]">{book.author}</span>
                   </div>
                   <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
-                    <span className="text-[10px] uppercase tracking-[0.12em]">Jaar</span>
+                    <span className="text-[10px] uppercase tracking-[0.12em]">
+                      Jaar
+                    </span>
                     <span className="text-[var(--app-ink)]">{book.year}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
-                    <span className="text-[10px] uppercase tracking-[0.12em]">Formaat</span>
-                    <span className="text-[var(--app-ink)]">{book.format}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
-                    <span className="text-[10px] uppercase tracking-[0.12em]">Status</span>
-                    <span className="text-[var(--app-ink)]">{book.status}</span>
                   </div>
                 </div>
               </div>
@@ -224,21 +281,20 @@ export function LibraryView({
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border border-[var(--app-border)] bg-[#fffdf9]">
-          <div className="grid grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr_1fr] gap-3 bg-[#f9f4ee] px-4 py-2 text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
+          <div className="grid grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr] gap-3 bg-[#f9f4ee] px-4 py-2 text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
             <div></div>
             <div>Titel</div>
             <div>Auteur</div>
             <div>Jaar</div>
             <div>Formaat</div>
-            <div>Status</div>
           </div>
           {filteredBooks.map((book) => (
             <div
               key={book.id}
               className={
                 selectedItemId === book.id
-                  ? "grid cursor-pointer grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr_1fr] gap-3 border-t border-[var(--app-border)] bg-[rgba(201,122,58,0.12)] px-4 py-2"
-                  : "grid cursor-pointer grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr_1fr] gap-3 border-t border-[var(--app-border)] px-4 py-2 hover:bg-[rgba(201,122,58,0.06)]"
+                  ? "grid cursor-pointer grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr] gap-3 border-t border-[var(--app-border)] bg-[rgba(201,122,58,0.12)] px-4 py-2"
+                  : "grid cursor-pointer grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr] gap-3 border-t border-[var(--app-border)] px-4 py-2 hover:bg-[rgba(201,122,58,0.06)]"
               }
               onClick={() => setSelectedItemId(book.id)}
               role="button"
@@ -280,11 +336,14 @@ export function LibraryView({
                   </div>
                 ) : null}
               </div>
-              <div className="text-xs text-[var(--app-ink-muted)]">{book.author}</div>
-              <div className="text-xs text-[var(--app-ink-muted)]">{book.year}</div>
-              <div className="text-xs text-[var(--app-ink-muted)]">{book.format}</div>
-              <div className="inline-flex items-center justify-center rounded-full border border-[rgba(201,122,58,0.25)] bg-[rgba(201,122,58,0.08)] px-2 py-0.5 text-[11px]">
-                {book.status}
+              <div className="text-xs text-[var(--app-ink-muted)]">
+                {book.author}
+              </div>
+              <div className="text-xs text-[var(--app-ink-muted)]">
+                {book.year}
+              </div>
+              <div className="text-xs text-[var(--app-ink-muted)]">
+                {book.format}
               </div>
             </div>
           ))}

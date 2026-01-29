@@ -1,7 +1,21 @@
-export type View = "library" | "inbox" | "duplicates" | "fix" | "changes" | "tags";
+export type View =
+  | "library"
+  | "library-books"
+  | "library-authors"
+  | "library-series"
+  | "inbox"
+  | "duplicates"
+  | "fix"
+  | "changes"
+  | "tags";
 export type LibraryFilter = "all" | "epub" | "pdf" | "needs-metadata" | "tagged";
 
 export type Tag = { id: string; name: string; color?: string | null };
+
+export type Author = {
+  name: string;
+  bookCount: number;
+};
 
 export type LibraryItem = {
   id: string;
@@ -12,6 +26,9 @@ export type LibraryItem = {
   formats: string[];
   cover_path?: string | null;
   tags?: Tag[];
+  language?: string | null;
+  series?: string | null;
+  series_index?: number | null;
 };
 
 export type ScanStats = {

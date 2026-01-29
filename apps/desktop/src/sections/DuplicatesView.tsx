@@ -5,7 +5,7 @@ type DuplicatesViewProps = {
   groups: DuplicateGroup[];
   duplicateKeepSelection: Record<string, string>;
   setDuplicateKeepSelection: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  handleResolveDuplicate: (groupId: string, keepFileId?: string) => void;
+  handleResolveDuplicate: (groupId: string, keepFileId: string) => void;
 };
 
 export function DuplicatesView({

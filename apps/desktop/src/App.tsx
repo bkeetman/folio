@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import type {
+  Author,
   DuplicateGroup,
   EnrichmentCandidate,
   InboxItem,
@@ -30,6 +31,8 @@ import { DuplicatesView } from "./sections/DuplicatesView";
 import { FixView } from "./sections/FixView";
 import { ChangesView } from "./sections/ChangesView";
 import { TagsView } from "./sections/TagsView";
+import { AuthorsView } from "./sections/AuthorsView";
+import { SeriesView } from "./sections/SeriesView";
 
 const sampleBooks = [
   {
@@ -184,7 +187,7 @@ const sampleFixCandidates: EnrichmentCandidate[] = [
 ];
 
 function App() {
-  const [view, setView] = useState<View>("library");
+  const [view, setView] = useState<View>("library-books");
   const [grid, setGrid] = useState(true);
   const [query, setQuery] = useState("");
   const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>("all");
@@ -209,6 +212,7 @@ function App() {
   const [matchOpen, setMatchOpen] = useState(false);
   const [matchCandidates, setMatchCandidates] = useState<EnrichmentCandidate[]>([]);
   const [matchLoading, setMatchLoading] = useState(false);
+  const [matchApplying, setMatchApplying] = useState<string | null>(null);
   const [matchQuery, setMatchQuery] = useState("");
   const [coverRefreshToken, setCoverRefreshToken] = useState(0);
   const [coverOverrides, setCoverOverrides] = useState<Record<string, string | null>>({});
@@ -233,6 +237,10 @@ function App() {
   );
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [confirmDeleteIds, setConfirmDeleteIds] = useState<string[]>([]);
+
+  // Navigation filter states (for linking from Authors/Series views)
+  const [selectedAuthorNames, setSelectedAuthorNames] = useState<string[]>([]);
+  const [selectedSeries, setSelectedSeries] = useState<string[]>([]);
 
   const refreshPendingChanges = useCallback(async () => {
     if (!isTauri()) return 0;
@@ -298,6 +306,31 @@ function App() {
     (typeof window !== "undefined" &&
       Boolean((window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__));
 
+  // Derived filter data
+  const uniqueAuthors = useMemo((): Author[] => {
+    const counts = new Map<string, number>();
+    libraryItems.forEach((item) => {
+      item.authors.forEach((author) => {
+        counts.set(author, (counts.get(author) || 0) + 1);
+      });
+    });
+    return Array.from(counts.entries())
+      .map(([name, bookCount]) => ({ name, bookCount }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [libraryItems]);
+
+  const uniqueSeries = useMemo((): Array<{ name: string; bookCount: number }> => {
+    const series = new Map<string, number>();
+    libraryItems.forEach((item) => {
+      if (item.series) {
+        series.set(item.series, (series.get(item.series) || 0) + 1);
+      }
+    });
+    return Array.from(series.entries())
+      .map(([name, bookCount]) => ({ name, bookCount }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [libraryItems]);
+
   useEffect(() => {
     if (!isDesktop) return;
     getVersion()
@@ -310,18 +343,25 @@ function App() {
   const filteredBooks = useMemo(() => {
     const base = isDesktop
       ? libraryItems.map((item) => ({
-          coverOverride: coverOverrides[item.id],
           id: item.id,
           title: item.title ?? "Untitled",
           author: item.authors.length ? item.authors.join(", ") : "Unknown",
+          authors: item.authors,
           format: item.formats[0] ?? "FILE",
           year: item.published_year ?? "—",
           status: item.title && item.authors.length ? "Complete" : "Needs Metadata",
           cover: typeof coverOverrides[item.id] === "string" ? coverOverrides[item.id] : null,
           tags: item.tags ?? [],
+          series: item.series ?? null,
         }))
-      : sampleBooks;
-    const filteredByTag = base.filter((book) => {
+      : sampleBooks.map((book) => ({
+          ...book,
+          authors: [book.author],
+          series: null as string | null,
+        }));
+
+    // Format filter
+    const filteredByFormat = base.filter((book) => {
       const normalizedFormat = String(book.format)
         .replace(".", "")
         .toLowerCase();
@@ -338,16 +378,34 @@ function App() {
           return true;
       }
     });
-    const filteredBySpecificTags = selectedTagIds.length
-      ? filteredByTag.filter((book) =>
+
+    // Tag filter (AND-logic)
+    const filteredByTags = selectedTagIds.length
+      ? filteredByFormat.filter((book) =>
           selectedTagIds.every((tagId) =>
             (book.tags ?? []).some((tag) => tag.id === tagId)
           )
         )
-      : filteredByTag;
-    if (!query) return filteredBySpecificTags;
+      : filteredByFormat;
+
+    // Author filter (for navigation from Authors view)
+    const filteredByAuthors = selectedAuthorNames.length
+      ? filteredByTags.filter((book) =>
+          selectedAuthorNames.some((name) => book.authors.includes(name))
+        )
+      : filteredByTags;
+
+    // Series filter (for navigation from Series view)
+    const filteredBySeries = selectedSeries.length
+      ? filteredByAuthors.filter(
+          (book) => book.series && selectedSeries.includes(book.series)
+        )
+      : filteredByAuthors;
+
+    // Search query
+    if (!query) return filteredBySeries;
     const lowered = query.toLowerCase();
-    return filteredBySpecificTags.filter(
+    return filteredBySeries.filter(
       (book) =>
         book.title.toLowerCase().includes(lowered) ||
         book.author.toLowerCase().includes(lowered)
@@ -359,6 +417,8 @@ function App() {
     coverOverrides,
     libraryFilter,
     selectedTagIds,
+    selectedAuthorNames,
+    selectedSeries,
   ]);
 
   const refreshTags = useCallback(async () => {
@@ -904,6 +964,7 @@ function App() {
 
   const handleMatchApply = async (candidate: EnrichmentCandidate) => {
     if (!selectedItemId || !isTauri()) return;
+    setMatchApplying(candidate.id);
     try {
       await invoke("apply_fix_candidate", {
         itemId: selectedItemId,
@@ -917,10 +978,14 @@ function App() {
       );
       setMatchOpen(false);
       setMatchCandidates([]);
+      // Clear any cached cover and fetch the new one from the backend
+      clearCoverOverride(selectedItemId);
       await fetchCoverOverride(selectedItemId);
       await refreshLibrary();
     } catch {
       setScanStatus("Could not apply metadata.");
+    } finally {
+      setMatchApplying(null);
     }
   };
 
@@ -990,7 +1055,7 @@ function App() {
   return (
     <div
       className={
-        view === "library"
+        view === "library" || view === "library-books" || view === "library-authors" || view === "library-series"
           ? "grid h-screen grid-cols-[210px_minmax(0,1fr)_240px] overflow-hidden bg-[var(--app-bg)] text-[var(--app-ink)]"
           : "grid h-screen grid-cols-[210px_minmax(0,1fr)] overflow-hidden bg-[var(--app-bg)] text-[var(--app-ink)]"
       }
@@ -1076,7 +1141,7 @@ function App() {
 
         <div className="flex flex-col gap-4">
           <section className="flex flex-col gap-4">
-            {view === "library" ? (
+            {(view === "library" || view === "library-books") ? (
               <LibraryView
                 isDesktop={isDesktop}
                 libraryItemsLength={libraryItems.length}
@@ -1092,6 +1157,26 @@ function App() {
                 coverRefreshToken={coverRefreshToken}
                 fetchCoverOverride={fetchCoverOverride}
                 clearCoverOverride={clearCoverOverride}
+                selectedAuthorNames={selectedAuthorNames}
+                setSelectedAuthorNames={setSelectedAuthorNames}
+                selectedSeries={selectedSeries}
+                setSelectedSeries={setSelectedSeries}
+              />
+            ) : null}
+
+            {view === "library-authors" ? (
+              <AuthorsView
+                authors={uniqueAuthors}
+                setSelectedAuthorNames={setSelectedAuthorNames}
+                setView={setView}
+              />
+            ) : null}
+
+            {view === "library-series" ? (
+              <SeriesView
+                series={uniqueSeries}
+                setSelectedSeries={setSelectedSeries}
+                setView={setView}
               />
             ) : null}
 
@@ -1159,6 +1244,7 @@ function App() {
           itemAuthor={selectedItem?.author ?? "Unknown"}
           query={matchQuery}
           loading={matchLoading}
+          applyingId={matchApplying}
           candidates={matchCandidates}
           onQueryChange={setMatchQuery}
           onSearch={handleMatchSearch}
@@ -1174,7 +1260,7 @@ function App() {
         />
       </main>
 
-      {view === "library" ? (
+      {(view === "library" || view === "library-books" || view === "library-authors" || view === "library-series") ? (
         <Inspector
           selectedItem={selectedItem}
           selectedTags={selectedTags}
@@ -1185,6 +1271,9 @@ function App() {
           isDesktop={isDesktop}
           clearCoverOverride={clearCoverOverride}
           fetchCoverOverride={fetchCoverOverride}
+          setView={setView}
+          setSelectedAuthorNames={setSelectedAuthorNames}
+          setSelectedSeries={setSelectedSeries}
         />
       ) : null}
     </div>

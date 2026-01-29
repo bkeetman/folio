@@ -12,7 +12,9 @@ import {
   Copy,
   FileClock,
   Inbox,
+  Library,
   Tag,
+  User,
   Wrench,
 } from "lucide-react";
 
@@ -98,11 +100,31 @@ export function Sidebar({
       </div>
 
       <nav className="flex flex-col gap-1">
-        <SidebarItem active={view === "library"} onClick={() => setView("library")}> 
-          <BookOpen size={16} />
+        <div className="text-[10px] uppercase tracking-[0.15em] text-[var(--app-ink-muted)] px-2 pt-2">
           Library
+        </div>
+        <SidebarItem
+          active={view === "library" || view === "library-books"}
+          onClick={() => setView("library-books")}
+        >
+          <BookOpen size={16} />
+          Boeken
         </SidebarItem>
-        <SidebarItem active={view === "tags"} onClick={() => setView("tags")}> 
+        <SidebarItem
+          active={view === "library-authors"}
+          onClick={() => setView("library-authors")}
+        >
+          <User size={16} />
+          Auteurs
+        </SidebarItem>
+        <SidebarItem
+          active={view === "library-series"}
+          onClick={() => setView("library-series")}
+        >
+          <Library size={16} />
+          Series
+        </SidebarItem>
+        <SidebarItem active={view === "tags"} onClick={() => setView("tags")}>
           <Tag size={16} />
           Tags
         </SidebarItem>
