@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { HardDrive, FolderOpen, RefreshCw } from "lucide-react";
+import { HardDrive, FolderOpen, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "../components/ui";
 import type { EReaderDevice, EReaderBook, SyncQueueItem, LibraryItem } from "../types/library";
 
@@ -212,14 +212,27 @@ export function EReaderView({
             ))}
           </select>
           {selectedDevice && (
-            <span
-              className={`flex items-center gap-1.5 text-xs ${selectedDevice.isConnected ? "text-emerald-600" : "text-amber-600"}`}
-            >
+            <>
               <span
-                className={`w-2 h-2 rounded-full ${selectedDevice.isConnected ? "bg-emerald-500" : "bg-amber-500"}`}
-              />
-              {selectedDevice.isConnected ? "Connected" : "Disconnected"}
-            </span>
+                className={`flex items-center gap-1.5 text-xs ${selectedDevice.isConnected ? "text-emerald-600" : "text-amber-600"}`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${selectedDevice.isConnected ? "bg-emerald-500" : "bg-amber-500"}`}
+                />
+                {selectedDevice.isConnected ? "Connected" : "Disconnected"}
+              </span>
+              <button
+                onClick={() => {
+                  if (confirm(`Remove "${selectedDevice.name}" from Folio?`)) {
+                    onRemoveDevice(selectedDevice.id);
+                  }
+                }}
+                className="p-1 rounded text-[var(--app-text-muted)] hover:text-red-600 hover:bg-red-50"
+                title="Remove device"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </>
           )}
         </div>
         <div className="flex items-center gap-2">
