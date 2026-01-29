@@ -1,7 +1,7 @@
 {
   "name": "folio",
   "private": true,
-  "version": "0.1.21",
+  "version": "0.1.22",
   "scripts": {
     "dev": "pnpm -C apps/desktop dev",
     "build": "pnpm -C apps/desktop build",
