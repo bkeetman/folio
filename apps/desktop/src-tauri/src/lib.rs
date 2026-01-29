@@ -23,6 +23,9 @@ const MIGRATION_PENDING_CHANGES_SQL: &str = include_str!(
 const MIGRATION_TAG_COLORS_SQL: &str = include_str!(
   "../../../../packages/core/drizzle/0003_tag_colors.sql"
 );
+const MIGRATION_EREADER_SQL: &str = include_str!(
+  "../../../../packages/core/drizzle/0004_ereader.sql"
+);
 
 #[derive(Serialize, Clone)]
 struct Tag {
@@ -1721,6 +1724,7 @@ fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
   apply_migration(&conn, "0001_wandering_young_avengers", MIGRATION_COVERS_SQL)?;
   apply_migration(&conn, "0002_pending_changes", MIGRATION_PENDING_CHANGES_SQL)?;
   apply_migration(&conn, "0003_tag_colors", MIGRATION_TAG_COLORS_SQL)?;
+  apply_migration(&conn, "0004_ereader", MIGRATION_EREADER_SQL)?;
   conn.execute_batch("PRAGMA foreign_keys = ON;")
     .map_err(|err| err.to_string())?;
   Ok(conn)
