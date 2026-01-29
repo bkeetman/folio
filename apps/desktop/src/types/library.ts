@@ -7,7 +7,8 @@ export type View =
   | "duplicates"
   | "fix"
   | "changes"
-  | "tags";
+  | "tags"
+  | "ereader";
 export type LibraryFilter = "all" | "epub" | "pdf" | "needs-metadata" | "tagged";
 
 export type Tag = { id: string; name: string; color?: string | null };
@@ -101,4 +102,41 @@ export type OrganizePlan = {
     target_path: string;
     action: string;
   }>;
+};
+
+export type EReaderDevice = {
+  id: string;
+  name: string;
+  mountPath: string;
+  deviceType: "kobo" | "kindle" | "generic";
+  booksSubfolder: string;
+  lastConnectedAt: number | null;
+  isConnected: boolean;
+};
+
+export type EReaderBook = {
+  path: string;
+  filename: string;
+  title: string | null;
+  authors: string[];
+  fileHash: string;
+  matchedItemId: string | null;
+  matchConfidence: "exact" | "fuzzy" | null;
+};
+
+export type SyncQueueItem = {
+  id: string;
+  deviceId: string;
+  action: "add" | "remove" | "import";
+  itemId: string | null;
+  ereaderPath: string | null;
+  status: "pending" | "completed" | "error";
+  createdAt: number;
+};
+
+export type SyncResult = {
+  added: number;
+  removed: number;
+  imported: number;
+  errors: string[];
 };
