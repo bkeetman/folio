@@ -3273,6 +3273,84 @@ fn scan_ereader(app: tauri::AppHandle, device_id: String) -> Result<Vec<EReaderB
   Ok(books)
 }
 
+// Sync queue management commands
+
+#[tauri::command]
+fn queue_sync_action(
+  app: tauri::AppHandle,
+  device_id: String,
+  action: String,
+  item_id: Option<String>,
+  ereader_path: Option<String>,
+) -> Result<SyncQueueItem, String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+  let id = Uuid::new_v4().to_string();
+
+  conn.execute(
+    "INSERT INTO ereader_sync_queue (id, device_id, item_id, ereader_path, action, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6)",
+    params![id, device_id, item_id, ereader_path, action, now],
+  ).map_err(|err| err.to_string())?;
+
+  log::info!("queued sync action: {} for device {}", action, device_id);
+
+  Ok(SyncQueueItem {
+    id,
+    device_id,
+    action,
+    item_id,
+    ereader_path,
+    status: "pending".to_string(),
+    created_at: now,
+  })
+}
+
+#[tauri::command]
+fn remove_from_sync_queue(app: tauri::AppHandle, queue_id: String) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  conn.execute("DELETE FROM ereader_sync_queue WHERE id = ?1", params![queue_id])
+    .map_err(|err| err.to_string())?;
+  log::info!("removed from sync queue: {}", queue_id);
+  Ok(())
+}
+
+#[tauri::command]
+fn get_sync_queue(app: tauri::AppHandle, device_id: String) -> Result<Vec<SyncQueueItem>, String> {
+  let conn = open_db(&app)?;
+  let mut stmt = conn
+    .prepare("SELECT id, device_id, action, item_id, ereader_path, status, created_at FROM ereader_sync_queue WHERE device_id = ?1 ORDER BY created_at")
+    .map_err(|err| err.to_string())?;
+
+  let rows = stmt
+    .query_map(params![device_id], |row| {
+      Ok(SyncQueueItem {
+        id: row.get(0)?,
+        device_id: row.get(1)?,
+        action: row.get(2)?,
+        item_id: row.get(3)?,
+        ereader_path: row.get(4)?,
+        status: row.get(5)?,
+        created_at: row.get(6)?,
+      })
+    })
+    .map_err(|err| err.to_string())?;
+
+  let mut items = Vec::new();
+  for row in rows {
+    items.push(row.map_err(|err| err.to_string())?);
+  }
+  Ok(items)
+}
+
+#[tauri::command]
+fn clear_sync_queue(app: tauri::AppHandle, device_id: String) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  conn.execute("DELETE FROM ereader_sync_queue WHERE device_id = ?1", params![device_id])
+    .map_err(|err| err.to_string())?;
+  log::info!("cleared sync queue for device {}", device_id);
+  Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let app_menu = |app: &tauri::App| {
@@ -3347,7 +3425,11 @@ pub fn run() {
       list_ereader_devices,
       remove_ereader_device,
       check_device_connected,
-      scan_ereader
+      scan_ereader,
+      queue_sync_action,
+      remove_from_sync_queue,
+      get_sync_queue,
+      clear_sync_queue
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
