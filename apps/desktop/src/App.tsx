@@ -37,6 +37,7 @@ import { TagsView } from "./sections/TagsView";
 import { AuthorsView } from "./sections/AuthorsView";
 import { SeriesView } from "./sections/SeriesView";
 import { EReaderView } from "./sections/EReaderView";
+import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
 
 const sampleBooks = [
   {
@@ -1444,6 +1445,16 @@ function App() {
           onSearch={handleMatchSearch}
           onApply={handleMatchApply}
           onClose={() => setMatchOpen(false)}
+        />
+
+        <SyncConfirmDialog
+          open={ereaderSyncDialogOpen}
+          onClose={() => setEreaderSyncDialogOpen(false)}
+          onConfirm={handleExecuteEreaderSync}
+          deviceName={ereaderDevices.find((d) => d.id === selectedEreaderDeviceId)?.name ?? "eReader"}
+          queue={ereaderSyncQueue}
+          libraryItems={libraryItems}
+          syncing={ereaderSyncing}
         />
 
         <StatusBar
