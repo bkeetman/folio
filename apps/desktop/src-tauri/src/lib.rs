@@ -3351,6 +3351,188 @@ fn clear_sync_queue(app: tauri::AppHandle, device_id: String) -> Result<(), Stri
   Ok(())
 }
 
+#[tauri::command]
+fn execute_sync(app: tauri::AppHandle, device_id: String) -> Result<SyncResult, String> {
+  let conn = open_db(&app)?;
+
+  // Get device info
+  let (mount_path, books_subfolder): (String, String) = conn
+    .query_row(
+      "SELECT mount_path, COALESCE(books_subfolder, '') FROM ereader_devices WHERE id = ?1",
+      params![device_id],
+      |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .map_err(|err| err.to_string())?;
+
+  let device_path = if books_subfolder.is_empty() {
+    std::path::PathBuf::from(&mount_path)
+  } else {
+    std::path::PathBuf::from(&mount_path).join(&books_subfolder)
+  };
+
+  if !device_path.exists() {
+    return Err("Device is not connected".to_string());
+  }
+
+  // Get pending queue items
+  let mut stmt = conn
+    .prepare("SELECT id, action, item_id, ereader_path FROM ereader_sync_queue WHERE device_id = ?1 AND status = 'pending'")
+    .map_err(|err| err.to_string())?;
+
+  let rows = stmt
+    .query_map(params![device_id], |row| {
+      Ok((
+        row.get::<_, String>(0)?,
+        row.get::<_, String>(1)?,
+        row.get::<_, Option<String>>(2)?,
+        row.get::<_, Option<String>>(3)?,
+      ))
+    })
+    .map_err(|err| err.to_string())?;
+
+  let queue_items: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+
+  let mut added = 0i64;
+  let mut removed = 0i64;
+  let mut imported = 0i64;
+  let mut errors: Vec<String> = Vec::new();
+
+  for (queue_id, action, item_id, ereader_path) in queue_items {
+    let result: Result<(), String> = match action.as_str() {
+      "add" => {
+        if let Some(item_id) = item_id {
+          // Get file path from library
+          let file_path: Option<String> = conn
+            .query_row(
+              "SELECT path FROM files WHERE item_id = ?1 AND status = 'active' LIMIT 1",
+              params![item_id],
+              |row| row.get(0),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?;
+
+          if let Some(src) = file_path {
+            let src_path = std::path::Path::new(&src);
+            let filename = src_path.file_name().unwrap_or_default();
+            let dest = resolve_sync_collision(&device_path, filename.to_str().unwrap_or("book.epub"));
+
+            match std::fs::copy(&src, &dest) {
+              Ok(_) => {
+                added += 1;
+                log::info!("copied {} to {}", src, dest.display());
+                Ok(())
+              }
+              Err(e) => Err(format!("Failed to copy: {}", e)),
+            }
+          } else {
+            Err("Library file not found".to_string())
+          }
+        } else {
+          Err("No item_id for add action".to_string())
+        }
+      }
+      "remove" => {
+        if let Some(path) = ereader_path {
+          match std::fs::remove_file(&path) {
+            Ok(_) => {
+              removed += 1;
+              log::info!("removed {}", path);
+              Ok(())
+            }
+            Err(e) => Err(format!("Failed to remove: {}", e)),
+          }
+        } else {
+          Err("No path for remove action".to_string())
+        }
+      }
+      "import" => {
+        if let Some(src) = ereader_path {
+          let src_path = std::path::Path::new(&src);
+          if src_path.exists() {
+            // Import to library imports folder
+            let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            let imports_dir = app_dir.join("imports");
+            std::fs::create_dir_all(&imports_dir).map_err(|e| e.to_string())?;
+
+            let filename = src_path.file_name().unwrap_or_default();
+            let dest = imports_dir.join(filename);
+
+            match std::fs::copy(&src, &dest) {
+              Ok(_) => {
+                imported += 1;
+                log::info!("imported {} to {}", src, dest.display());
+                Ok(())
+              }
+              Err(e) => Err(format!("Failed to import: {}", e)),
+            }
+          } else {
+            Err("Source file not found".to_string())
+          }
+        } else {
+          Err("No path for import action".to_string())
+        }
+      }
+      _ => Err(format!("Unknown action: {}", action)),
+    };
+
+    match result {
+      Ok(_) => {
+        conn.execute(
+          "UPDATE ereader_sync_queue SET status = 'completed' WHERE id = ?1",
+          params![queue_id],
+        ).ok();
+      }
+      Err(e) => {
+        errors.push(e.clone());
+        conn.execute(
+          "UPDATE ereader_sync_queue SET status = 'error' WHERE id = ?1",
+          params![queue_id],
+        ).ok();
+      }
+    }
+  }
+
+  // Clean up completed items
+  conn.execute(
+    "DELETE FROM ereader_sync_queue WHERE device_id = ?1 AND status = 'completed'",
+    params![device_id],
+  ).ok();
+
+  log::info!("sync complete: {} added, {} removed, {} imported, {} errors", added, removed, imported, errors.len());
+
+  Ok(SyncResult { added, removed, imported, errors })
+}
+
+fn resolve_sync_collision(dir: &std::path::Path, filename: &str) -> std::path::PathBuf {
+  let base = dir.join(filename);
+  if !base.exists() {
+    return base;
+  }
+
+  let stem = std::path::Path::new(filename)
+    .file_stem()
+    .and_then(|s| s.to_str())
+    .unwrap_or("file");
+  let ext = std::path::Path::new(filename)
+    .extension()
+    .and_then(|s| s.to_str())
+    .unwrap_or("");
+
+  let mut index = 1;
+  loop {
+    let new_name = if ext.is_empty() {
+      format!("{} ({})", stem, index)
+    } else {
+      format!("{} ({}).{}", stem, index, ext)
+    };
+    let candidate = dir.join(new_name);
+    if !candidate.exists() {
+      return candidate;
+    }
+    index += 1;
+  }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let app_menu = |app: &tauri::App| {
@@ -3429,7 +3611,8 @@ pub fn run() {
       queue_sync_action,
       remove_from_sync_queue,
       get_sync_queue,
-      clear_sync_queue
+      clear_sync_queue,
+      execute_sync
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
