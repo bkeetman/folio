@@ -8,6 +8,8 @@ import type {
   Author,
   DuplicateGroup,
   EnrichmentCandidate,
+  EReaderBook,
+  EReaderDevice,
   InboxItem,
   LibraryFilter,
   LibraryHealth,
@@ -16,6 +18,7 @@ import type {
   PendingChange,
   ScanProgress,
   ScanStats,
+  SyncQueueItem,
   Tag,
   View,
 } from "./types/library";
@@ -33,6 +36,7 @@ import { ChangesView } from "./sections/ChangesView";
 import { TagsView } from "./sections/TagsView";
 import { AuthorsView } from "./sections/AuthorsView";
 import { SeriesView } from "./sections/SeriesView";
+import { EReaderView } from "./sections/EReaderView";
 
 const sampleBooks = [
   {
@@ -241,6 +245,15 @@ function App() {
   // Navigation filter states (for linking from Authors/Series views)
   const [selectedAuthorNames, setSelectedAuthorNames] = useState<string[]>([]);
   const [selectedSeries, setSelectedSeries] = useState<string[]>([]);
+
+  // eReader state
+  const [ereaderDevices, setEreaderDevices] = useState<EReaderDevice[]>([]);
+  const [selectedEreaderDeviceId, setSelectedEreaderDeviceId] = useState<string | null>(null);
+  const [ereaderBooks, setEreaderBooks] = useState<EReaderBook[]>([]);
+  const [ereaderSyncQueue, setEreaderSyncQueue] = useState<SyncQueueItem[]>([]);
+  const [ereaderScanning, setEreaderScanning] = useState(false);
+  const [ereaderSyncDialogOpen, setEreaderSyncDialogOpen] = useState(false);
+  const [ereaderSyncing, setEreaderSyncing] = useState(false);
 
   const refreshPendingChanges = useCallback(async () => {
     if (!isTauri()) return 0;
@@ -555,6 +568,37 @@ function App() {
   useEffect(() => {
     void checkForUpdates(true);
   }, [checkForUpdates]);
+
+  // Load eReader devices
+  useEffect(() => {
+    if (!isDesktop) return;
+    const loadEreaderDevices = async () => {
+      try {
+        const devices = await invoke<EReaderDevice[]>("list_ereader_devices");
+        setEreaderDevices(devices);
+        if (devices.length > 0 && !selectedEreaderDeviceId) {
+          setSelectedEreaderDeviceId(devices[0].id);
+        }
+      } catch {
+        setEreaderDevices([]);
+      }
+    };
+    void loadEreaderDevices();
+  }, [isDesktop, selectedEreaderDeviceId]);
+
+  // Load sync queue when device changes
+  useEffect(() => {
+    if (!isDesktop || !selectedEreaderDeviceId) return;
+    const loadQueue = async () => {
+      try {
+        const queue = await invoke<SyncQueueItem[]>("get_sync_queue", { deviceId: selectedEreaderDeviceId });
+        setEreaderSyncQueue(queue);
+      } catch {
+        setEreaderSyncQueue([]);
+      }
+    };
+    void loadQueue();
+  }, [isDesktop, selectedEreaderDeviceId]);
 
   const handleApplyChange = async (changeId: string) => {
     if (!isTauri()) return;
@@ -1052,6 +1096,136 @@ function App() {
     }
   };
 
+  // eReader handlers
+  const handleAddEreaderDevice = async (name: string, mountPath: string) => {
+    if (!isTauri()) return;
+    try {
+      const device = await invoke<EReaderDevice>("add_ereader_device", { name, mountPath });
+      setEreaderDevices((prev) => [...prev, device]);
+      setSelectedEreaderDeviceId(device.id);
+    } catch {
+      setScanStatus("Could not add eReader device.");
+    }
+  };
+
+  const handleRemoveEreaderDevice = async (deviceId: string) => {
+    if (!isTauri()) return;
+    try {
+      await invoke("remove_ereader_device", { deviceId });
+      setEreaderDevices((prev) => prev.filter((d) => d.id !== deviceId));
+      if (selectedEreaderDeviceId === deviceId) {
+        setSelectedEreaderDeviceId(null);
+      }
+    } catch {
+      setScanStatus("Could not remove eReader device.");
+    }
+  };
+
+  const handleScanEreaderDevice = async (deviceId: string) => {
+    if (!isTauri()) return;
+    setEreaderScanning(true);
+    try {
+      const books = await invoke<EReaderBook[]>("scan_ereader", { deviceId });
+      setEreaderBooks(books);
+    } catch {
+      setScanStatus("Could not scan eReader device.");
+    } finally {
+      setEreaderScanning(false);
+    }
+  };
+
+  const handleQueueEreaderAdd = async (itemId: string) => {
+    if (!isTauri() || !selectedEreaderDeviceId) return;
+    try {
+      const item = await invoke<SyncQueueItem>("queue_sync_action", {
+        deviceId: selectedEreaderDeviceId,
+        action: "add",
+        itemId,
+        ereaderPath: null,
+      });
+      setEreaderSyncQueue((prev) => [...prev, item]);
+    } catch {
+      setScanStatus("Could not queue book for sync.");
+    }
+  };
+
+  const handleQueueEreaderRemove = async (ereaderPath: string) => {
+    if (!isTauri() || !selectedEreaderDeviceId) return;
+    try {
+      const item = await invoke<SyncQueueItem>("queue_sync_action", {
+        deviceId: selectedEreaderDeviceId,
+        action: "remove",
+        itemId: null,
+        ereaderPath,
+      });
+      setEreaderSyncQueue((prev) => [...prev, item]);
+    } catch {
+      setScanStatus("Could not queue book for removal.");
+    }
+  };
+
+  const handleQueueEreaderImport = async (ereaderPath: string) => {
+    if (!isTauri() || !selectedEreaderDeviceId) return;
+    try {
+      const item = await invoke<SyncQueueItem>("queue_sync_action", {
+        deviceId: selectedEreaderDeviceId,
+        action: "import",
+        itemId: null,
+        ereaderPath,
+      });
+      setEreaderSyncQueue((prev) => [...prev, item]);
+    } catch {
+      setScanStatus("Could not queue book for import.");
+    }
+  };
+
+  const handleRemoveFromEreaderQueue = async (queueId: string) => {
+    if (!isTauri()) return;
+    try {
+      await invoke("remove_from_sync_queue", { queueId });
+      setEreaderSyncQueue((prev) => prev.filter((q) => q.id !== queueId));
+    } catch {
+      setScanStatus("Could not remove from sync queue.");
+    }
+  };
+
+  const handleOpenSyncDialog = () => {
+    setEreaderSyncDialogOpen(true);
+  };
+
+  const handleExecuteEreaderSync = async () => {
+    if (!isTauri() || !selectedEreaderDeviceId) return;
+    setEreaderSyncing(true);
+    try {
+      const result = await invoke<{ added: number; removed: number; imported: number; errors: string[] }>("execute_sync", {
+        deviceId: selectedEreaderDeviceId,
+      });
+
+      // Refresh data
+      const queue = await invoke<SyncQueueItem[]>("get_sync_queue", { deviceId: selectedEreaderDeviceId });
+      setEreaderSyncQueue(queue);
+
+      const books = await invoke<EReaderBook[]>("scan_ereader", { deviceId: selectedEreaderDeviceId });
+      setEreaderBooks(books);
+
+      await refreshLibrary();
+
+      // Show result
+      const parts = [];
+      if (result.added > 0) parts.push(`${result.added} added`);
+      if (result.removed > 0) parts.push(`${result.removed} removed`);
+      if (result.imported > 0) parts.push(`${result.imported} imported`);
+      if (result.errors.length > 0) parts.push(`${result.errors.length} errors`);
+
+      setScanStatus(`Sync complete: ${parts.join(", ")}`);
+      setEreaderSyncDialogOpen(false);
+    } catch {
+      setScanStatus("Sync failed.");
+    } finally {
+      setEreaderSyncing(false);
+    }
+  };
+
   return (
     <div
       className={
@@ -1233,6 +1407,26 @@ function App() {
                 newTagColor={newTagColor}
                 setNewTagColor={setNewTagColor}
                 handleCreateTag={handleCreateTag}
+              />
+            ) : null}
+
+            {view === "ereader" ? (
+              <EReaderView
+                devices={ereaderDevices}
+                selectedDeviceId={selectedEreaderDeviceId}
+                setSelectedDeviceId={setSelectedEreaderDeviceId}
+                ereaderBooks={ereaderBooks}
+                syncQueue={ereaderSyncQueue}
+                libraryItems={libraryItems}
+                onAddDevice={handleAddEreaderDevice}
+                onRemoveDevice={handleRemoveEreaderDevice}
+                onScanDevice={handleScanEreaderDevice}
+                onQueueAdd={handleQueueEreaderAdd}
+                onQueueRemove={handleQueueEreaderRemove}
+                onQueueImport={handleQueueEreaderImport}
+                onRemoveFromQueue={handleRemoveFromEreaderQueue}
+                onExecuteSync={handleOpenSyncDialog}
+                scanning={ereaderScanning}
               />
             ) : null}
           </section>
