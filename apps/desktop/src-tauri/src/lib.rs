@@ -3133,6 +3133,146 @@ fn check_device_connected(app: tauri::AppHandle, device_id: String) -> Result<bo
   }
 }
 
+#[tauri::command]
+fn scan_ereader(app: tauri::AppHandle, device_id: String) -> Result<Vec<EReaderBook>, String> {
+  let conn = open_db(&app)?;
+
+  // Get device info
+  let (mount_path, books_subfolder): (String, String) = conn
+    .query_row(
+      "SELECT mount_path, COALESCE(books_subfolder, '') FROM ereader_devices WHERE id = ?1",
+      params![device_id],
+      |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .map_err(|err| err.to_string())?;
+
+  let scan_path = if books_subfolder.is_empty() {
+    std::path::PathBuf::from(&mount_path)
+  } else {
+    std::path::PathBuf::from(&mount_path).join(&books_subfolder)
+  };
+
+  if !scan_path.exists() {
+    return Err("Device folder does not exist".to_string());
+  }
+
+  log::info!("scanning ereader at: {}", scan_path.display());
+
+  // Build a map of library items by hash and by title for matching
+  let mut hash_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+  let mut title_map: std::collections::HashMap<String, (String, Vec<String>)> = std::collections::HashMap::new();
+
+  let mut stmt = conn
+    .prepare("SELECT items.id, items.title, files.sha256, GROUP_CONCAT(authors.name) as authors FROM items LEFT JOIN files ON files.item_id = items.id LEFT JOIN item_authors ON item_authors.item_id = items.id LEFT JOIN authors ON authors.id = item_authors.author_id WHERE files.sha256 IS NOT NULL GROUP BY items.id")
+    .map_err(|err| err.to_string())?;
+
+  let rows = stmt
+    .query_map(params![], |row| {
+      Ok((
+        row.get::<_, String>(0)?,
+        row.get::<_, Option<String>>(1)?,
+        row.get::<_, Option<String>>(2)?,
+        row.get::<_, Option<String>>(3)?,
+      ))
+    })
+    .map_err(|err| err.to_string())?;
+
+  for row in rows {
+    let (item_id, title, hash, authors) = row.map_err(|err| err.to_string())?;
+    if let Some(h) = hash {
+      hash_map.insert(h, item_id.clone());
+    }
+    if let Some(t) = title {
+      let author_list: Vec<String> = authors
+        .unwrap_or_default()
+        .split(',')
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_lowercase())
+        .collect();
+      title_map.insert(t.to_lowercase(), (item_id, author_list));
+    }
+  }
+
+  let mut books: Vec<EReaderBook> = Vec::new();
+
+  for entry in WalkDir::new(&scan_path)
+    .into_iter()
+    .filter_map(Result::ok)
+    .filter(|e| e.file_type().is_file())
+  {
+    let path = entry.path();
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+
+    if ext != "epub" && ext != "pdf" {
+      continue;
+    }
+
+    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+    let path_str = path.to_string_lossy().to_string();
+
+    // Compute hash
+    let file_hash = match hash_file(path) {
+      Ok(h) => h,
+      Err(_) => continue,
+    };
+
+    // Try to extract metadata
+    let (title, authors): (Option<String>, Vec<String>) = if ext == "epub" {
+      match extract_epub_metadata(path) {
+        Ok(meta) => (meta.title, meta.authors),
+        Err(_) => (None, vec![]),
+      }
+    } else {
+      // For PDF, try to extract title from filename
+      let stem = path.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string());
+      (stem, vec![])
+    };
+
+    // Match against library - hash first, then fuzzy title+author
+    let (matched_item_id, match_confidence) = if let Some(item_id) = hash_map.get(&file_hash) {
+      (Some(item_id.clone()), Some("exact".to_string()))
+    } else if let Some(t) = &title {
+      let key: String = t.to_lowercase();
+      if let Some((item_id, lib_authors)) = title_map.get(&key) {
+        // Check if authors match (fuzzy)
+        let book_authors: Vec<String> = authors.iter().map(|a: &String| a.to_lowercase()).collect();
+        let author_match = lib_authors.is_empty() || book_authors.is_empty() ||
+          lib_authors.iter().any(|la| book_authors.iter().any(|ba: &String| ba.contains(la) || la.contains(ba.as_str())));
+        if author_match {
+          (Some(item_id.clone()), Some("fuzzy".to_string()))
+        } else {
+          (None, None)
+        }
+      } else {
+        (None, None)
+      }
+    } else {
+      (None, None)
+    };
+
+    books.push(EReaderBook {
+      path: path_str,
+      filename,
+      title,
+      authors,
+      file_hash,
+      matched_item_id,
+      match_confidence,
+    });
+  }
+
+  log::info!("scanned {} books from ereader", books.len());
+
+  // Update last connected timestamp
+  let now = chrono::Utc::now().timestamp_millis();
+  conn.execute(
+    "UPDATE ereader_devices SET last_connected_at = ?1 WHERE id = ?2",
+    params![now, device_id],
+  ).ok();
+
+  Ok(books)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let app_menu = |app: &tauri::App| {
@@ -3206,7 +3346,8 @@ pub fn run() {
       add_ereader_device,
       list_ereader_devices,
       remove_ereader_device,
-      check_device_connected
+      check_device_connected,
+      scan_ereader
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
