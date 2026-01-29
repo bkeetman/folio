@@ -2,6 +2,22 @@
 
 Calm, modern, Mac-first personal book library.
 
+## Installation on macOS
+
+Since the app allows you to manage your local files but is not signed with a paid Apple Developer certificate, macOS will quarantine the downloaded file.
+
+**(1) Download** the `.dmg` from [Releases](https://github.com/bkeetman/folio/releases).
+
+**(2) Install** by dragging Folio to your Applications folder.
+
+**(3) Run this command** in your Terminal to allow the app to run:
+
+```bash
+xattr -cr /Applications/Folio.app
+```
+
+Then you can open Folio normally.
+
 ## Development
 
 ```bash
