@@ -32,6 +32,18 @@ export type LibraryItem = {
   series_index?: number | null;
 };
 
+export type BookDisplay = {
+  id: string;
+  title: string;
+  author: string;
+  format: string;
+  year: number | string;
+  status: string;
+  cover: string | null;
+  tags?: Tag[];
+  series?: string | null;
+};
+
 export type ScanStats = {
   added: number;
   updated: number;

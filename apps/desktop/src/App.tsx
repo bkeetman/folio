@@ -1,9 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MatchModal } from "./components/MatchModal";
+import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
+import { TAG_COLORS } from "./lib/tagColors";
+import { AuthorsView } from "./sections/AuthorsView";
+import { ChangesView } from "./sections/ChangesView";
+import { DuplicatesView } from "./sections/DuplicatesView";
+import { EReaderView } from "./sections/EReaderView";
+import { FixView } from "./sections/FixView";
+import { InboxView } from "./sections/InboxView";
+import { Inspector } from "./sections/Inspector";
+import { LibraryView } from "./sections/LibraryView";
+import { SeriesView } from "./sections/SeriesView";
+import { Sidebar } from "./sections/Sidebar";
+import { StatusBar } from "./sections/StatusBar";
+import { TagsView } from "./sections/TagsView";
+import { TopToolbar } from "./sections/TopToolbar";
 import type {
   Author,
   DuplicateGroup,
@@ -22,22 +38,6 @@ import type {
   Tag,
   View,
 } from "./types/library";
-import { MatchModal } from "./components/MatchModal";
-import { TAG_COLORS } from "./lib/tagColors";
-import { Sidebar } from "./sections/Sidebar";
-import { TopToolbar } from "./sections/TopToolbar";
-import { LibraryView } from "./sections/LibraryView";
-import { Inspector } from "./sections/Inspector";
-import { StatusBar } from "./sections/StatusBar";
-import { InboxView } from "./sections/InboxView";
-import { DuplicatesView } from "./sections/DuplicatesView";
-import { FixView } from "./sections/FixView";
-import { ChangesView } from "./sections/ChangesView";
-import { TagsView } from "./sections/TagsView";
-import { AuthorsView } from "./sections/AuthorsView";
-import { SeriesView } from "./sections/SeriesView";
-import { EReaderView } from "./sections/EReaderView";
-import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
 
 const sampleBooks = [
   {
@@ -357,22 +357,22 @@ function App() {
   const filteredBooks = useMemo(() => {
     const base = isDesktop
       ? libraryItems.map((item) => ({
-          id: item.id,
-          title: item.title ?? "Untitled",
-          author: item.authors.length ? item.authors.join(", ") : "Unknown",
-          authors: item.authors,
-          format: item.formats[0] ?? "FILE",
-          year: item.published_year ?? "—",
-          status: item.title && item.authors.length ? "Complete" : "Needs Metadata",
-          cover: typeof coverOverrides[item.id] === "string" ? coverOverrides[item.id] : null,
-          tags: item.tags ?? [],
-          series: item.series ?? null,
-        }))
+        id: item.id,
+        title: item.title ?? "Untitled",
+        author: item.authors.length ? item.authors.join(", ") : "Unknown",
+        authors: item.authors,
+        format: item.formats[0] ?? "FILE",
+        year: item.published_year ?? "—",
+        status: item.title && item.authors.length ? "Complete" : "Needs Metadata",
+        cover: typeof coverOverrides[item.id] === "string" ? coverOverrides[item.id] : null,
+        tags: item.tags ?? [],
+        series: item.series ?? null,
+      }))
       : sampleBooks.map((book) => ({
-          ...book,
-          authors: [book.author],
-          series: null as string | null,
-        }));
+        ...book,
+        authors: [book.author],
+        series: null as string | null,
+      }));
 
     // Format filter
     const filteredByFormat = base.filter((book) => {
@@ -396,24 +396,24 @@ function App() {
     // Tag filter (AND-logic)
     const filteredByTags = selectedTagIds.length
       ? filteredByFormat.filter((book) =>
-          selectedTagIds.every((tagId) =>
-            (book.tags ?? []).some((tag) => tag.id === tagId)
-          )
+        selectedTagIds.every((tagId) =>
+          (book.tags ?? []).some((tag) => tag.id === tagId)
         )
+      )
       : filteredByFormat;
 
     // Author filter (for navigation from Authors view)
     const filteredByAuthors = selectedAuthorNames.length
       ? filteredByTags.filter((book) =>
-          selectedAuthorNames.some((name) => book.authors.includes(name))
-        )
+        selectedAuthorNames.some((name) => book.authors.includes(name))
+      )
       : filteredByTags;
 
     // Series filter (for navigation from Series view)
     const filteredBySeries = selectedSeries.length
       ? filteredByAuthors.filter(
-          (book) => book.series && selectedSeries.includes(book.series)
-        )
+        (book) => book.series && selectedSeries.includes(book.series)
+      )
       : filteredByAuthors;
 
     // Search query
@@ -804,14 +804,19 @@ function App() {
       });
       if (typeof selection === "string") {
         setScanStatus("Scanning...");
-        const stats = await invoke<ScanStats>("scan_folder", {
-          root: selection,
+        await invoke("scan_library", {
+          rootPath: selection,
         });
-        setScanStatus(
-          `Scan complete: ${stats.added} added, ${stats.updated} updated, ${stats.moved} moved.`
-        );
+        // We do NOT setScanProgress(null) here immediately, as the scan is async backend side.
+        // However, scan_library in backend currently is NOT async spawned in the command handler itself?
+        // Wait, scan_library in scanner.rs is synchronous in the thread? 
+        // No, `#[tauri::command]` by default runs on a thread pool if not async?
+        // Actually, if it returns Result, it blocks the invoke promise.
+        // But my scan_library implementation IS blocking.
+        // So the promise resolves WHEN the scan is done.
+        // But scanner also emits events.
+        // Let's rely on events for UI updates, but the promise resolution means it's done.
         await refreshLibrary();
-        setScanProgress(null);
       } else {
         setScanStatus("Scan cancelled.");
         setScanProgress(null);
@@ -1285,11 +1290,11 @@ function App() {
                   width:
                     scanProgress.total > 0
                       ? `${Math.min(
-                          100,
-                          Math.round(
-                            (scanProgress.processed / scanProgress.total) * 100
-                          )
-                        )}%`
+                        100,
+                        Math.round(
+                          (scanProgress.processed / scanProgress.total) * 100
+                        )
+                      )}%`
                       : "6%",
                 }}
               />

@@ -11,6 +11,11 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 use zip::ZipArchive;
 
+pub mod db;
+pub mod models;
+pub mod parser;
+pub mod scanner;
+
 const MIGRATION_SQL: &str = include_str!(
   "../../../../packages/core/drizzle/0000_nebulous_mysterio.sql"
 );
@@ -3626,6 +3631,7 @@ pub fn run() {
       apply_organize,
       clear_library,
       scan_folder,
+      scanner::scan_library,
       add_ereader_device,
       list_ereader_devices,
       remove_ereader_device,
