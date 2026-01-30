@@ -1,4 +1,5 @@
 use crate::db;
+use crate::generate_text_cover;
 // use crate::models::Book;
 use rusqlite::{params, OptionalExtension};
 use std::fs;
@@ -83,7 +84,7 @@ pub fn scan_library(app: AppHandle, root_path: String) -> Result<(), String> {
                          language = meta.language;
                          description = meta.description;
                          publisher = meta.publisher;
-                         
+
                          if let Some(bytes) = meta.cover_image {
                              // Save cover to app_data/covers
                              let app_dir = app.path().app_data_dir().unwrap_or(std::path::PathBuf::from("."));
@@ -99,6 +100,24 @@ pub fn scan_library(app: AppHandle, root_path: String) -> Result<(), String> {
                              }
                          }
                      }
+                }
+
+                // Generate text cover if no cover was found
+                if cover_path.is_none() {
+                    let app_dir = app.path().app_data_dir().unwrap_or(std::path::PathBuf::from("."));
+                    let covers_dir = app_dir.join("covers");
+                    if !covers_dir.exists() {
+                        let _ = fs::create_dir_all(&covers_dir);
+                    }
+                    let author_for_cover = author_name.as_deref().unwrap_or("Unknown");
+                    if let Ok(bytes) = generate_text_cover(&title, author_for_cover) {
+                        let cover_filename = format!("{}.png", id);
+                        let target_path = covers_dir.join(&cover_filename);
+                        if fs::write(&target_path, &bytes).is_ok() {
+                            cover_path = Some(target_path.to_string_lossy().to_string());
+                            log::info!("Generated text cover for: {}", title);
+                        }
+                    }
                 }
 
                 tx.execute(

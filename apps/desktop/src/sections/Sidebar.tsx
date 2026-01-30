@@ -38,6 +38,7 @@ type SidebarProps = {
   libraryHealth: LibraryHealth | null;
   handleClearLibrary: () => void;
   appVersion: string | null;
+  ereaderConnected: boolean;
 };
 
 export function Sidebar({
@@ -59,6 +60,7 @@ export function Sidebar({
   libraryHealth,
   handleClearLibrary,
   appVersion,
+  ereaderConnected,
 }: SidebarProps) {
   const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
 
@@ -131,7 +133,13 @@ export function Sidebar({
         </SidebarItem>
         <SidebarItem active={view === "ereader"} onClick={() => setView("ereader")}>
           <HardDrive size={16} />
-          eReader
+          <span className="flex items-center gap-1.5">
+            eReader
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${ereaderConnected ? "bg-emerald-500" : "bg-stone-300"}`}
+              title={ereaderConnected ? "Device connected" : "No device connected"}
+            />
+          </span>
         </SidebarItem>
         <SidebarItem active={view === "inbox"} onClick={() => setView("inbox")}> 
           <Inbox size={16} />

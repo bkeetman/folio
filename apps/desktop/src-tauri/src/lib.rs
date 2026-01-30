@@ -1,3 +1,7 @@
+use ab_glyph::{FontRef, PxScale};
+use image::{ImageBuffer, Rgba, ImageEncoder};
+use image::codecs::png::PngEncoder;
+use imageproc::drawing::draw_text_mut;
 use lopdf::{Document, Object};
 use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -148,12 +152,22 @@ struct SyncQueueItem {
   created_at: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct SyncResult {
   added: i64,
   removed: i64,
   imported: i64,
   errors: Vec<String>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SyncProgressPayload {
+  processed: usize,
+  total: usize,
+  current: String,
+  action: String,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -1650,7 +1664,23 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
             );
           }
           Ok(None) => {
-            log::info!("epub cover missing: {}", path_str);
+            log::info!("epub cover missing, generating text cover: {}", path_str);
+            // Generate text-based cover as fallback
+            let title: String = conn
+              .query_row("SELECT title FROM items WHERE id = ?1", params![item_id], |row| row.get(0))
+              .unwrap_or_else(|_| "Untitled".to_string());
+            let author: String = conn
+              .query_row(
+                "SELECT GROUP_CONCAT(a.name, ', ') FROM authors a JOIN item_authors ia ON ia.author_id = a.id WHERE ia.item_id = ?1",
+                params![item_id],
+                |row| row.get::<_, Option<String>>(0),
+              )
+              .unwrap_or(None)
+              .unwrap_or_else(|| "Unknown".to_string());
+            if let Ok(bytes) = crate::generate_text_cover(&title, &author) {
+              let _ = crate::save_cover(&app, &conn, &item_id, bytes, "png", now, "generated", None);
+              log::info!("generated text cover for: {}", path_str);
+            }
           }
           Err(error) => {
             log::warn!("epub cover error {}: {}", path_str, error);
@@ -1659,6 +1689,25 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
       }
       if let Ok(false) = has_cover(&conn, &item_id) {
         let _ = fetch_cover_fallback(&app, &conn, &item_id, now);
+      }
+      // Final fallback: generate text cover if still no cover
+      if let Ok(false) = has_cover(&conn, &item_id) {
+        log::info!("generating text cover as final fallback for existing item: {}", path_str);
+        let title: String = conn
+          .query_row("SELECT title FROM items WHERE id = ?1", params![item_id], |row| row.get(0))
+          .unwrap_or_else(|_| "Untitled".to_string());
+        let author: String = conn
+          .query_row(
+            "SELECT GROUP_CONCAT(a.name, ', ') FROM authors a JOIN item_authors ia ON ia.author_id = a.id WHERE ia.item_id = ?1",
+            params![item_id],
+            |row| row.get::<_, Option<String>>(0),
+          )
+          .unwrap_or(None)
+          .unwrap_or_else(|| "Unknown".to_string());
+        if let Ok(bytes) = crate::generate_text_cover(&title, &author) {
+          let _ = crate::save_cover(&app, &conn, &item_id, bytes, "png", now, "generated", None);
+          log::info!("generated text cover for existing item: {}", path_str);
+        }
       }
     }
       continue;
@@ -1711,7 +1760,23 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
             );
           }
           Ok(None) => {
-            log::info!("epub cover missing: {}", path_str);
+            log::info!("epub cover missing, generating text cover: {}", path_str);
+            // Generate text-based cover as fallback
+            let title: String = conn
+              .query_row("SELECT title FROM items WHERE id = ?1", params![item_id], |row| row.get(0))
+              .unwrap_or_else(|_| "Untitled".to_string());
+            let author: String = conn
+              .query_row(
+                "SELECT GROUP_CONCAT(a.name, ', ') FROM authors a JOIN item_authors ia ON ia.author_id = a.id WHERE ia.item_id = ?1",
+                params![item_id],
+                |row| row.get::<_, Option<String>>(0),
+              )
+              .unwrap_or(None)
+              .unwrap_or_else(|| "Unknown".to_string());
+            if let Ok(bytes) = crate::generate_text_cover(&title, &author) {
+              let _ = crate::save_cover(&app, &conn, &item_id, bytes, "png", now, "generated", None);
+              log::info!("generated text cover for: {}", path_str);
+            }
           }
           Err(error) => {
             log::warn!("epub cover error {}: {}", path_str, error);
@@ -1720,6 +1785,25 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
       }
     if let Ok(false) = has_cover(&conn, &item_id) {
       let _ = fetch_cover_fallback(&app, &conn, &item_id, now);
+    }
+    // Final fallback: generate text cover if still no cover
+    if let Ok(false) = has_cover(&conn, &item_id) {
+      log::info!("generating text cover as final fallback for new item: {}", path_str);
+      let title: String = conn
+        .query_row("SELECT title FROM items WHERE id = ?1", params![item_id], |row| row.get(0))
+        .unwrap_or_else(|_| "Untitled".to_string());
+      let author: String = conn
+        .query_row(
+          "SELECT GROUP_CONCAT(a.name, ', ') FROM authors a JOIN item_authors ia ON ia.author_id = a.id WHERE ia.item_id = ?1",
+          params![item_id],
+          |row| row.get::<_, Option<String>>(0),
+        )
+        .unwrap_or(None)
+        .unwrap_or_else(|| "Unknown".to_string());
+      if let Ok(bytes) = crate::generate_text_cover(&title, &author) {
+        let _ = crate::save_cover(&app, &conn, &item_id, bytes, "png", now, "generated", None);
+        log::info!("generated text cover for new item: {}", path_str);
+      }
     }
   }
 
@@ -2152,6 +2236,94 @@ fn extract_year(text: &str) -> Option<i64> {
   captures.get(1)?.as_str().parse().ok()
 }
 
+/// Normalize a book title for matching purposes
+/// - Lowercases
+/// - Removes leading articles (The, A, An)
+/// - Removes punctuation
+/// - Removes subtitle after colon/dash
+/// - Collapses whitespace
+fn normalize_title_for_matching(title: &str) -> String {
+  let mut result = title.to_lowercase();
+
+  // Remove subtitle (everything after : or -)
+  if let Some(pos) = result.find(':') {
+    result = result[..pos].to_string();
+  }
+  if let Some(pos) = result.find(" - ") {
+    result = result[..pos].to_string();
+  }
+
+  // Remove leading articles
+  let articles = ["the ", "a ", "an ", "de ", "het ", "een "];
+  for article in articles {
+    if result.starts_with(article) {
+      result = result[article.len()..].to_string();
+      break;
+    }
+  }
+
+  // Remove punctuation and normalize whitespace
+  result = result
+    .chars()
+    .map(|c| if c.is_alphanumeric() || c.is_whitespace() { c } else { ' ' })
+    .collect::<String>()
+    .split_whitespace()
+    .collect::<Vec<_>>()
+    .join(" ");
+
+  result
+}
+
+/// Extract the likely last name from an author string
+/// Handles both "First Last" and "Last, First" formats
+fn extract_author_last_name(author: &str) -> String {
+  let author = author.trim().to_lowercase();
+
+  // Handle "Last, First" format
+  if let Some(pos) = author.find(',') {
+    return author[..pos].trim().to_string();
+  }
+
+  // Handle "First Last" format - take last word
+  author.split_whitespace().last().unwrap_or(&author).to_string()
+}
+
+/// Check if two author lists likely refer to the same author(s)
+/// Uses last name matching for better accuracy
+fn authors_match_fuzzy(lib_authors: &[String], book_authors: &[String]) -> bool {
+  // If either list is empty, consider it a match (no author info)
+  if lib_authors.is_empty() || book_authors.is_empty() {
+    return true;
+  }
+
+  // Extract last names from both lists
+  let lib_last_names: Vec<String> = lib_authors
+    .iter()
+    .map(|a| extract_author_last_name(a))
+    .collect();
+
+  let book_last_names: Vec<String> = book_authors
+    .iter()
+    .map(|a| extract_author_last_name(a))
+    .collect();
+
+  // Check if at least one last name matches
+  for lib_name in &lib_last_names {
+    for book_name in &book_last_names {
+      // Exact last name match
+      if lib_name == book_name {
+        return true;
+      }
+      // One contains the other (handles partial names)
+      if lib_name.contains(book_name.as_str()) || book_name.contains(lib_name.as_str()) {
+        return true;
+      }
+    }
+  }
+
+  false
+}
+
 fn find_rootfile(container: &str) -> Option<String> {
   let regex = Regex::new(r#"full-path="([^"]+)""#).ok()?;
   let captures = regex.captures(container)?;
@@ -2343,6 +2515,110 @@ fn map_cover_extension(mime: &str) -> Option<&'static str> {
     "image/webp" => Some("webp"),
     _ => None,
   }
+}
+
+/// Generate a cover image from title and author text
+/// Returns PNG bytes
+pub fn generate_text_cover(title: &str, author: &str) -> Result<Vec<u8>, String> {
+  // Cover dimensions (standard ebook cover aspect ratio ~2:3)
+  let width: u32 = 400;
+  let height: u32 = 600;
+
+  // Create image with a warm beige/cream background
+  let bg_color = Rgba([250u8, 245, 235, 255]);
+  let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_pixel(width, height, bg_color);
+
+  // Draw a subtle border
+  let border_color = Rgba([180u8, 160, 140, 255]);
+  let border_width = 8u32;
+  for x in 0..width {
+    for y in 0..height {
+      if x < border_width || x >= width - border_width || y < border_width || y >= height - border_width {
+        img.put_pixel(x, y, border_color);
+      }
+    }
+  }
+
+  // Draw inner border line
+  let line_color = Rgba([160u8, 140, 120, 255]);
+  let inner_margin = 20u32;
+  for x in inner_margin..(width - inner_margin) {
+    img.put_pixel(x, inner_margin, line_color);
+    img.put_pixel(x, height - inner_margin - 1, line_color);
+  }
+  for y in inner_margin..(height - inner_margin) {
+    img.put_pixel(inner_margin, y, line_color);
+    img.put_pixel(width - inner_margin - 1, y, line_color);
+  }
+
+  // Load embedded font (use a simple built-in approach)
+  // We'll use the default font from ab_glyph
+  let font_data = include_bytes!("../fonts/DejaVuSans.ttf");
+  let font = FontRef::try_from_slice(font_data).map_err(|e| format!("Font error: {}", e))?;
+
+  let text_color = Rgba([60u8, 50, 40, 255]);
+  let author_color = Rgba([100u8, 90, 80, 255]);
+
+  // Draw author at top
+  let author_scale = PxScale::from(22.0);
+  let author_display = if author.len() > 35 {
+    format!("{}...", &author[..32])
+  } else {
+    author.to_string()
+  };
+  draw_text_mut(&mut img, author_color, 40, 50, author_scale, &font, &author_display);
+
+  // Draw title in the middle (wrap long titles)
+  let title_scale = PxScale::from(32.0);
+  let max_chars_per_line = 18;
+  let words: Vec<&str> = title.split_whitespace().collect();
+  let mut lines: Vec<String> = Vec::new();
+  let mut current_line = String::new();
+
+  for word in words {
+    if current_line.is_empty() {
+      current_line = word.to_string();
+    } else if current_line.len() + 1 + word.len() <= max_chars_per_line {
+      current_line.push(' ');
+      current_line.push_str(word);
+    } else {
+      lines.push(current_line);
+      current_line = word.to_string();
+    }
+  }
+  if !current_line.is_empty() {
+    lines.push(current_line);
+  }
+
+  // Limit to 6 lines max
+  if lines.len() > 6 {
+    lines.truncate(5);
+    if let Some(last) = lines.last_mut() {
+      if last.len() > 3 {
+        last.truncate(last.len() - 3);
+        last.push_str("...");
+      }
+    }
+  }
+
+  // Center title vertically
+  let line_height = 42i32;
+  let total_height = (lines.len() as i32) * line_height;
+  let start_y = ((height as i32) - total_height) / 2;
+
+  for (i, line) in lines.iter().enumerate() {
+    let y = start_y + (i as i32) * line_height;
+    draw_text_mut(&mut img, text_color, 40, y, title_scale, &font, line);
+  }
+
+  // Encode to PNG
+  let mut png_bytes: Vec<u8> = Vec::new();
+  let encoder = PngEncoder::new(&mut png_bytes);
+  encoder
+    .write_image(&img, width, height, image::ExtendedColorType::Rgba8)
+    .map_err(|e| format!("PNG encode error: {}", e))?;
+
+  Ok(png_bytes)
 }
 
 fn save_cover(
@@ -3084,8 +3360,6 @@ fn list_ereader_devices(app: tauri::AppHandle) -> Result<Vec<EReaderDevice>, Str
       let mount_path: String = row.get(2)?;
       let path = std::path::Path::new(&mount_path);
       let is_connected = path.exists() && path.is_dir();
-      log::info!("eReader device check: path='{}', exists={}, is_dir={}, is_connected={}",
-        mount_path, path.exists(), path.is_dir(), is_connected);
       Ok(EReaderDevice {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -3169,12 +3443,15 @@ fn scan_ereader(app: tauri::AppHandle, device_id: String) -> Result<Vec<EReaderB
 
   log::info!("scanning ereader at: {}", scan_path.display());
 
-  // Build a map of library items by hash and by title for matching
+  // Build maps for matching: hash, ISBN, and normalized title
   let mut hash_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+  let mut isbn_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
   let mut title_map: std::collections::HashMap<String, (String, Vec<String>)> = std::collections::HashMap::new();
+  let mut normalized_title_map: std::collections::HashMap<String, (String, Vec<String>)> = std::collections::HashMap::new();
 
+  // Query items with their files, authors, and identifiers (ISBNs)
   let mut stmt = conn
-    .prepare("SELECT items.id, items.title, files.sha256, GROUP_CONCAT(authors.name) as authors FROM items LEFT JOIN files ON files.item_id = items.id LEFT JOIN item_authors ON item_authors.item_id = items.id LEFT JOIN authors ON authors.id = item_authors.author_id WHERE files.sha256 IS NOT NULL GROUP BY items.id")
+    .prepare("SELECT items.id, items.title, files.sha256, GROUP_CONCAT(DISTINCT authors.name) as authors, GROUP_CONCAT(DISTINCT identifiers.value) as isbns FROM items LEFT JOIN files ON files.item_id = items.id LEFT JOIN item_authors ON item_authors.item_id = items.id LEFT JOIN authors ON authors.id = item_authors.author_id LEFT JOIN identifiers ON identifiers.item_id = items.id WHERE files.sha256 IS NOT NULL GROUP BY items.id")
     .map_err(|err| err.to_string())?;
 
   let rows = stmt
@@ -3184,23 +3461,45 @@ fn scan_ereader(app: tauri::AppHandle, device_id: String) -> Result<Vec<EReaderB
         row.get::<_, Option<String>>(1)?,
         row.get::<_, Option<String>>(2)?,
         row.get::<_, Option<String>>(3)?,
+        row.get::<_, Option<String>>(4)?,
       ))
     })
     .map_err(|err| err.to_string())?;
 
   for row in rows {
-    let (item_id, title, hash, authors) = row.map_err(|err| err.to_string())?;
+    let (item_id, title, hash, authors, isbns) = row.map_err(|err| err.to_string())?;
+
+    // Hash map
     if let Some(h) = hash {
       hash_map.insert(h, item_id.clone());
     }
+
+    // ISBN map - add all ISBNs for this item
+    if let Some(isbn_str) = isbns {
+      for isbn in isbn_str.split(',') {
+        if let Some(normalized) = normalize_isbn(isbn.trim()) {
+          isbn_map.insert(normalized, item_id.clone());
+        }
+      }
+    }
+
+    // Build author list
+    let author_list: Vec<String> = authors
+      .unwrap_or_default()
+      .split(',')
+      .filter(|s| !s.trim().is_empty())
+      .map(|s| s.trim().to_string())
+      .collect();
+
+    // Title maps (exact and normalized)
     if let Some(t) = title {
-      let author_list: Vec<String> = authors
-        .unwrap_or_default()
-        .split(',')
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| s.trim().to_lowercase())
-        .collect();
-      title_map.insert(t.to_lowercase(), (item_id, author_list));
+      title_map.insert(t.to_lowercase(), (item_id.clone(), author_list.clone()));
+
+      // Also add normalized title
+      let normalized = normalize_title_for_matching(&t);
+      if !normalized.is_empty() {
+        normalized_title_map.insert(normalized, (item_id, author_list));
+      }
     }
   }
 
@@ -3254,26 +3553,57 @@ fn scan_ereader(app: tauri::AppHandle, device_id: String) -> Result<Vec<EReaderB
       (filename_title, vec![])
     };
 
-    // Match against library - hash first, then fuzzy title+author
+    // Match against library in order of confidence:
+    // 1. Hash match (exact file)
+    // 2. ISBN match (very reliable)
+    // 3. Exact title match + author check
+    // 4. Normalized title match + author check
+
     let (matched_item_id, match_confidence) = if let Some(item_id) = hash_map.get(&file_hash) {
+      // 1. Exact hash match
       (Some(item_id.clone()), Some("exact".to_string()))
-    } else if let Some(t) = &title {
-      let key: String = t.to_lowercase();
-      if let Some((item_id, lib_authors)) = title_map.get(&key) {
-        // Check if authors match (fuzzy)
-        let book_authors: Vec<String> = authors.iter().map(|a: &String| a.to_lowercase()).collect();
-        let author_match = lib_authors.is_empty() || book_authors.is_empty() ||
-          lib_authors.iter().any(|la| book_authors.iter().any(|ba: &String| ba.contains(la) || la.contains(ba.as_str())));
-        if author_match {
-          (Some(item_id.clone()), Some("fuzzy".to_string()))
+    } else {
+      // Try to extract ISBNs from the ebook for ISBN matching
+      let ebook_isbns: Vec<String> = if ext == "epub" {
+        extract_epub_metadata(path)
+          .map(|meta| meta.identifiers)
+          .unwrap_or_default()
+          .iter()
+          .filter_map(|id| normalize_isbn(id))
+          .collect()
+      } else {
+        vec![]
+      };
+
+      // 2. ISBN match
+      let isbn_match = ebook_isbns.iter().find_map(|isbn| isbn_map.get(isbn));
+      if let Some(item_id) = isbn_match {
+        (Some(item_id.clone()), Some("isbn".to_string()))
+      } else if let Some(t) = &title {
+        // 3. Exact title match (case-insensitive)
+        let key = t.to_lowercase();
+        if let Some((item_id, lib_authors)) = title_map.get(&key) {
+          if authors_match_fuzzy(lib_authors, &authors) {
+            (Some(item_id.clone()), Some("title".to_string()))
+          } else {
+            (None, None)
+          }
         } else {
-          (None, None)
+          // 4. Normalized title match
+          let normalized_key = normalize_title_for_matching(t);
+          if let Some((item_id, lib_authors)) = normalized_title_map.get(&normalized_key) {
+            if authors_match_fuzzy(lib_authors, &authors) {
+              (Some(item_id.clone()), Some("fuzzy".to_string()))
+            } else {
+              (None, None)
+            }
+          } else {
+            (None, None)
+          }
         }
       } else {
         (None, None)
       }
-    } else {
-      (None, None)
     };
 
     books.push(EReaderBook {
@@ -3417,13 +3747,28 @@ fn execute_sync(app: tauri::AppHandle, device_id: String) -> Result<SyncResult, 
     .map_err(|err| err.to_string())?;
 
   let queue_items: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+  let total = queue_items.len();
 
   let mut added = 0i64;
   let mut removed = 0i64;
   let mut imported = 0i64;
   let mut errors: Vec<String> = Vec::new();
+  let mut processed = 0usize;
 
   for (queue_id, action, item_id, ereader_path) in queue_items {
+    // Emit progress
+    let current_name = ereader_path.as_deref()
+      .or(item_id.as_deref())
+      .unwrap_or("item")
+      .to_string();
+    log::info!("sync progress: {}/{} - {} ({})", processed + 1, total, current_name, action);
+    let _ = app.emit("sync-progress", SyncProgressPayload {
+      processed,
+      total,
+      current: current_name,
+      action: action.clone(),
+    });
+    processed += 1;
     let result: Result<(), String> = match action.as_str() {
       "add" => {
         if let Some(item_id) = item_id {
@@ -3526,7 +3871,9 @@ fn execute_sync(app: tauri::AppHandle, device_id: String) -> Result<SyncResult, 
 
   log::info!("sync complete: {} added, {} removed, {} imported, {} errors", added, removed, imported, errors.len());
 
-  Ok(SyncResult { added, removed, imported, errors })
+  let result = SyncResult { added, removed, imported, errors };
+  let _ = app.emit("sync-complete", &result);
+  Ok(result)
 }
 
 fn resolve_sync_collision(dir: &std::path::Path, filename: &str) -> std::path::PathBuf {

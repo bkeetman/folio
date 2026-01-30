@@ -34,6 +34,7 @@ import type {
   PendingChange,
   ScanProgress,
   ScanStats,
+  SyncProgress,
   SyncQueueItem,
   Tag,
   View,
@@ -255,6 +256,7 @@ function App() {
   const [ereaderScanning, setEreaderScanning] = useState(false);
   const [ereaderSyncDialogOpen, setEreaderSyncDialogOpen] = useState(false);
   const [ereaderSyncing, setEreaderSyncing] = useState(false);
+  const [ereaderSyncProgress, setEreaderSyncProgress] = useState<SyncProgress | null>(null);
 
   const refreshPendingChanges = useCallback(async () => {
     if (!isTauri()) return 0;
@@ -570,10 +572,9 @@ function App() {
     void checkForUpdates(true);
   }, [checkForUpdates]);
 
-  // Load eReader devices (refresh when switching to eReader view to check connection status)
+  // Load eReader devices and poll connection status periodically
   useEffect(() => {
     if (!isDesktop) return;
-    if (view !== "ereader" && ereaderDevices.length > 0) return; // Only refresh on view switch if we have devices
     const loadEreaderDevices = async () => {
       try {
         const devices = await invoke<EReaderDevice[]>("list_ereader_devices");
@@ -586,7 +587,10 @@ function App() {
       }
     };
     void loadEreaderDevices();
-  }, [isDesktop, view, selectedEreaderDeviceId, ereaderDevices.length]);
+    // Poll every 3 seconds to detect device connect/disconnect
+    const interval = window.setInterval(loadEreaderDevices, 3000);
+    return () => window.clearInterval(interval);
+  }, [isDesktop, selectedEreaderDeviceId]);
 
   // Load sync queue when device changes
   useEffect(() => {
@@ -804,18 +808,9 @@ function App() {
       });
       if (typeof selection === "string") {
         setScanStatus("Scanning...");
-        await invoke("scan_library", {
-          rootPath: selection,
+        await invoke("scan_folder", {
+          root: selection,
         });
-        // We do NOT setScanProgress(null) here immediately, as the scan is async backend side.
-        // However, scan_library in backend currently is NOT async spawned in the command handler itself?
-        // Wait, scan_library in scanner.rs is synchronous in the thread? 
-        // No, `#[tauri::command]` by default runs on a thread pool if not async?
-        // Actually, if it returns Result, it blocks the invoke promise.
-        // But my scan_library implementation IS blocking.
-        // So the promise resolves WHEN the scan is done.
-        // But scanner also emits events.
-        // Let's rely on events for UI updates, but the promise resolution means it's done.
         await refreshLibrary();
       } else {
         setScanStatus("Scan cancelled.");
@@ -920,6 +915,46 @@ function App() {
       if (unlistenError) unlistenError();
     };
   }, [isDesktop, scanStartedAt, scanning]);
+
+  // Listen for eReader sync progress events
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlistenSyncProgress: (() => void) | undefined;
+    let unlistenSyncComplete: (() => void) | undefined;
+
+    listen<SyncProgress>("sync-progress", (event) => {
+      console.log("sync-progress event:", event.payload);
+      setEreaderSyncProgress(event.payload);
+      if (!ereaderSyncing) setEreaderSyncing(true);
+    }).then((stop) => {
+      unlistenSyncProgress = stop;
+    });
+
+    listen<{ added: number; removed: number; imported: number; errors: string[] }>("sync-complete", (event) => {
+      setEreaderSyncProgress(null);
+      setEreaderSyncing(false);
+      const parts = [];
+      if (event.payload.added > 0) parts.push(`${event.payload.added} added`);
+      if (event.payload.removed > 0) parts.push(`${event.payload.removed} removed`);
+      if (event.payload.imported > 0) parts.push(`${event.payload.imported} imported`);
+      if (event.payload.errors.length > 0) parts.push(`${event.payload.errors.length} errors`);
+      setScanStatus(`Sync complete: ${parts.join(", ")}`);
+      setEreaderSyncDialogOpen(false);
+      // Refresh the queue
+      if (selectedEreaderDeviceId) {
+        invoke<SyncQueueItem[]>("get_sync_queue", { deviceId: selectedEreaderDeviceId })
+          .then(setEreaderSyncQueue)
+          .catch(() => setEreaderSyncQueue([]));
+      }
+    }).then((stop) => {
+      unlistenSyncComplete = stop;
+    });
+
+    return () => {
+      if (unlistenSyncProgress) unlistenSyncProgress();
+      if (unlistenSyncComplete) unlistenSyncComplete();
+    };
+  }, [isDesktop, ereaderSyncing, selectedEreaderDeviceId]);
 
   const currentFixItem = inbox.length ? inbox[0] : inboxItems[0] ?? null;
   const candidateList = isDesktop ? fixCandidates : sampleFixCandidates;
@@ -1260,6 +1295,7 @@ function App() {
         libraryHealth={libraryHealth}
         handleClearLibrary={handleClearLibrary}
         appVersion={appVersion}
+        ereaderConnected={ereaderDevices.some((d) => d.isConnected)}
       />
 
       <main className="flex h-screen flex-col gap-4 overflow-y-auto px-6 py-4">
@@ -1442,6 +1478,8 @@ function App() {
                   }
                 }}
                 scanning={ereaderScanning}
+                syncing={ereaderSyncing}
+                syncProgress={ereaderSyncProgress}
               />
             ) : null}
           </section>
@@ -1469,6 +1507,7 @@ function App() {
           queue={ereaderSyncQueue}
           libraryItems={libraryItems}
           syncing={ereaderSyncing}
+          syncProgress={ereaderSyncProgress}
         />
 
         <StatusBar
@@ -1493,6 +1532,17 @@ function App() {
           setView={setView}
           setSelectedAuthorNames={setSelectedAuthorNames}
           setSelectedSeries={setSelectedSeries}
+          ereaderConnected={ereaderDevices.some((d) => d.isConnected)}
+          ereaderSyncStatus={selectedItem ? (() => {
+            const onDevice = ereaderBooks.find((eb) => eb.matchedItemId === selectedItem.id);
+            const inQueue = ereaderSyncQueue.some((q) => q.itemId === selectedItem.id && q.status === "pending");
+            return {
+              isOnDevice: !!onDevice,
+              isInQueue: inQueue,
+              matchConfidence: (onDevice?.matchConfidence as "exact" | "isbn" | "title" | "fuzzy" | null) ?? null,
+            };
+          })() : null}
+          onQueueEreaderAdd={handleQueueEreaderAdd}
         />
       ) : null}
     </div>

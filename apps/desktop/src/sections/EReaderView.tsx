@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { HardDrive, FolderOpen, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "../components/ui";
-import type { EReaderDevice, EReaderBook, SyncQueueItem, LibraryItem } from "../types/library";
+import type { EReaderDevice, EReaderBook, SyncQueueItem, LibraryItem, SyncProgress } from "../types/library";
 
-type EReaderFilter = "all" | "in-library" | "not-on-device" | "device-only" | "queued";
+type EReaderFilter = "all" | "in-library" | "on-device" | "not-on-device" | "device-only" | "queued";
 
 type EReaderViewProps = {
   devices: EReaderDevice[];
@@ -22,6 +22,8 @@ type EReaderViewProps = {
   onExecuteSync: () => void;
   onRefreshDevices: () => Promise<void>;
   scanning: boolean;
+  syncing: boolean;
+  syncProgress: SyncProgress | null;
 };
 
 type UnifiedItem = {
@@ -29,7 +31,7 @@ type UnifiedItem = {
   title: string | null;
   authors: string[];
   status: "on-device" | "library-only" | "device-only" | "queued-add" | "queued-remove";
-  confidence: "exact" | "fuzzy" | null;
+  confidence: "exact" | "isbn" | "title" | "fuzzy" | null;
   libraryItemId: string | null;
   ereaderPath: string | null;
 };
@@ -51,6 +53,8 @@ export function EReaderView({
   onExecuteSync,
   onRefreshDevices,
   scanning,
+  syncing,
+  syncProgress,
 }: EReaderViewProps) {
   const [filter, setFilter] = useState<EReaderFilter>("all");
 
@@ -75,7 +79,7 @@ export function EReaderView({
       title: lib.title,
       authors: lib.authors,
       status,
-      confidence: (onDevice?.matchConfidence as "exact" | "fuzzy" | null) ?? null,
+      confidence: (onDevice?.matchConfidence as "exact" | "isbn" | "title" | "fuzzy" | null) ?? null,
       libraryItemId: lib.id,
       ereaderPath: onDevice?.path ?? null,
     });
@@ -102,6 +106,8 @@ export function EReaderView({
     switch (filter) {
       case "in-library":
         return item.libraryItemId !== null;
+      case "on-device":
+        return item.status === "on-device"; // Both in library AND on device
       case "not-on-device":
         return item.status === "library-only" || item.status === "queued-add";
       case "device-only":
@@ -113,19 +119,39 @@ export function EReaderView({
     }
   });
 
-  const StatusBadge = ({ status, confidence }: { status: UnifiedItem["status"]; confidence: "exact" | "fuzzy" | null }) => {
-    const badges: Record<string, { label: string; className: string }> = {
-      "on-device": {
-        label: confidence === "exact" ? "On Device" : "On Device",
-        className: confidence === "exact" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700",
-      },
-      "library-only": { label: "Library Only", className: "bg-gray-100 text-gray-600" },
-      "device-only": { label: "Device Only", className: "bg-amber-100 text-amber-700" },
-      "queued-add": { label: "Queued +", className: "bg-purple-100 text-purple-700" },
-      "queued-remove": { label: "Queued −", className: "bg-red-100 text-red-700" },
+  const StatusBadge = ({ status, confidence }: { status: UnifiedItem["status"]; confidence: UnifiedItem["confidence"] }) => {
+    // Different labels/colors based on match confidence
+    const getOnDeviceBadge = () => {
+      switch (confidence) {
+        case "exact":
+          return { label: "Synced", className: "bg-emerald-100 text-emerald-700", title: "Exact file match" };
+        case "isbn":
+          return { label: "Synced", className: "bg-emerald-100 text-emerald-700", title: "Matched by ISBN" };
+        case "title":
+          return { label: "Synced", className: "bg-blue-100 text-blue-700", title: "Matched by title" };
+        case "fuzzy":
+          return { label: "Synced?", className: "bg-sky-100 text-sky-700", title: "Fuzzy match - verify" };
+        default:
+          return { label: "Synced", className: "bg-blue-100 text-blue-700", title: "On device" };
+      }
+    };
+
+    const badges: Record<string, { label: string; className: string; title?: string }> = {
+      "on-device": getOnDeviceBadge(),
+      "library-only": { label: "Library", className: "bg-gray-100 text-gray-600", title: "Only in library" },
+      "device-only": { label: "Device", className: "bg-amber-100 text-amber-700", title: "Only on device" },
+      "queued-add": { label: "Queue +", className: "bg-purple-100 text-purple-700", title: "Queued to add" },
+      "queued-remove": { label: "Queue −", className: "bg-red-100 text-red-700", title: "Queued to remove" },
     };
     const badge = badges[status];
-    return <span className={`px-2 py-1 rounded text-xs font-medium ${badge.className}`}>{badge.label}</span>;
+    return (
+      <span
+        className={`inline-block px-2 py-1 rounded text-xs font-medium whitespace-nowrap ${badge.className}`}
+        title={badge.title}
+      >
+        {badge.label}
+      </span>
+    );
   };
 
   const ActionButton = ({ item }: { item: UnifiedItem }) => {
@@ -249,9 +275,16 @@ export function EReaderView({
             <RefreshCw className={`w-4 h-4 mr-2 ${scanning ? "animate-spin" : ""}`} />
             {scanning ? "Scanning..." : "Scan Device"}
           </Button>
-          {pendingQueue.length > 0 && (
-            <Button size="sm" onClick={onExecuteSync}>
-              Sync ({pendingQueue.length})
+          {(pendingQueue.length > 0 || syncing) && (
+            <Button size="sm" onClick={onExecuteSync} disabled={syncing}>
+              {syncing ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Syncing...
+                </>
+              ) : (
+                `Sync (${pendingQueue.length})`
+              )}
             </Button>
           )}
         </div>
@@ -260,7 +293,7 @@ export function EReaderView({
       {/* Filters */}
       <div className="flex items-center gap-2 p-4 border-b border-[var(--app-border)]">
         <span className="text-sm text-[var(--app-text-muted)]">Filter:</span>
-        {(["all", "in-library", "not-on-device", "device-only", "queued"] as const).map((f) => (
+        {(["all", "in-library", "on-device", "not-on-device", "device-only", "queued"] as const).map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
@@ -272,6 +305,7 @@ export function EReaderView({
           >
             {f === "all" && "All"}
             {f === "in-library" && "In Library"}
+            {f === "on-device" && "On Device"}
             {f === "not-on-device" && "Not on Device"}
             {f === "device-only" && "Device Only"}
             {f === "queued" && "Queued"}
@@ -279,8 +313,35 @@ export function EReaderView({
         ))}
       </div>
 
+      {/* Sync Progress */}
+      {syncing && syncProgress && (
+        <div className="p-4 border-b border-[var(--app-border)] bg-[rgba(207,217,210,0.35)]">
+          <div className="flex items-center justify-between text-sm mb-2">
+            <span className="font-medium">
+              Syncing: {syncProgress.action === "add" ? "Adding" : syncProgress.action === "remove" ? "Removing" : "Importing"}
+            </span>
+            <span className="text-[var(--app-text-muted)]">
+              {syncProgress.processed} / {syncProgress.total}
+            </span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-[rgba(208,138,70,0.2)]">
+            <div
+              className="h-full rounded-full bg-[linear-gradient(90deg,var(--app-accent),var(--app-accent-strong))] transition-[width] duration-200"
+              style={{
+                width: syncProgress.total > 0
+                  ? `${Math.round((syncProgress.processed / syncProgress.total) * 100)}%`
+                  : "0%",
+              }}
+            />
+          </div>
+          <div className="mt-1 text-xs text-[var(--app-text-muted)] truncate">
+            {syncProgress.current}
+          </div>
+        </div>
+      )}
+
       {/* Sync Queue (collapsible) */}
-      {pendingQueue.length > 0 && (
+      {pendingQueue.length > 0 && !syncing && (
         <div className="border-b border-[var(--app-border)] bg-[var(--app-bg-secondary)]">
           <div className="p-3">
             <h3 className="text-sm font-medium mb-2">Sync Queue ({pendingQueue.length} pending)</h3>

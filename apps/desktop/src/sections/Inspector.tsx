@@ -2,7 +2,13 @@ import type { Dispatch, SetStateAction } from "react";
 import type { Tag, View } from "../types/library";
 import { Button, Separator } from "../components/ui";
 import { getTagColorClass } from "../lib/tagColors";
-import { FolderOpen, PencilLine, Sparkles } from "lucide-react";
+import { FolderOpen, HardDrive, PencilLine, Sparkles } from "lucide-react";
+
+type EReaderSyncStatus = {
+  isOnDevice: boolean;
+  isInQueue: boolean;
+  matchConfidence: "exact" | "isbn" | "title" | "fuzzy" | null;
+};
 
 type InspectorProps = {
   selectedItem: {
@@ -28,6 +34,10 @@ type InspectorProps = {
   setView: Dispatch<SetStateAction<View>>;
   setSelectedAuthorNames: Dispatch<SetStateAction<string[]>>;
   setSelectedSeries: Dispatch<SetStateAction<string[]>>;
+  // eReader sync
+  ereaderConnected: boolean;
+  ereaderSyncStatus: EReaderSyncStatus | null;
+  onQueueEreaderAdd: (itemId: string) => void;
 };
 
 export function Inspector({
@@ -43,6 +53,9 @@ export function Inspector({
   setView,
   setSelectedAuthorNames,
   setSelectedSeries,
+  ereaderConnected,
+  ereaderSyncStatus,
+  onQueueEreaderAdd,
 }: InspectorProps) {
   const handleAuthorClick = (authorName: string) => {
     setSelectedAuthorNames([authorName]);
@@ -183,6 +196,41 @@ export function Inspector({
               Match metadata
             </Button>
           </div>
+
+          {/* eReader Sync Section */}
+          {ereaderConnected && (
+            <div className="mt-3 pt-3 border-t border-[var(--app-border)]">
+              <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)] mb-2">
+                eReader
+              </div>
+              {ereaderSyncStatus?.isOnDevice ? (
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-emerald-100 text-emerald-700">
+                    <HardDrive size={12} />
+                    Synced
+                  </span>
+                  {ereaderSyncStatus.matchConfidence === "fuzzy" && (
+                    <span className="text-[10px] text-[var(--app-ink-muted)]">(fuzzy match)</span>
+                  )}
+                </div>
+              ) : ereaderSyncStatus?.isInQueue ? (
+                <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-700">
+                  <HardDrive size={12} />
+                  In queue
+                </span>
+              ) : (
+                <Button
+                  variant="toolbar"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => onQueueEreaderAdd(selectedItem.id)}
+                >
+                  <HardDrive size={14} />
+                  Send to eReader
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <div className="text-xs text-[var(--app-ink-muted)]">

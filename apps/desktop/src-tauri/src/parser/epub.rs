@@ -1,7 +1,8 @@
 use std::fs::File;
-use std::io::{Read, Cursor};
+use std::io::{Read, Write, Cursor, Seek};
 use std::path::Path;
-use zip::ZipArchive;
+use zip::{ZipArchive, ZipWriter};
+use zip::write::SimpleFileOptions;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use crate::models::Book;
@@ -211,4 +212,255 @@ fn parse_opf(archive: &mut ZipArchive<File>, opf_path: &str) -> Result<(PartialM
     }
     
     Ok((meta, cover_href))
+}
+
+/// Write a cover image into an EPUB file
+/// This modifies the EPUB in place by:
+/// 1. Adding the cover image file
+/// 2. Updating the OPF manifest to include the cover
+/// 3. Adding metadata reference to the cover
+pub fn write_epub_cover(epub_path: &Path, cover_bytes: &[u8], cover_extension: &str) -> Result<(), String> {
+    // Read the entire EPUB into memory
+    let file = File::open(epub_path).map_err(|e| format!("Failed to open EPUB: {}", e))?;
+    let mut archive = ZipArchive::new(file).map_err(|e| format!("Failed to read EPUB archive: {}", e))?;
+
+    // Find the OPF path
+    let opf_path = find_opf_path(&mut archive)?;
+    let opf_dir = Path::new(&opf_path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+
+    // Determine cover filename and path within EPUB
+    let cover_filename = format!("cover.{}", cover_extension);
+    let cover_path_in_epub = if opf_dir.is_empty() {
+        cover_filename.clone()
+    } else {
+        format!("{}/{}", opf_dir, cover_filename)
+    };
+
+    // Read the OPF file
+    let mut opf_file = archive.by_name(&opf_path).map_err(|e| format!("Failed to read OPF: {}", e))?;
+    let mut opf_content = String::new();
+    opf_file.read_to_string(&mut opf_content).map_err(|e| format!("Failed to read OPF content: {}", e))?;
+    drop(opf_file);
+
+    // Check if cover already exists in manifest
+    let has_cover_item = opf_content.contains("id=\"cover-image\"") || opf_content.contains("properties=\"cover-image\"");
+
+    // Modify OPF to add cover reference if not present
+    let modified_opf = if !has_cover_item {
+        add_cover_to_opf(&opf_content, &cover_filename, cover_extension)?
+    } else {
+        opf_content.clone()
+    };
+
+    // Collect all file names and contents from the archive
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+
+    // Re-open archive to read all files
+    let file = File::open(epub_path).map_err(|e| format!("Failed to reopen EPUB: {}", e))?;
+    let mut archive = ZipArchive::new(file).map_err(|e| format!("Failed to read EPUB archive: {}", e))?;
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| format!("Failed to read entry: {}", e))?;
+        let name = entry.name().to_string();
+
+        // Skip the cover file if it exists (we'll replace it)
+        if name == cover_path_in_epub {
+            continue;
+        }
+
+        let mut content = Vec::new();
+        entry.read_to_end(&mut content).map_err(|e| format!("Failed to read entry content: {}", e))?;
+
+        // Replace OPF content with modified version
+        if name == opf_path {
+            files.push((name, modified_opf.as_bytes().to_vec()));
+        } else {
+            files.push((name, content));
+        }
+    }
+
+    // Add the cover image
+    files.push((cover_path_in_epub, cover_bytes.to_vec()));
+
+    // Write the new EPUB
+    let output_file = File::create(epub_path).map_err(|e| format!("Failed to create output EPUB: {}", e))?;
+    let mut zip_writer = ZipWriter::new(output_file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    for (name, content) in files {
+        zip_writer.start_file(&name, options).map_err(|e| format!("Failed to write file {}: {}", name, e))?;
+        zip_writer.write_all(&content).map_err(|e| format!("Failed to write content for {}: {}", name, e))?;
+    }
+
+    zip_writer.finish().map_err(|e| format!("Failed to finalize EPUB: {}", e))?;
+
+    Ok(())
+}
+
+/// Add cover image reference to OPF content
+fn add_cover_to_opf(opf_content: &str, cover_filename: &str, cover_extension: &str) -> Result<String, String> {
+    let media_type = match cover_extension {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        _ => "image/jpeg",
+    };
+
+    // Add item to manifest
+    let manifest_item = format!(
+        r#"    <item id="cover-image" href="{}" media-type="{}" properties="cover-image"/>"#,
+        cover_filename, media_type
+    );
+
+    // Add meta to metadata
+    let meta_entry = r#"    <meta name="cover" content="cover-image"/>"#;
+
+    let mut result = opf_content.to_string();
+
+    // Insert manifest item before </manifest>
+    if let Some(pos) = result.find("</manifest>") {
+        result.insert_str(pos, &format!("{}\n  ", manifest_item));
+    }
+
+    // Insert meta entry before </metadata>
+    if let Some(pos) = result.find("</metadata>") {
+        result.insert_str(pos, &format!("{}\n  ", meta_entry));
+    }
+
+    Ok(result)
+}
+
+/// Write metadata to an EPUB file (title, author, etc.)
+pub fn write_epub_metadata(
+    epub_path: &Path,
+    title: Option<&str>,
+    author: Option<&str>,
+    language: Option<&str>,
+    description: Option<&str>,
+    publisher: Option<&str>,
+) -> Result<(), String> {
+    // Read the entire EPUB into memory
+    let file = File::open(epub_path).map_err(|e| format!("Failed to open EPUB: {}", e))?;
+    let mut archive = ZipArchive::new(file).map_err(|e| format!("Failed to read EPUB archive: {}", e))?;
+
+    // Find the OPF path
+    let opf_path = find_opf_path(&mut archive)?;
+
+    // Read the OPF file
+    let mut opf_file = archive.by_name(&opf_path).map_err(|e| format!("Failed to read OPF: {}", e))?;
+    let mut opf_content = String::new();
+    opf_file.read_to_string(&mut opf_content).map_err(|e| format!("Failed to read OPF content: {}", e))?;
+    drop(opf_file);
+
+    // Modify OPF metadata
+    let modified_opf = update_opf_metadata(&opf_content, title, author, language, description, publisher)?;
+
+    // Collect all files from the archive
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+
+    let file = File::open(epub_path).map_err(|e| format!("Failed to reopen EPUB: {}", e))?;
+    let mut archive = ZipArchive::new(file).map_err(|e| format!("Failed to read EPUB archive: {}", e))?;
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| format!("Failed to read entry: {}", e))?;
+        let name = entry.name().to_string();
+
+        let mut content = Vec::new();
+        entry.read_to_end(&mut content).map_err(|e| format!("Failed to read entry content: {}", e))?;
+
+        if name == opf_path {
+            files.push((name, modified_opf.as_bytes().to_vec()));
+        } else {
+            files.push((name, content));
+        }
+    }
+
+    // Write the new EPUB
+    let output_file = File::create(epub_path).map_err(|e| format!("Failed to create output EPUB: {}", e))?;
+    let mut zip_writer = ZipWriter::new(output_file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    for (name, content) in files {
+        zip_writer.start_file(&name, options).map_err(|e| format!("Failed to write file {}: {}", name, e))?;
+        zip_writer.write_all(&content).map_err(|e| format!("Failed to write content for {}: {}", name, e))?;
+    }
+
+    zip_writer.finish().map_err(|e| format!("Failed to finalize EPUB: {}", e))?;
+
+    Ok(())
+}
+
+/// Update metadata fields in OPF content using simple string replacement
+fn update_opf_metadata(
+    opf_content: &str,
+    title: Option<&str>,
+    author: Option<&str>,
+    language: Option<&str>,
+    description: Option<&str>,
+    publisher: Option<&str>,
+) -> Result<String, String> {
+    use regex::Regex;
+
+    let mut result = opf_content.to_string();
+
+    // Update or add title
+    if let Some(new_title) = title {
+        let title_re = Regex::new(r"<dc:title[^>]*>([^<]*)</dc:title>").map_err(|e| e.to_string())?;
+        if title_re.is_match(&result) {
+            result = title_re.replace(&result, format!("<dc:title>{}</dc:title>", escape_xml(new_title))).to_string();
+        } else if let Some(pos) = result.find("</metadata>") {
+            result.insert_str(pos, &format!("  <dc:title>{}</dc:title>\n  ", escape_xml(new_title)));
+        }
+    }
+
+    // Update or add creator (author)
+    if let Some(new_author) = author {
+        let creator_re = Regex::new(r"<dc:creator[^>]*>([^<]*)</dc:creator>").map_err(|e| e.to_string())?;
+        if creator_re.is_match(&result) {
+            result = creator_re.replace(&result, format!("<dc:creator>{}</dc:creator>", escape_xml(new_author))).to_string();
+        } else if let Some(pos) = result.find("</metadata>") {
+            result.insert_str(pos, &format!("  <dc:creator>{}</dc:creator>\n  ", escape_xml(new_author)));
+        }
+    }
+
+    // Update or add language
+    if let Some(new_lang) = language {
+        let lang_re = Regex::new(r"<dc:language[^>]*>([^<]*)</dc:language>").map_err(|e| e.to_string())?;
+        if lang_re.is_match(&result) {
+            result = lang_re.replace(&result, format!("<dc:language>{}</dc:language>", escape_xml(new_lang))).to_string();
+        } else if let Some(pos) = result.find("</metadata>") {
+            result.insert_str(pos, &format!("  <dc:language>{}</dc:language>\n  ", escape_xml(new_lang)));
+        }
+    }
+
+    // Update or add description
+    if let Some(new_desc) = description {
+        let desc_re = Regex::new(r"<dc:description[^>]*>([^<]*)</dc:description>").map_err(|e| e.to_string())?;
+        if desc_re.is_match(&result) {
+            result = desc_re.replace(&result, format!("<dc:description>{}</dc:description>", escape_xml(new_desc))).to_string();
+        } else if let Some(pos) = result.find("</metadata>") {
+            result.insert_str(pos, &format!("  <dc:description>{}</dc:description>\n  ", escape_xml(new_desc)));
+        }
+    }
+
+    // Update or add publisher
+    if let Some(new_pub) = publisher {
+        let pub_re = Regex::new(r"<dc:publisher[^>]*>([^<]*)</dc:publisher>").map_err(|e| e.to_string())?;
+        if pub_re.is_match(&result) {
+            result = pub_re.replace(&result, format!("<dc:publisher>{}</dc:publisher>", escape_xml(new_pub))).to_string();
+        } else if let Some(pos) = result.find("</metadata>") {
+            result.insert_str(pos, &format!("  <dc:publisher>{}</dc:publisher>\n  ", escape_xml(new_pub)));
+        }
+    }
+
+    Ok(result)
+}
+
+/// Escape special XML characters
+fn escape_xml(s: &str) -> String {
+    s.replace('&', "&amp;")
+     .replace('<', "&lt;")
+     .replace('>', "&gt;")
+     .replace('"', "&quot;")
+     .replace('\'', "&apos;")
 }

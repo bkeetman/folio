@@ -58,6 +58,13 @@ export type ScanProgress = {
   current: string;
 };
 
+export type SyncProgress = {
+  processed: number;
+  total: number;
+  current: string;
+  action: string;
+};
+
 export type InboxItem = {
   id: string;
   title: string;
@@ -133,7 +140,7 @@ export type EReaderBook = {
   authors: string[];
   fileHash: string;
   matchedItemId: string | null;
-  matchConfidence: "exact" | "fuzzy" | null;
+  matchConfidence: "exact" | "isbn" | "title" | "fuzzy" | null;
 };
 
 export type SyncQueueItem = {

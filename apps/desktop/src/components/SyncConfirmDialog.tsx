@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 import { Button } from "./ui";
-import type { SyncQueueItem, LibraryItem } from "../types/library";
+import type { SyncQueueItem, LibraryItem, SyncProgress } from "../types/library";
 
 type SyncConfirmDialogProps = {
   open: boolean;
@@ -10,6 +10,7 @@ type SyncConfirmDialogProps = {
   queue: SyncQueueItem[];
   libraryItems: LibraryItem[];
   syncing: boolean;
+  syncProgress: SyncProgress | null;
 };
 
 export function SyncConfirmDialog({
@@ -20,6 +21,7 @@ export function SyncConfirmDialog({
   queue,
   libraryItems,
   syncing,
+  syncProgress,
 }: SyncConfirmDialogProps) {
   if (!open) return null;
 
@@ -50,9 +52,37 @@ export function SyncConfirmDialog({
 
         {/* Content */}
         <div className="p-4 space-y-4 max-h-[60vh] overflow-auto">
-          <p className="text-sm text-[var(--app-text-muted)]">Ready to sync the following changes:</p>
+          {syncing && syncProgress ? (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium">
+                  {syncProgress.action === "add" ? "Adding to device..." :
+                   syncProgress.action === "remove" ? "Removing from device..." :
+                   "Importing to library..."}
+                </span>
+                <span className="text-[var(--app-text-muted)]">
+                  {syncProgress.processed + 1} / {syncProgress.total}
+                </span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-[rgba(208,138,70,0.2)]">
+                <div
+                  className="h-full rounded-full bg-[linear-gradient(90deg,var(--app-accent),var(--app-accent-strong))] transition-[width] duration-200"
+                  style={{
+                    width: syncProgress.total > 0
+                      ? `${Math.round(((syncProgress.processed + 1) / syncProgress.total) * 100)}%`
+                      : "0%",
+                  }}
+                />
+              </div>
+              <div className="text-xs text-[var(--app-text-muted)] truncate">
+                {syncProgress.current}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-[var(--app-text-muted)]">Ready to sync the following changes:</p>
+          )}
 
-          {addItems.length > 0 && (
+          {!syncing && addItems.length > 0 && (
             <div>
               <h3 className="text-sm font-medium text-emerald-600 mb-2">
                 + Add to device ({addItems.length} {addItems.length === 1 ? "book" : "books"})
@@ -65,7 +95,7 @@ export function SyncConfirmDialog({
             </div>
           )}
 
-          {removeItems.length > 0 && (
+          {!syncing && removeItems.length > 0 && (
             <div>
               <h3 className="text-sm font-medium text-red-600 mb-2">
                 - Remove from device ({removeItems.length} {removeItems.length === 1 ? "book" : "books"})
@@ -78,7 +108,7 @@ export function SyncConfirmDialog({
             </div>
           )}
 
-          {importItems.length > 0 && (
+          {!syncing && importItems.length > 0 && (
             <div>
               <h3 className="text-sm font-medium text-blue-600 mb-2">
                 Import to library ({importItems.length} {importItems.length === 1 ? "book" : "books"})

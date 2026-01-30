@@ -46,10 +46,17 @@ pub fn init_db(app_handle: &AppHandle) -> Result<Connection> {
             series_index REAL,
             isbn TEXT,
             cover_path TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )",
         [],
     )?;
+
+    // Add updated_at column to existing books table if it doesn't exist
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP",
+        [],
+    ).ok(); // Ignore error if column already exists
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS authors (

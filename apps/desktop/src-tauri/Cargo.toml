@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "0.1.20"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -37,3 +37,6 @@ regex = "1.10"
 lopdf = "0.32"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 urlencoding = "2.1"
+image = "0.25"
+imageproc = "0.25"
+ab_glyph = "0.2"
