@@ -225,6 +225,12 @@ function App() {
   const [matchCandidates, setMatchCandidates] = useState<EnrichmentCandidate[]>([]);
   const [matchLoading, setMatchLoading] = useState(false);
   const [matchApplying, setMatchApplying] = useState<string | null>(null);
+  const [matchApplyProgress, setMatchApplyProgress] = useState<{
+    step: string;
+    message: string;
+    current: number;
+    total: number;
+  } | null>(null);
   const [matchQuery, setMatchQuery] = useState("");
   const [coverRefreshToken, setCoverRefreshToken] = useState(0);
   const [coverOverrides, setCoverOverrides] = useState<Record<string, string | null>>({});
@@ -1079,6 +1085,30 @@ function App() {
     };
   }, [isDesktop]); // Removed enriching and refreshLibrary from deps to prevent re-registration
 
+  // Listen for apply-metadata-progress events (single item metadata apply)
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlisten: (() => void) | undefined;
+
+    listen<{ itemId: string; step: string; message: string; current: number; total: number }>(
+      "apply-metadata-progress",
+      (event) => {
+        setMatchApplyProgress({
+          step: event.payload.step,
+          message: event.payload.message,
+          current: event.payload.current,
+          total: event.payload.total,
+        });
+      }
+    ).then((stop) => {
+      unlisten = stop;
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [isDesktop]);
+
   // Listen for change progress events
   useEffect(() => {
     if (!isDesktop) return;
@@ -1224,6 +1254,7 @@ function App() {
   const handleMatchApply = async (candidate: EnrichmentCandidate) => {
     if (!selectedItemId || !isTauri()) return;
     setMatchApplying(candidate.id);
+    setMatchApplyProgress(null);
     try {
       await invoke("apply_fix_candidate", {
         itemId: selectedItemId,
@@ -1245,6 +1276,7 @@ function App() {
       setScanStatus("Could not apply metadata.");
     } finally {
       setMatchApplying(null);
+      setMatchApplyProgress(null);
     }
   };
 
@@ -1649,6 +1681,7 @@ function App() {
           query={matchQuery}
           loading={matchLoading}
           applyingId={matchApplying}
+          applyProgress={matchApplyProgress}
           candidates={matchCandidates}
           onQueryChange={setMatchQuery}
           onSearch={handleMatchSearch}

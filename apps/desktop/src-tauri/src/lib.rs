@@ -1486,17 +1486,47 @@ fn apply_enrichment_for_batch(
   Ok(())
 }
 
+/// Progress payload for single-item metadata apply
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ApplyMetadataProgress {
+  item_id: String,
+  step: String,
+  message: String,
+  current: usize,
+  total: usize,
+}
+
 #[tauri::command]
 fn apply_fix_candidate(
   app: tauri::AppHandle,
   item_id: String,
   candidate: EnrichmentCandidate,
 ) -> Result<(), String> {
+  use tauri::Emitter;
+
   let conn = open_db(&app)?;
   let now = chrono::Utc::now().timestamp_millis();
   log::info!("applying fix candidate for item {}: {:?}", item_id, candidate.title);
 
+  // Step 1: Update metadata
+  let _ = app.emit("apply-metadata-progress", ApplyMetadataProgress {
+    item_id: item_id.clone(),
+    step: "metadata".to_string(),
+    message: "Updating metadata...".to_string(),
+    current: 1,
+    total: 4,
+  });
   apply_enrichment_candidate(&app, &conn, &item_id, &candidate, now)?;
+
+  // Step 2: Queue file changes
+  let _ = app.emit("apply-metadata-progress", ApplyMetadataProgress {
+    item_id: item_id.clone(),
+    step: "queue".to_string(),
+    message: "Queueing file changes...".to_string(),
+    current: 2,
+    total: 4,
+  });
   let queued = queue_epub_changes(&conn, &item_id, &candidate, now)?;
   log::info!("queued epub changes: {} for item {}", queued, item_id);
   conn.execute(
@@ -1505,17 +1535,40 @@ fn apply_fix_candidate(
   )
   .map_err(|err| err.to_string())?;
 
-  // Try to fetch cover from candidate URL first
+  // Step 3: Fetch cover
+  let _ = app.emit("apply-metadata-progress", ApplyMetadataProgress {
+    item_id: item_id.clone(),
+    step: "cover".to_string(),
+    message: "Fetching cover...".to_string(),
+    current: 3,
+    total: 4,
+  });
   let mut cover_fetched = false;
   if let Some(url) = candidate.cover_url.as_deref() {
     cover_fetched = fetch_cover_from_url(&app, &conn, &item_id, url, now)?;
   }
 
-  // If candidate cover failed or wasn't available, try fallback using ISBN
+  // Step 4: Fallback cover if needed
   if !cover_fetched {
+    let _ = app.emit("apply-metadata-progress", ApplyMetadataProgress {
+      item_id: item_id.clone(),
+      step: "cover-fallback".to_string(),
+      message: "Trying alternative cover sources...".to_string(),
+      current: 4,
+      total: 4,
+    });
     log::info!("trying cover fallback for item {}", item_id);
     let _ = fetch_cover_fallback(&app, &conn, &item_id, now);
   }
+
+  // Done
+  let _ = app.emit("apply-metadata-progress", ApplyMetadataProgress {
+    item_id: item_id.clone(),
+    step: "done".to_string(),
+    message: "Complete".to_string(),
+    current: 4,
+    total: 4,
+  });
 
   log::info!("fix candidate applied for item {}", item_id);
   Ok(())

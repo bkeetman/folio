@@ -11,6 +11,13 @@ type EnrichmentCandidate = {
   confidence: number;
 };
 
+type ApplyProgress = {
+  step: string;
+  message: string;
+  current: number;
+  total: number;
+};
+
 type MatchModalProps = {
   open: boolean;
   itemTitle: string;
@@ -18,6 +25,7 @@ type MatchModalProps = {
   query: string;
   loading: boolean;
   applyingId: string | null;
+  applyProgress: ApplyProgress | null;
   candidates: EnrichmentCandidate[];
   onQueryChange: (value: string) => void;
   onSearch: () => void;
@@ -32,6 +40,7 @@ export function MatchModal({
   query,
   loading,
   applyingId,
+  applyProgress,
   candidates,
   onQueryChange,
   onSearch,
@@ -140,11 +149,27 @@ export function MatchModal({
                         variant="ghost"
                         onClick={() => onApply(candidate)}
                         disabled={loading || applyingId !== null}
+                        className="w-full"
                       >
                         {applyingId === candidate.id ? (
-                          <span className="flex items-center gap-2">
-                            <span className="h-3 w-3 animate-spin rounded-full border-2 border-[var(--app-accent)]/40 border-t-[var(--app-accent)]" />
-                            Applying…
+                          <span className="flex flex-col items-center gap-1">
+                            <span className="flex items-center gap-2">
+                              <span className="h-3 w-3 animate-spin rounded-full border-2 border-[var(--app-accent)]/40 border-t-[var(--app-accent)]" />
+                              {applyProgress?.message ?? "Applying…"}
+                            </span>
+                            {applyProgress && (
+                              <span className="flex w-full items-center gap-2">
+                                <span className="h-1 flex-1 overflow-hidden rounded-full bg-[var(--app-border)]">
+                                  <span
+                                    className="block h-full rounded-full bg-[var(--app-accent)] transition-all"
+                                    style={{ width: `${(applyProgress.current / applyProgress.total) * 100}%` }}
+                                  />
+                                </span>
+                                <span className="text-[10px] text-[var(--app-ink-muted)]">
+                                  {applyProgress.current}/{applyProgress.total}
+                                </span>
+                              </span>
+                            )}
                           </span>
                         ) : (
                           "Use This"
