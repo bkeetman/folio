@@ -78,7 +78,7 @@ jobs:
           args: ${{ matrix.target != '' && format('--target {0}', matrix.target) || '' }}
 
       - name: Sign macOS updater artifact
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-latest' && matrix.target == 'aarch64-apple-darwin'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -100,14 +100,14 @@ jobs:
           fi
 
       - name: Generate updater manifest
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-latest' && matrix.target == 'aarch64-apple-darwin'
         run: node scripts/generate-updater.js
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
 
       - name: Upload updater manifest
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-latest' && matrix.target == 'aarch64-apple-darwin'
         uses: actions/upload-artifact@v4
         with:
           name: updater-manifest
