@@ -1,3 +1,4 @@
+import { getLanguageFlag } from "../lib/languageFlags";
 import { getTagColorClass } from "../lib/tagColors";
 import type { BookDisplay } from "../types/library";
 import { ProcessingOverlay } from "./ProgressBar";
@@ -23,6 +24,8 @@ export function BookCard({
     viewMode = "grid",
     isEnriching = false,
 }: BookCardProps) {
+    const languageFlag = getLanguageFlag(book.language);
+
     if (viewMode === "list") {
         return (
             <div
@@ -55,10 +58,23 @@ export function BookCard({
                             {book.format}
                         </div>
                     )}
+                    {/* Language flag */}
+                    {languageFlag && (
+                        <div className="absolute bottom-0.5 right-0.5 text-[10px] leading-none opacity-80">
+                            {languageFlag}
+                        </div>
+                    )}
                     <ProcessingOverlay isProcessing={isEnriching} size={14} variant="purple" />
                 </div>
                 <div className="flex flex-col gap-1">
-                    <div className="text-sm font-semibold">{book.title}</div>
+                    <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-semibold">{book.title}</span>
+                        {book.series && (
+                            <span className="text-[10px] text-[var(--app-ink-muted)]">
+                                ({book.series}{book.seriesIndex ? ` #${book.seriesIndex}` : ""})
+                            </span>
+                        )}
+                    </div>
                     {(book.tags ?? []).length ? (
                         <div className="flex flex-wrap gap-1">
                             {(book.tags ?? []).slice(0, 2).map((tag) => (
@@ -113,17 +129,37 @@ export function BookCard({
                     />
                 ) : null}
                 {book.cover ? (
-                    <div className="absolute left-2 top-2 rounded-md bg-[rgba(255,255,255,0.9)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]">
-                        {book.format}
+                    <div className="absolute left-2 top-2 flex items-center gap-1">
+                        <div className="rounded-md bg-[rgba(255,255,255,0.9)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]">
+                            {book.format}
+                        </div>
+                        {languageFlag && (
+                            <div className="rounded-md bg-[rgba(255,255,255,0.9)] px-1.5 py-0.5 text-[10px]">
+                                {languageFlag}
+                            </div>
+                        )}
                     </div>
                 ) : (
                     <div className="relative z-10 flex flex-col gap-2 p-3">
-                        <div className="rounded-md bg-[rgba(255,255,255,0.8)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]">
-                            {book.format}
+                        <div className="flex items-center gap-1">
+                            <div className="rounded-md bg-[rgba(255,255,255,0.8)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]">
+                                {book.format}
+                            </div>
+                            {languageFlag && (
+                                <div className="rounded-md bg-[rgba(255,255,255,0.8)] px-1.5 py-0.5 text-[10px]">
+                                    {languageFlag}
+                                </div>
+                            )}
                         </div>
                         <div className="text-[13px] font-semibold leading-snug">
                             {book.title}
                         </div>
+                    </div>
+                )}
+                {/* Series badge */}
+                {book.series && book.seriesIndex && (
+                    <div className="absolute bottom-2 right-2 rounded-md bg-[rgba(0,0,0,0.6)] px-1.5 py-0.5 text-[10px] font-medium text-white">
+                        #{book.seriesIndex}
                     </div>
                 )}
                 {/* Enriching spinner overlay */}
@@ -148,7 +184,7 @@ export function BookCard({
                         <span className="text-[10px] uppercase tracking-[0.12em]">
                             Auteur
                         </span>
-                        <span className="text-[var(--app-ink)]">{book.author}</span>
+                        <span className="text-[var(--app-ink)] truncate max-w-[100px]">{book.author}</span>
                     </div>
                     <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
                         <span className="text-[10px] uppercase tracking-[0.12em]">
@@ -156,6 +192,16 @@ export function BookCard({
                         </span>
                         <span className="text-[var(--app-ink)]">{book.year}</span>
                     </div>
+                    {book.series && (
+                        <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
+                            <span className="text-[10px] uppercase tracking-[0.12em]">
+                                Serie
+                            </span>
+                            <span className="text-[var(--app-ink)] truncate max-w-[100px]">
+                                {book.series}{book.seriesIndex ? ` #${book.seriesIndex}` : ""}
+                            </span>
+                        </div>
+                    )}
                 </div>
             </div>
         </article>

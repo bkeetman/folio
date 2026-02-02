@@ -15,6 +15,8 @@ pub struct EpubMetadata {
     pub description: Option<String>,
     pub cover_image: Option<Vec<u8>>,
     pub cover_mime: Option<String>,
+    pub series: Option<String>,
+    pub series_index: Option<f64>,
 }
 
 pub fn parse_epub(path: &Path) -> Result<EpubMetadata, String> {
@@ -56,6 +58,8 @@ pub fn parse_epub(path: &Path) -> Result<EpubMetadata, String> {
         description: metadata.description,
         cover_image,
         cover_mime,
+        series: metadata.series,
+        series_index: metadata.series_index,
     })
 }
 
@@ -98,6 +102,8 @@ struct PartialMeta {
     language: Option<String>,
     description: Option<String>,
     publisher: Option<String>,
+    series: Option<String>,
+    series_index: Option<f64>,
 }
 
 fn parse_opf(archive: &mut ZipArchive<File>, opf_path: &str) -> Result<(PartialMeta, Option<String>), String> {
@@ -108,8 +114,9 @@ fn parse_opf(archive: &mut ZipArchive<File>, opf_path: &str) -> Result<(PartialM
     let mut reader = Reader::from_str(&xml);
     let mut buf = Vec::new();
     
-    let mut meta = PartialMeta { 
-        title: None, creator: None, language: None, description: None, publisher: None 
+    let mut meta = PartialMeta {
+        title: None, creator: None, language: None, description: None, publisher: None,
+        series: None, series_index: None,
     };
     let mut cover_id = None;
     let mut cover_href = None;
@@ -133,6 +140,7 @@ fn parse_opf(archive: &mut ZipArchive<File>, opf_path: &str) -> Result<(PartialM
                      b"dc:publisher" => in_pub = true,
                      b"meta" => {
                          // Check for <meta name="cover" content="cover-image-id" />
+                         // Also check for calibre:series and calibre:series_index
                          let mut name = String::new();
                          let mut content = String::new();
                          for attr in e.attributes() {
@@ -143,6 +151,10 @@ fn parse_opf(archive: &mut ZipArchive<File>, opf_path: &str) -> Result<(PartialM
                          }
                          if name == "cover" {
                              cover_id = Some(content);
+                         } else if name == "calibre:series" {
+                             meta.series = Some(content);
+                         } else if name == "calibre:series_index" {
+                             meta.series_index = content.parse::<f64>().ok();
                          }
                      }
                      _ => (),
@@ -151,6 +163,7 @@ fn parse_opf(archive: &mut ZipArchive<File>, opf_path: &str) -> Result<(PartialM
              Ok(Event::Empty(e)) => {
                  if e.name().as_ref() == b"meta" {
                       // Same check for self-closing meta tags
+                      // Also check for calibre:series and calibre:series_index
                       let mut name = String::new();
                       let mut content = String::new();
                       for attr in e.attributes() {
@@ -161,6 +174,10 @@ fn parse_opf(archive: &mut ZipArchive<File>, opf_path: &str) -> Result<(PartialM
                       }
                       if name == "cover" {
                           cover_id = Some(content);
+                      } else if name == "calibre:series" {
+                          meta.series = Some(content);
+                      } else if name == "calibre:series_index" {
+                          meta.series_index = content.parse::<f64>().ok();
                       }
                  } else if e.name().as_ref() == b"item" {
                      // Look for item properties="cover-image"

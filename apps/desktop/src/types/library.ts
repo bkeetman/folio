@@ -36,12 +36,15 @@ export type BookDisplay = {
   id: string;
   title: string;
   author: string;
+  authors: string[];
   format: string;
   year: number | string;
   status: string;
   cover: string | null;
   tags?: Tag[];
+  language?: string | null;
   series?: string | null;
+  seriesIndex?: number | null;
 };
 
 export type ScanStats = {

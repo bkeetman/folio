@@ -376,12 +376,16 @@ function App() {
         status: item.title && item.authors.length ? "Complete" : "Needs Metadata",
         cover: typeof coverOverrides[item.id] === "string" ? coverOverrides[item.id] : null,
         tags: item.tags ?? [],
+        language: item.language ?? null,
         series: item.series ?? null,
+        seriesIndex: item.series_index ?? null,
       }))
       : sampleBooks.map((book) => ({
         ...book,
         authors: [book.author],
+        language: null as string | null,
         series: null as string | null,
+        seriesIndex: null as number | null,
       }));
 
     // Format filter
@@ -703,6 +707,26 @@ function App() {
     () => tags.filter((tag) => !selectedTags.some((selected) => selected.id === tag.id)),
     [tags, selectedTags]
   );
+
+  // Find available languages for the selected item (other editions with same title/author)
+  const availableLanguages = useMemo(() => {
+    if (!selectedItem) return [];
+    const normalizeTitle = (t: string) => t.toLowerCase().replace(/[^\w\s]/g, "").trim();
+    const selectedTitle = normalizeTitle(selectedItem.title);
+    const selectedAuthor = selectedItem.author.toLowerCase();
+
+    const languages = new Set<string>();
+    libraryItems.forEach((item) => {
+      if (!item.language) return;
+      const itemTitle = normalizeTitle(item.title ?? "");
+      const itemAuthors = item.authors.map((a) => a.toLowerCase());
+      // Match if title is similar and at least one author matches
+      if (itemTitle === selectedTitle && itemAuthors.some((a) => selectedAuthor.includes(a) || a.includes(selectedAuthor))) {
+        languages.add(item.language);
+      }
+    });
+    return Array.from(languages).sort();
+  }, [selectedItem, libraryItems]);
 
   const scanEtaSeconds = useMemo(() => {
     if (!scanProgress || !scanStartedAt || scanProgress.total === 0) return null;
@@ -1491,8 +1515,13 @@ function App() {
             {view === "library-series" ? (
               <SeriesView
                 series={uniqueSeries}
+                books={filteredBooks}
                 setSelectedSeries={setSelectedSeries}
                 setView={setView}
+                onSelectBook={(bookId) => {
+                  setSelectedItemId(bookId);
+                  setView("library-books");
+                }}
               />
             ) : null}
 
@@ -1622,6 +1651,7 @@ function App() {
       {(view === "library" || view === "library-books" || view === "library-authors" || view === "library-series") ? (
         <Inspector
           selectedItem={selectedItem}
+          availableLanguages={availableLanguages}
           selectedTags={selectedTags}
           availableTags={availableTags}
           handleAddTag={handleAddTag}

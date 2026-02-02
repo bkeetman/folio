@@ -265,6 +265,8 @@ struct ExtractedMetadata {
   published_year: Option<i64>,
   description: Option<String>,
   identifiers: Vec<String>,
+  series: Option<String>,
+  series_index: Option<f64>,
 }
 
 #[tauri::command]
@@ -2188,6 +2190,8 @@ fn extract_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, String>
     published_year: None,
     description: None,
     identifiers: vec![],
+    series: None,
+    series_index: None,
   })
 }
 
@@ -2216,6 +2220,8 @@ fn extract_epub_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, St
     published_year: None,
     description: None,
     identifiers: vec![],
+    series: None,
+    series_index: None,
   };
 
   parse_opf_metadata(&opf, &mut metadata)?;
@@ -2284,6 +2290,8 @@ fn extract_pdf_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, Str
     published_year: None,
     description: None,
     identifiers: vec![],
+    series: None,
+    series_index: None,
   };
 
   if let Ok(info) = info {
@@ -2332,11 +2340,11 @@ fn apply_metadata(
   metadata: &ExtractedMetadata,
   now: i64,
 ) -> Result<(), String> {
-  let existing: (Option<String>, Option<String>, Option<i64>, Option<String>) = conn
+  let existing: (Option<String>, Option<String>, Option<i64>, Option<String>, Option<String>, Option<f64>) = conn
     .query_row(
-      "SELECT title, language, published_year, description FROM items WHERE id = ?1",
+      "SELECT title, language, published_year, description, series, series_index FROM items WHERE id = ?1",
       params![item_id],
-      |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+      |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
     )
     .map_err(|err| err.to_string())?;
 
@@ -2344,10 +2352,12 @@ fn apply_metadata(
   let language = existing.1.or_else(|| metadata.language.clone());
   let published_year = existing.2.or(metadata.published_year);
   let description = existing.3.or_else(|| metadata.description.clone());
+  let series = existing.4.or_else(|| metadata.series.clone());
+  let series_index = existing.5.or(metadata.series_index);
 
   conn.execute(
-    "UPDATE items SET title = ?1, language = ?2, published_year = ?3, description = ?4, updated_at = ?5 WHERE id = ?6",
-    params![title, language, published_year, description, now, item_id],
+    "UPDATE items SET title = ?1, language = ?2, published_year = ?3, description = ?4, series = ?5, series_index = ?6, updated_at = ?7 WHERE id = ?8",
+    params![title, language, published_year, description, series, series_index, now, item_id],
   )
   .map_err(|err| err.to_string())?;
 
@@ -2362,6 +2372,12 @@ fn apply_metadata(
   }
   if metadata.description.is_some() {
     insert_field_source(conn, item_id, "description", now)?;
+  }
+  if metadata.series.is_some() {
+    insert_field_source(conn, item_id, "series", now)?;
+  }
+  if metadata.series_index.is_some() {
+    insert_field_source(conn, item_id, "series_index", now)?;
   }
 
   for author in &metadata.authors {
@@ -2607,6 +2623,17 @@ fn parse_opf_metadata(opf: &str, metadata: &mut ExtractedMetadata) -> Result<(),
     match reader.read_event_into(&mut buf) {
       Ok(quick_xml::events::Event::Start(event)) => {
         current_tag = String::from_utf8_lossy(event.name().as_ref()).to_string();
+        // Also check for meta elements with attributes (for calibre:series)
+        if current_tag == "meta" {
+          parse_meta_element(&event, metadata);
+        }
+      }
+      Ok(quick_xml::events::Event::Empty(event)) => {
+        // Handle self-closing meta elements like <meta name="calibre:series" content="..."/>
+        let tag_name = String::from_utf8_lossy(event.name().as_ref()).to_string();
+        if tag_name == "meta" {
+          parse_meta_element(&event, metadata);
+        }
       }
       Ok(quick_xml::events::Event::Text(event)) => {
         let text = event.unescape().map_err(|err| err.to_string())?.to_string();
@@ -2656,6 +2683,27 @@ fn parse_opf_metadata(opf: &str, metadata: &mut ExtractedMetadata) -> Result<(),
   }
 
   Ok(())
+}
+
+/// Parse a <meta> element for calibre:series and calibre:series_index
+fn parse_meta_element(event: &quick_xml::events::BytesStart, metadata: &mut ExtractedMetadata) {
+  let mut name = String::new();
+  let mut content = String::new();
+
+  for attr in event.attributes().flatten() {
+    if attr.key.as_ref() == b"name" {
+      name = String::from_utf8_lossy(&attr.value).to_string();
+    }
+    if attr.key.as_ref() == b"content" {
+      content = String::from_utf8_lossy(&attr.value).to_string();
+    }
+  }
+
+  if name == "calibre:series" && metadata.series.is_none() {
+    metadata.series = Some(content);
+  } else if name == "calibre:series_index" && metadata.series_index.is_none() {
+    metadata.series_index = content.parse::<f64>().ok();
+  }
 }
 
 struct CoverDescriptor {

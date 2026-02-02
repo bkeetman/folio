@@ -2,7 +2,8 @@ import type { Dispatch, SetStateAction } from "react";
 import type { Tag, View } from "../types/library";
 import { Button, Separator } from "../components/ui";
 import { getTagColorClass } from "../lib/tagColors";
-import { FolderOpen, HardDrive, PencilLine, Sparkles } from "lucide-react";
+import { getLanguageFlag, getLanguageName } from "../lib/languageFlags";
+import { FolderOpen, HardDrive, PencilLine, Sparkles, Globe, BookOpen } from "lucide-react";
 
 type EReaderSyncStatus = {
   isOnDevice: boolean;
@@ -21,7 +22,11 @@ type InspectorProps = {
     status: string;
     cover: string | null;
     series?: string | null;
+    seriesIndex?: number | null;
+    language?: string | null;
   } | null;
+  // Available languages for this book (other editions in different languages)
+  availableLanguages?: string[];
   selectedTags: Tag[];
   availableTags: Tag[];
   handleAddTag: (tagId: string) => void;
@@ -42,6 +47,7 @@ type InspectorProps = {
 
 export function Inspector({
   selectedItem,
+  availableLanguages = [],
   selectedTags,
   availableTags,
   handleAddTag,
@@ -123,11 +129,23 @@ export function Inspector({
               <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.year}</div>
               {selectedItem.series && (
                 <button
-                  className="text-left text-xs text-[var(--app-accent-strong)] hover:underline"
+                  className="flex items-center gap-1 text-left text-xs text-[var(--app-accent-strong)] hover:underline"
                   onClick={() => handleSeriesClick(selectedItem.series!)}
                 >
-                  Serie: {selectedItem.series}
+                  <BookOpen size={12} />
+                  {selectedItem.series}
+                  {selectedItem.seriesIndex && (
+                    <span className="ml-1 rounded bg-[rgba(208,138,70,0.15)] px-1.5 py-0.5 text-[10px] font-medium">
+                      #{selectedItem.seriesIndex}
+                    </span>
+                  )}
                 </button>
+              )}
+              {selectedItem.language && (
+                <div className="flex items-center gap-1.5 text-xs text-[var(--app-ink-muted)]">
+                  <span>{getLanguageFlag(selectedItem.language)}</span>
+                  <span>{getLanguageName(selectedItem.language)}</span>
+                </div>
               )}
               <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.format}</div>
             </div>
@@ -175,6 +193,37 @@ export function Inspector({
               </div>
             </div>
           </div>
+
+          {/* Available languages (other editions) */}
+          {availableLanguages.length > 1 && (
+            <div className="mt-3">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
+                <Globe size={12} />
+                Beschikbare talen
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {availableLanguages.map((lang) => {
+                  const flag = getLanguageFlag(lang);
+                  const name = getLanguageName(lang);
+                  const isCurrent = lang === selectedItem.language;
+                  return (
+                    <span
+                      key={lang}
+                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${
+                        isCurrent
+                          ? "border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)]"
+                          : "border-[var(--app-border)] bg-white/80"
+                      }`}
+                      title={name}
+                    >
+                      {flag && <span>{flag}</span>}
+                      <span>{name}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="mt-3 grid grid-cols-2 gap-2">
             <Button variant="toolbar" size="sm" className="w-full justify-center">

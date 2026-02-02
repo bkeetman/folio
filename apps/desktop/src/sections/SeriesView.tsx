@@ -1,7 +1,8 @@
 import { useMemo, useState, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { View } from "../types/library";
-import { Search } from "lucide-react";
+import type { BookDisplay, View } from "../types/library";
+import { Search, ChevronDown, ChevronRight } from "lucide-react";
+import { getLanguageFlag } from "../lib/languageFlags";
 
 type Series = {
   name: string;
@@ -10,19 +11,52 @@ type Series = {
 
 type SeriesViewProps = {
   series: Series[];
+  books: BookDisplay[];
   setSelectedSeries: Dispatch<SetStateAction<string[]>>;
   setView: Dispatch<SetStateAction<View>>;
+  onSelectBook: (bookId: string) => void;
 };
 
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("");
 
 export function SeriesView({
   series,
+  books,
   setSelectedSeries,
   setView,
+  onSelectBook,
 }: SeriesViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [expandedSeries, setExpandedSeries] = useState<Set<string>>(new Set());
+
+  // Group books by series name
+  const booksBySeries = useMemo(() => {
+    const grouped: Record<string, BookDisplay[]> = {};
+    books.forEach((book) => {
+      if (book.series) {
+        if (!grouped[book.series]) grouped[book.series] = [];
+        grouped[book.series].push(book);
+      }
+    });
+    // Sort books within each series by seriesIndex
+    Object.keys(grouped).forEach((key) => {
+      grouped[key].sort((a, b) => (a.seriesIndex ?? 999) - (b.seriesIndex ?? 999));
+    });
+    return grouped;
+  }, [books]);
+
+  const toggleExpanded = (seriesName: string) => {
+    setExpandedSeries((prev) => {
+      const next = new Set(prev);
+      if (next.has(seriesName)) {
+        next.delete(seriesName);
+      } else {
+        next.add(seriesName);
+      }
+      return next;
+    });
+  };
 
   // Filter series by search query
   const filteredSeries = useMemo(() => {
@@ -137,19 +171,89 @@ export function SeriesView({
                     {groupedSeries[letter].length}
                   </span>
                 </div>
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-2">
-                  {groupedSeries[letter].map((s) => (
-                    <button
-                      key={s.name}
-                      className="flex items-center justify-between rounded-lg border border-[var(--app-border)] bg-white/80 px-3 py-2 text-left text-sm transition hover:border-[rgba(208,138,70,0.4)] hover:bg-white"
-                      onClick={() => handleSeriesClick(s.name)}
-                    >
-                      <span className="font-medium truncate">{s.name}</span>
-                      <span className="ml-2 shrink-0 text-xs text-[var(--app-ink-muted)]">
-                        {s.bookCount} {s.bookCount === 1 ? "boek" : "boeken"}
-                      </span>
-                    </button>
-                  ))}
+                <div className="flex flex-col gap-2">
+                  {groupedSeries[letter].map((s) => {
+                    const isExpanded = expandedSeries.has(s.name);
+                    const seriesBooks = booksBySeries[s.name] ?? [];
+                    return (
+                      <div
+                        key={s.name}
+                        className="rounded-lg border border-[var(--app-border)] bg-white/80 transition"
+                      >
+                        {/* Series header */}
+                        <div className="flex items-center">
+                          <button
+                            className="flex flex-1 items-center gap-2 px-3 py-2 text-left text-sm transition hover:bg-[rgba(208,138,70,0.04)]"
+                            onClick={() => toggleExpanded(s.name)}
+                          >
+                            {isExpanded ? (
+                              <ChevronDown size={16} className="shrink-0 text-[var(--app-ink-muted)]" />
+                            ) : (
+                              <ChevronRight size={16} className="shrink-0 text-[var(--app-ink-muted)]" />
+                            )}
+                            <span className="font-medium truncate">{s.name}</span>
+                            <span className="ml-auto shrink-0 text-xs text-[var(--app-ink-muted)]">
+                              {s.bookCount} {s.bookCount === 1 ? "boek" : "boeken"}
+                            </span>
+                          </button>
+                          <button
+                            className="px-3 py-2 text-xs text-[var(--app-accent-strong)] hover:underline"
+                            onClick={() => handleSeriesClick(s.name)}
+                          >
+                            Toon alle
+                          </button>
+                        </div>
+                        {/* Expanded books list */}
+                        {isExpanded && seriesBooks.length > 0 && (
+                          <div className="border-t border-[var(--app-border)] bg-[rgba(255,253,249,0.6)]">
+                            {seriesBooks.map((book, i) => (
+                              <button
+                                key={book.id}
+                                className={`flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition hover:bg-[rgba(208,138,70,0.06)] ${
+                                  i < seriesBooks.length - 1 ? "border-b border-[var(--app-border)]/50" : ""
+                                }`}
+                                onClick={() => onSelectBook(book.id)}
+                              >
+                                {/* Series index */}
+                                <span className="w-8 shrink-0 text-center">
+                                  {book.seriesIndex ? (
+                                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[rgba(208,138,70,0.15)] text-xs font-semibold text-[var(--app-accent-strong)]">
+                                      {book.seriesIndex}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-[var(--app-ink-muted)]">—</span>
+                                  )}
+                                </span>
+                                {/* Cover thumbnail */}
+                                <div className="h-10 w-7 shrink-0 overflow-hidden rounded border border-[var(--app-border)] bg-[#fffaf4]">
+                                  {book.cover ? (
+                                    <img src={book.cover} alt="" className="h-full w-full object-cover" />
+                                  ) : (
+                                    <div className="flex h-full w-full items-center justify-center text-[6px] text-[var(--app-ink-muted)]">
+                                      {book.format}
+                                    </div>
+                                  )}
+                                </div>
+                                {/* Book info */}
+                                <div className="flex min-w-0 flex-1 flex-col">
+                                  <span className="truncate font-medium">{book.title}</span>
+                                  <span className="truncate text-xs text-[var(--app-ink-muted)]">{book.author}</span>
+                                </div>
+                                {/* Language flag */}
+                                {book.language && (
+                                  <span className="shrink-0 text-sm">{getLanguageFlag(book.language)}</span>
+                                )}
+                                {/* Format badge */}
+                                <span className="shrink-0 rounded bg-[var(--app-bg)] px-1.5 py-0.5 text-[10px] uppercase text-[var(--app-ink-muted)]">
+                                  {book.format}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ))}
