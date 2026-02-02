@@ -11,6 +11,29 @@ export type View =
   | "ereader";
 export type LibraryFilter = "all" | "epub" | "pdf" | "needs-metadata" | "tagged";
 
+export type FixFilter = {
+  missingAuthor: boolean;
+  missingTitle: boolean;
+  missingCover: boolean;
+  missingIsbn: boolean;
+  missingYear: boolean;
+  missingDescription: boolean;
+  missingLanguage: boolean;
+  missingSeries: boolean;
+  includeIssues: boolean;
+};
+
+export type ItemMetadata = {
+  title: string | null;
+  authors: string[];
+  publishedYear: number | null;
+  language: string | null;
+  isbn: string | null;
+  series: string | null;
+  seriesIndex: number | null;
+  description: string | null;
+};
+
 export type Tag = { id: string; name: string; color?: string | null };
 
 export type Author = {
