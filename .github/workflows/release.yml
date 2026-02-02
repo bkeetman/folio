@@ -16,8 +16,13 @@ jobs:
       matrix:
         include:
           - os: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - os: macos-latest
+            args: "--target x86_64-apple-darwin"
           - os: windows-latest
+            args: ""
           - os: ubuntu-24.04
+            args: ""
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -70,6 +75,7 @@ jobs:
           releaseBody: "Automated release for ${{ github.ref_name }}"
           releaseDraft: false
           prerelease: false
+          args: ${{ matrix.args }}
 
       - name: Sign macOS updater artifact
         if: matrix.os == 'macos-latest'
