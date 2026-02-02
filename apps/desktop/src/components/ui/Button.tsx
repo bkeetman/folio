@@ -1,8 +1,8 @@
-import type { ButtonHTMLAttributes } from "react";
 import { cva } from "class-variance-authority";
+import type { ButtonHTMLAttributes } from "react";
 import { cn } from "../../lib/utils";
 
-type ButtonVariant = "primary" | "ghost" | "toolbar" | "danger" | "outline";
+type ButtonVariant = "primary" | "default" | "ghost" | "toolbar" | "danger" | "outline";
 type ButtonSize = "sm" | "md" | "lg" | "icon";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -16,15 +16,17 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          "bg-[var(--app-accent)] text-white shadow-[0_12px_20px_rgba(201,122,58,0.28)] hover:bg-[var(--app-accent-strong)]",
+          "bg-app-accent text-white shadow-sm hover:bg-app-accent-strong",
+        default:
+          "bg-app-accent text-white shadow-sm hover:bg-app-accent-strong",
         ghost:
-          "bg-[var(--app-panel)] text-[var(--app-ink)] border-[var(--app-border)] hover:bg-white/80",
+          "bg-transparent text-app-ink hover:bg-app-ink/5",
         toolbar:
-          "bg-[var(--app-panel)] text-[var(--app-ink)] border-[var(--app-border)] hover:bg-white/80",
+          "bg-app-surface text-app-ink border border-app-border hover:bg-app-bg shadow-sm",
         outline:
-          "bg-transparent text-[var(--app-ink)] border-[var(--app-border)] hover:bg-white/50",
+          "bg-transparent text-app-ink border border-app-border hover:bg-app-bg",
         danger:
-          "bg-[rgba(255,248,244,0.9)] text-[#8b3a22] border-[rgba(178,74,44,0.4)] hover:bg-[rgba(255,240,232,1)]",
+          "bg-red-50 text-red-600 border border-red-200 hover:bg-red-100",
       },
       size: {
         sm: "h-8 px-3 text-xs",

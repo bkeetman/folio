@@ -3,14 +3,16 @@
 @tailwind utilities;
 
 :root {
-  --app-bg: #f7f4ef;
-  --app-surface: #f6f2ec;
-  --app-panel: #fffdf9;
-  --app-ink: #26211d;
-  --app-ink-muted: #6b625a;
-  --app-border: rgba(44, 38, 33, 0.14);
-  --app-accent: #c97a3a;
-  --app-accent-strong: #a95a2a;
+  /* Premium Desktop Theme - Cleaner, less yellow, more structural */
+  --app-bg: #f2f0ed;  /* Slightly cooler/neutral warm gray */
+  --app-surface: #ffffff; /* Bright surface for cards/panels */
+  --app-panel: #ffffff;
+  --app-ink: #1a1614; /* Sharper black/brown */
+  --app-ink-muted: #706860;
+  --app-border: rgba(26, 22, 20, 0.08); /* More subtle, precise border */
+  --app-accent: #ea580c; /* Sharper orange (Tailwind orange-600) for punch */
+  --app-accent-strong: #c2410c;
+  --app-ring: rgba(234, 88, 12, 0.15); /* Focus ring color */
   font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;

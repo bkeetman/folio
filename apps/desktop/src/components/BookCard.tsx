@@ -1,5 +1,7 @@
+import { FileText } from "lucide-react";
 import { getLanguageFlag } from "../lib/languageFlags";
 import { getTagColorClass } from "../lib/tagColors";
+import { cn } from "../lib/utils"; // Assuming you have a utils file, if not I will handle inline
 import type { BookDisplay } from "../types/library";
 import { ProcessingOverlay } from "./ProgressBar";
 
@@ -29,11 +31,12 @@ export function BookCard({
     if (viewMode === "list") {
         return (
             <div
-                className={
+                className={cn(
+                    "grid cursor-pointer grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr] gap-4 border-b border-app-border px-4 py-3 transition-colors last:border-0",
                     selected
-                        ? "grid cursor-pointer grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr] gap-3 border-t border-[var(--app-border)] bg-[rgba(201,122,58,0.12)] px-4 py-2"
-                        : "grid cursor-pointer grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr] gap-3 border-t border-[var(--app-border)] px-4 py-2 hover:bg-[rgba(201,122,58,0.06)]"
-                }
+                        ? "bg-app-accent/5"
+                        : "hover:bg-app-border/30 bg-app-panel"
+                )}
                 onClick={onSelect}
                 role="button"
                 tabIndex={0}
@@ -41,11 +44,12 @@ export function BookCard({
                     if (event.key === "Enter") onSelect();
                 }}
             >
-                <div className="relative grid h-16 w-12 place-items-center overflow-hidden rounded-md border border-[rgba(44,38,33,0.12)] bg-[#fffaf4]">
+                {/* Thumbnail */}
+                <div className="relative grid h-14 w-10 shrink-0 place-items-center overflow-hidden rounded border border-app-border bg-app-bg shadow-sm">
                     {book.cover ? (
                         <img
                             key={`${book.id}-${coverRefreshToken}-${book.cover ?? "none"}`}
-                            className="h-full w-full object-contain"
+                            className="h-full w-full object-cover"
                             src={book.cover}
                             alt=""
                             onError={() => {
@@ -54,60 +58,69 @@ export function BookCard({
                             }}
                         />
                     ) : (
-                        <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
-                            {book.format}
-                        </div>
-                    )}
-                    {/* Language flag */}
-                    {languageFlag && (
-                        <div className="absolute bottom-0.5 right-0.5 text-[10px] leading-none opacity-80">
-                            {languageFlag}
-                        </div>
+                        <FileText size={16} className="text-app-ink-muted/40" />
                     )}
                     <ProcessingOverlay isProcessing={isEnriching} size={14} variant="purple" />
                 </div>
-                <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-semibold">{book.title}</span>
+
+                {/* Title & Tags */}
+                <div className="flex flex-col justify-center gap-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                        <span className="truncate text-sm font-medium text-app-ink">{book.title}</span>
                         {book.series && (
-                            <span className="text-[10px] text-[var(--app-ink-muted)]">
+                            <span className="shrink-0 text-xs text-app-ink-muted">
                                 ({book.series}{book.seriesIndex ? ` #${book.seriesIndex}` : ""})
                             </span>
                         )}
                     </div>
-                    {(book.tags ?? []).length ? (
-                        <div className="flex flex-wrap gap-1">
-                            {(book.tags ?? []).slice(0, 2).map((tag) => (
+                    {(book.tags ?? []).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                            {(book.tags ?? []).slice(0, 3).map((tag) => (
                                 <span
                                     key={tag.id}
-                                    className={`rounded-full border px-2 py-0.5 text-[10px] ${getTagColorClass(tag.color)}`}
+                                    className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium leading-none ${getTagColorClass(tag.color)}`}
                                 >
                                     {tag.name}
                                 </span>
                             ))}
                         </div>
-                    ) : null}
+                    )}
                 </div>
-                <div className="text-xs text-[var(--app-ink-muted)]">
+
+                {/* Author */}
+                <div className="flex items-center text-sm text-app-ink-muted truncate">
                     {book.author}
                 </div>
-                <div className="text-xs text-[var(--app-ink-muted)]">
+
+                {/* Year */}
+                <div className="flex items-center text-sm tabular-nums text-app-ink-muted">
                     {book.year}
                 </div>
-                <div className="text-xs text-[var(--app-ink-muted)]">
-                    {book.format}
+
+                {/* Format / Meta */}
+                <div className="flex items-center gap-2">
+                    <span className="rounded border border-app-border bg-app-bg px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-app-ink-muted">
+                        {book.format}
+                    </span>
+                    {languageFlag && (
+                        <span className="text-xs opacity-70" title={book.language ?? "Language"}>
+                            {languageFlag}
+                        </span>
+                    )}
                 </div>
             </div>
         );
     }
 
+    // Grid View
     return (
         <article
-            className={
+            className={cn(
+                "group flex cursor-pointer flex-col overflow-hidden rounded-lg border transition-all duration-200",
                 selected
-                    ? "flex cursor-pointer flex-col overflow-hidden rounded-md border border-[rgba(201,122,58,0.6)] bg-[#fffdf9] shadow-[0_16px_24px_rgba(201,122,58,0.18)] transition"
-                    : "flex cursor-pointer flex-col overflow-hidden rounded-md border border-[rgba(44,38,33,0.08)] bg-[#fffdf9] shadow-[0_10px_18px_rgba(30,22,15,0.06)] transition hover:shadow-[0_18px_26px_rgba(24,18,12,0.1)]"
-            }
+                    ? "border-app-accent ring-1 ring-app-accent/20 bg-app-surface shadow-md"
+                    : "border-app-border bg-app-surface shadow-sm hover:border-app-accent/50 hover:shadow-md"
+            )}
             onClick={onSelect}
             role="button"
             tabIndex={0}
@@ -115,94 +128,80 @@ export function BookCard({
                 if (event.key === "Enter") onSelect();
             }}
         >
-            <div className="relative aspect-[3/4] overflow-hidden rounded-t-md border-b border-[rgba(44,38,33,0.06)] bg-[linear-gradient(135deg,#efe3d1,#f2e7d9)]">
+            {/* Cover Area */}
+            <div className="relative aspect-[2/3] w-full overflow-hidden bg-app-bg border-b border-app-border/50">
                 {book.cover ? (
                     <img
                         key={`${book.id}-${coverRefreshToken}-${book.cover ?? "none"}`}
-                        className="absolute inset-0 h-full w-full object-cover bg-[#f7f1e7]"
+                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                         src={book.cover}
-                        alt=""
+                        alt={book.title}
                         onError={() => {
                             clearCoverOverride(book.id);
                             fetchCoverOverride(book.id);
                         }}
                     />
-                ) : null}
-                {book.cover ? (
-                    <div className="absolute left-2 top-2 flex items-center gap-1">
-                        <div className="rounded-md bg-[rgba(255,255,255,0.9)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]">
-                            {book.format}
-                        </div>
-                        {languageFlag && (
-                            <div className="rounded-md bg-[rgba(255,255,255,0.9)] px-1.5 py-0.5 text-[10px]">
-                                {languageFlag}
-                            </div>
-                        )}
-                    </div>
                 ) : (
-                    <div className="relative z-10 flex flex-col gap-2 p-3">
-                        <div className="flex items-center gap-1">
-                            <div className="rounded-md bg-[rgba(255,255,255,0.8)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]">
-                                {book.format}
-                            </div>
-                            {languageFlag && (
-                                <div className="rounded-md bg-[rgba(255,255,255,0.8)] px-1.5 py-0.5 text-[10px]">
-                                    {languageFlag}
-                                </div>
-                            )}
+                    <div className="flex h-full flex-col items-center justify-center p-4 text-center">
+                        <div className="mb-3 grid h-12 w-12 place-items-center rounded-full bg-app-border/30 text-app-ink-muted">
+                            <span className="text-lg font-bold">{book.title.slice(0, 1).toUpperCase()}</span>
                         </div>
-                        <div className="text-[13px] font-semibold leading-snug">
+                        <div className="line-clamp-3 text-sm font-medium leading-snug text-app-ink/80">
                             {book.title}
                         </div>
                     </div>
                 )}
-                {/* Series badge */}
-                {book.series && book.seriesIndex && (
-                    <div className="absolute bottom-2 right-2 rounded-md bg-[rgba(0,0,0,0.6)] px-1.5 py-0.5 text-[10px] font-medium text-white">
-                        #{book.seriesIndex}
+
+                {/* Series Badge (Subtle, top right) */}
+                {book.series && (
+                    <div className="absolute top-2 right-2 max-w-[80%] truncate rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm">
+                        {book.series} {book.seriesIndex && `#${book.seriesIndex}`}
                     </div>
                 )}
-                {/* Enriching spinner overlay */}
+
                 <ProcessingOverlay isProcessing={isEnriching} size={24} variant="purple" />
             </div>
-            <div className="flex flex-col gap-1 px-3 py-2">
-                <div className="text-[13px] font-semibold">{book.title}</div>
-                {(book.tags ?? []).length ? (
-                    <div className="flex flex-wrap gap-1">
+
+            {/* Content Area */}
+            <div className="flex flex-1 flex-col p-3">
+                {/* Meta Row (Format, Lang) - NOW BELOW COVER */}
+                <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                        <span className="inline-flex h-5 items-center rounded border border-app-border bg-app-bg px-1.5 text-[10px] font-bold uppercase tracking-wider text-app-ink-muted/80">
+                            {book.format}
+                        </span>
+                        {languageFlag && <span className="text-xs opacity-80 grayscale transition-all group-hover:grayscale-0">{languageFlag}</span>}
+                    </div>
+                    {book.year && (
+                        <span className="text-[11px] font-medium text-app-ink-muted/60">{book.year}</span>
+                    )}
+                </div>
+
+                {/* Title */}
+                <h3 className="mb-0.5 line-clamp-2 text-[13px] font-semibold leading-snug text-app-ink group-hover:text-app-accent-strong transition-colors">
+                    {book.title}
+                </h3>
+
+                {/* Author */}
+                <div className="mb-2 line-clamp-1 text-[12px] text-app-ink-muted">
+                    {book.author}
+                </div>
+
+                {/* Tags (Bottom) */}
+                {(book.tags ?? []).length > 0 && (
+                    <div className="mt-auto flex flex-wrap gap-1 pt-2">
                         {(book.tags ?? []).slice(0, 3).map((tag) => (
                             <span
                                 key={tag.id}
-                                className={`rounded-full border px-2 py-0.5 text-[10px] ${getTagColorClass(tag.color)}`}
-                            >
-                                {tag.name}
-                            </span>
+                                className={`h-1.5 w-1.5 rounded-full ${getTagColorClass(tag.color).replace('text-', 'bg-').split(' ')[0]}`} // Use dot indicators for cleaner look or tiny pills
+                                title={tag.name}
+                            />
                         ))}
+                        {(book.tags ?? []).length > 0 && (
+                            <span className="text-[10px] text-app-ink-muted/50">+{book.tags!.length}</span>
+                        )}
                     </div>
-                ) : null}
-                <div className="grid gap-1">
-                    <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
-                        <span className="text-[10px] uppercase tracking-[0.12em]">
-                            Auteur
-                        </span>
-                        <span className="text-[var(--app-ink)] truncate max-w-[100px]">{book.author}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
-                        <span className="text-[10px] uppercase tracking-[0.12em]">
-                            Jaar
-                        </span>
-                        <span className="text-[var(--app-ink)]">{book.year}</span>
-                    </div>
-                    {book.series && (
-                        <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-ink-muted)]">
-                            <span className="text-[10px] uppercase tracking-[0.12em]">
-                                Serie
-                            </span>
-                            <span className="text-[var(--app-ink)] truncate max-w-[100px]">
-                                {book.series}{book.seriesIndex ? ` #${book.seriesIndex}` : ""}
-                            </span>
-                        </div>
-                    )}
-                </div>
+                )}
             </div>
         </article>
     );

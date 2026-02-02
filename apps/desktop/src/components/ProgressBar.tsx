@@ -12,6 +12,7 @@ type ProgressBarProps = {
   variant?: ProgressBarVariant;
   /** Whether to show the progress bar (typically: isRunning && progress) */
   show: boolean;
+  className?: string;
 };
 
 const variantStyles: Record<ProgressBarVariant, { border: string; bg: string; bar: string; spinner: string }> = {
@@ -52,14 +53,14 @@ const trackStyles: Record<ProgressBarVariant, string> = {
  * Reusable progress bar component for background operations.
  * Shows a spinner, progress text, and animated progress bar.
  */
-export function ProgressBar({ progress, label, variant = "accent", show }: ProgressBarProps) {
+export function ProgressBar({ progress, label, variant = "accent", show, className }: ProgressBarProps) {
   if (!show || !progress) return null;
 
   const styles = variantStyles[variant];
   const percentage = progress.total > 0 ? (progress.current / progress.total) * 100 : 0;
 
   return (
-    <div className={`rounded-lg border ${styles.border} ${styles.bg} px-3 py-2`}>
+    <div className={`rounded-lg border ${styles.border} ${styles.bg} px-3 py-2 ${className || ""}`}>
       <div className="flex items-center gap-2">
         <Loader2 size={14} className={`animate-spin ${styles.spinner}`} />
         <span className="text-xs text-[var(--app-ink)]">
