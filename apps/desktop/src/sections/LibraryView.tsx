@@ -1,7 +1,10 @@
 import type { Dispatch, SetStateAction } from "react";
+import { Sparkles, Loader2 } from "lucide-react";
 import { LibraryGrid } from "../components/LibraryGrid";
+import { ProgressBar } from "../components/ProgressBar";
+import { Button } from "../components/ui";
 import { getTagColorClass } from "../lib/tagColors";
-import type { BookDisplay, LibraryFilter, Tag } from "../types/library";
+import type { BookDisplay, LibraryFilter, OperationProgress, Tag } from "../types/library";
 
 type LibraryViewProps = {
   isDesktop: boolean;
@@ -23,6 +26,11 @@ type LibraryViewProps = {
   setSelectedAuthorNames: Dispatch<SetStateAction<string[]>>;
   selectedSeries: string[];
   setSelectedSeries: Dispatch<SetStateAction<string[]>>;
+  // Enrichment
+  onEnrichAll: () => void;
+  enriching: boolean;
+  enrichingItems: Set<string>;
+  enrichProgress: OperationProgress | null;
 };
 
 export function LibraryView({
@@ -44,6 +52,10 @@ export function LibraryView({
   setSelectedAuthorNames,
   selectedSeries,
   setSelectedSeries,
+  onEnrichAll,
+  enriching,
+  enrichingItems,
+  enrichProgress,
 }: LibraryViewProps) {
   const hasActiveFilter = selectedAuthorNames.length > 0 || selectedSeries.length > 0;
 
@@ -93,7 +105,31 @@ export function LibraryView({
         </div>
       )}
 
+      {/* Enrich progress bar */}
+      <ProgressBar
+        progress={enrichProgress}
+        label="Enriching"
+        variant="purple"
+        show={enriching && enrichProgress !== null}
+      />
+
       <div className="flex flex-wrap items-center gap-2">
+        {isDesktop && (
+          <Button
+            variant="toolbar"
+            size="sm"
+            onClick={onEnrichAll}
+            disabled={enriching}
+            className="mr-2"
+          >
+            {enriching ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Sparkles size={14} />
+            )}
+            {enriching ? "Enriching..." : "Enrich All"}
+          </Button>
+        )}
         <button
           className={
             libraryFilter === "all"
@@ -202,6 +238,7 @@ export function LibraryView({
         fetchCoverOverride={fetchCoverOverride}
         clearCoverOverride={clearCoverOverride}
         viewMode={grid ? "grid" : "list"}
+        enrichingItems={enrichingItems}
       />
     </>
   );

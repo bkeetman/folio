@@ -159,3 +159,47 @@ export type SyncResult = {
   imported: number;
   errors: string[];
 };
+
+// Legacy types - kept for backward compatibility during migration
+// These will be removed once all code uses OperationProgress/OperationStats
+
+export type EnrichProgress = {
+  itemId: string;
+  status: "searching" | "applying" | "done" | "skipped" | "error";
+  message: string | null;
+  current: number;
+  total: number;
+};
+
+export type EnrichStats = {
+  total: number;
+  enriched: number;
+  skipped: number;
+  errors: number;
+};
+
+export type ChangeProgress = {
+  changeId: string;
+  status: "applying" | "done" | "error";
+  message: string | null;
+  current: number;
+  total: number;
+};
+
+// Unified types for all background operations
+// All backend events should conform to these shapes
+
+export type OperationProgress = {
+  itemId: string;
+  status: "pending" | "processing" | "done" | "skipped" | "error";
+  message: string | null;
+  current: number;
+  total: number;
+};
+
+export type OperationStats = {
+  total: number;
+  processed: number;
+  skipped: number;
+  errors: number;
+};

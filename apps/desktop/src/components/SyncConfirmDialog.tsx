@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { SyncProgressBar } from "./ProgressBar";
 import { Button } from "./ui";
 import type { SyncQueueItem, LibraryItem, SyncProgress } from "../types/library";
 
@@ -53,31 +54,11 @@ export function SyncConfirmDialog({
         {/* Content */}
         <div className="p-4 space-y-4 max-h-[60vh] overflow-auto">
           {syncing && syncProgress ? (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="font-medium">
-                  {syncProgress.action === "add" ? "Adding to device..." :
-                   syncProgress.action === "remove" ? "Removing from device..." :
-                   "Importing to library..."}
-                </span>
-                <span className="text-[var(--app-text-muted)]">
-                  {syncProgress.processed + 1} / {syncProgress.total}
-                </span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-[rgba(208,138,70,0.2)]">
-                <div
-                  className="h-full rounded-full bg-[linear-gradient(90deg,var(--app-accent),var(--app-accent-strong))] transition-[width] duration-200"
-                  style={{
-                    width: syncProgress.total > 0
-                      ? `${Math.round(((syncProgress.processed + 1) / syncProgress.total) * 100)}%`
-                      : "0%",
-                  }}
-                />
-              </div>
-              <div className="text-xs text-[var(--app-text-muted)] truncate">
-                {syncProgress.current}
-              </div>
-            </div>
+            <SyncProgressBar
+              syncing={syncing}
+              progress={syncProgress}
+              variant="accent"
+            />
           ) : (
             <p className="text-sm text-[var(--app-text-muted)]">Ready to sync the following changes:</p>
           )}

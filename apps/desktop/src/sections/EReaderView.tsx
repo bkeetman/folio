@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { HardDrive, FolderOpen, RefreshCw, Trash2 } from "lucide-react";
+import { SyncProgressBar } from "../components/ProgressBar";
 import { Button } from "../components/ui";
 import type { EReaderDevice, EReaderBook, SyncQueueItem, LibraryItem, SyncProgress } from "../types/library";
 
@@ -315,28 +316,12 @@ export function EReaderView({
 
       {/* Sync Progress */}
       {syncing && syncProgress && (
-        <div className="p-4 border-b border-[var(--app-border)] bg-[rgba(207,217,210,0.35)]">
-          <div className="flex items-center justify-between text-sm mb-2">
-            <span className="font-medium">
-              Syncing: {syncProgress.action === "add" ? "Adding" : syncProgress.action === "remove" ? "Removing" : "Importing"}
-            </span>
-            <span className="text-[var(--app-text-muted)]">
-              {syncProgress.processed} / {syncProgress.total}
-            </span>
-          </div>
-          <div className="h-2 overflow-hidden rounded-full bg-[rgba(208,138,70,0.2)]">
-            <div
-              className="h-full rounded-full bg-[linear-gradient(90deg,var(--app-accent),var(--app-accent-strong))] transition-[width] duration-200"
-              style={{
-                width: syncProgress.total > 0
-                  ? `${Math.round((syncProgress.processed / syncProgress.total) * 100)}%`
-                  : "0%",
-              }}
-            />
-          </div>
-          <div className="mt-1 text-xs text-[var(--app-text-muted)] truncate">
-            {syncProgress.current}
-          </div>
+        <div className="p-4 border-b border-[var(--app-border)]">
+          <SyncProgressBar
+            syncing={syncing}
+            progress={syncProgress}
+            variant="accent"
+          />
         </div>
       )}
 

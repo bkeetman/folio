@@ -5,6 +5,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MatchModal } from "./components/MatchModal";
+import { ScanProgressBar } from "./components/ProgressBar";
 import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
 import { TAG_COLORS } from "./lib/tagColors";
 import { AuthorsView } from "./sections/AuthorsView";
@@ -30,6 +31,8 @@ import type {
   LibraryFilter,
   LibraryHealth,
   LibraryItem,
+  OperationProgress,
+  OperationStats,
   OrganizePlan,
   PendingChange,
   ScanProgress,
@@ -202,6 +205,9 @@ function App() {
   const [scanning, setScanning] = useState(false);
   const [scanStartedAt, setScanStartedAt] = useState<number | null>(null);
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichingItems, setEnrichingItems] = useState<Set<string>>(new Set());
+  const [enrichProgress, setEnrichProgress] = useState<OperationProgress | null>(null);
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([]);
   const [libraryReady, setLibraryReady] = useState(false);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
@@ -233,6 +239,8 @@ function App() {
   const [pendingChangesStatus, setPendingChangesStatus] = useState<
     "pending" | "applied" | "error"
   >("pending");
+  const [applyingChangeIds, setApplyingChangeIds] = useState<Set<string>>(new Set());
+  const [changeProgress, setChangeProgress] = useState<OperationProgress | null>(null);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -826,6 +834,28 @@ function App() {
     }
   }, [refreshLibrary, scanning]);
 
+  const handleEnrichAll = useCallback(async () => {
+    if (!isTauri()) {
+      setScanStatus("Enrich requires the Tauri desktop runtime.");
+      return;
+    }
+    if (enriching) return;
+    setEnriching(true);
+    setEnrichProgress(null);
+    setEnrichingItems(new Set());
+    setScanStatus("Enriching library...");
+    try {
+      // This returns immediately, progress comes via events
+      await invoke("enrich_all");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error ?? "Enrich failed.");
+      setScanStatus(`Enrich failed: ${message}`);
+      setEnriching(false);
+      setEnrichingItems(new Set());
+    }
+  }, [enriching]);
+
   const handleClearLibrary = async () => {
     if (!isTauri()) {
       setScanStatus("Clear requires the Tauri desktop runtime.");
@@ -955,6 +985,99 @@ function App() {
       if (unlistenSyncComplete) unlistenSyncComplete();
     };
   }, [isDesktop, ereaderSyncing, selectedEreaderDeviceId]);
+
+  // Listen for enrich progress events
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlistenProgress: (() => void) | undefined;
+    let unlistenComplete: (() => void) | undefined;
+
+    listen<OperationProgress>("enrich-progress", (event) => {
+      console.log("enrich-progress event:", event.payload);
+      setEnrichProgress(event.payload);
+      setEnrichingItems((prev) => {
+        const next = new Set(prev);
+        if (event.payload.status === "processing" || event.payload.status === "pending") {
+          next.add(event.payload.itemId);
+        } else {
+          next.delete(event.payload.itemId);
+        }
+        return next;
+      });
+      setEnriching(true);
+    }).then((stop) => {
+      unlistenProgress = stop;
+    });
+
+    listen<OperationStats>("enrich-complete", (event) => {
+      console.log("enrich-complete event:", event.payload);
+      setEnrichProgress(null);
+      setEnriching(false);
+      setEnrichingItems(new Set());
+      setScanStatus(
+        `Enrichment complete: ${event.payload.processed} enriched, ${event.payload.skipped} skipped, ${event.payload.errors} errors.`
+      );
+      // Refresh library to show new covers
+      void refreshLibrary();
+    }).then((stop) => {
+      unlistenComplete = stop;
+    });
+
+    return () => {
+      if (unlistenProgress) unlistenProgress();
+      if (unlistenComplete) unlistenComplete();
+    };
+  }, [isDesktop]); // Removed enriching and refreshLibrary from deps to prevent re-registration
+
+  // Listen for change progress events
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlistenProgress: (() => void) | undefined;
+    let unlistenComplete: (() => void) | undefined;
+
+    listen<OperationProgress>("change-progress", (event) => {
+      console.log("change-progress event:", event.payload);
+      setChangeProgress(event.payload);
+      setApplyingChangeIds((prev) => {
+        const next = new Set(prev);
+        if (event.payload.status === "processing") {
+          next.add(event.payload.itemId);
+        } else {
+          next.delete(event.payload.itemId);
+        }
+        return next;
+      });
+      setPendingChangesApplying(true);
+    }).then((stop) => {
+      unlistenProgress = stop;
+    });
+
+    listen<OperationStats>("change-complete", async (event) => {
+      console.log("change-complete event:", event.payload);
+      setChangeProgress(null);
+      setApplyingChangeIds(new Set());
+      setPendingChangesApplying(false);
+      setScanStatus(
+        `Changes complete: ${event.payload.processed} applied, ${event.payload.errors} errors.`
+      );
+      // Refresh the pending changes list
+      try {
+        const result = await invoke<PendingChange[]>("get_pending_changes", {
+          status: pendingChangesStatus,
+        });
+        setPendingChanges(result);
+      } catch {
+        // ignore
+      }
+    }).then((stop) => {
+      unlistenComplete = stop;
+    });
+
+    return () => {
+      if (unlistenProgress) unlistenProgress();
+      if (unlistenComplete) unlistenComplete();
+    };
+  }, [isDesktop]);
 
   const currentFixItem = inbox.length ? inbox[0] : inboxItems[0] ?? null;
   const candidateList = isDesktop ? fixCandidates : sampleFixCandidates;
@@ -1314,51 +1437,23 @@ function App() {
           updateStatus={updateStatus}
         />
 
-        {scanning && scanProgress ? (
-          <div className="flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-white/70 px-3 py-2">
-            <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--app-ink-muted)]">
-              Scanning {scanProgress.processed} of {scanProgress.total || "?"}
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-[rgba(208,138,70,0.2)]">
-              <div
-                className="h-full rounded-full bg-[linear-gradient(90deg,var(--app-accent),var(--app-accent-strong))] transition-[width] duration-200"
-                style={{
-                  width:
-                    scanProgress.total > 0
-                      ? `${Math.min(
-                        100,
-                        Math.round(
-                          (scanProgress.processed / scanProgress.total) * 100
-                        )
-                      )}%`
-                      : "6%",
-                }}
-              />
-            </div>
-            <div className="truncate text-[10px] text-[var(--app-ink-muted)]">
-              {scanProgress.current}
-            </div>
-            {scanEtaSeconds !== null ? (
-              <div className="text-[10px] text-[var(--app-ink-muted)]">
-                ETA {formatEta(scanEtaSeconds)}
-              </div>
-            ) : null}
-          </div>
-        ) : scanning ? (
-          <div className="flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-white/70 px-3 py-2">
-            <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--app-ink-muted)]">
-              Preparing scan…
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-[rgba(208,138,70,0.2)]">
-              <div className="h-full w-1/3 animate-pulse rounded-full bg-[linear-gradient(90deg,var(--app-accent),var(--app-accent-strong))]" />
-            </div>
-            <div className="text-[10px] text-[var(--app-ink-muted)]">Collecting files…</div>
-          </div>
-        ) : null}
+        <ScanProgressBar
+          scanning={scanning}
+          progress={scanProgress}
+          etaLabel={scanEtaLabel}
+          variant="accent"
+        />
 
         <div className="flex flex-col gap-4">
           <section className="flex flex-col gap-4">
-            {(view === "library" || view === "library-books") ? (
+            {(view === "library" || view === "library-books") && !libraryReady && isDesktop ? (
+              <div className="flex flex-col items-center justify-center gap-4 py-16">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--app-accent)] border-t-transparent" />
+                <div className="text-sm text-[var(--app-ink-muted)]">Loading library...</div>
+              </div>
+            ) : null}
+
+            {(view === "library" || view === "library-books") && libraryReady ? (
               <LibraryView
                 isDesktop={isDesktop}
                 libraryItemsLength={libraryItems.length}
@@ -1378,6 +1473,10 @@ function App() {
                 setSelectedAuthorNames={setSelectedAuthorNames}
                 selectedSeries={selectedSeries}
                 setSelectedSeries={setSelectedSeries}
+                onEnrichAll={handleEnrichAll}
+                enriching={enriching}
+                enrichingItems={enrichingItems}
+                enrichProgress={enrichProgress}
               />
             ) : null}
 
@@ -1439,6 +1538,8 @@ function App() {
                 setConfirmDeleteOpen={setConfirmDeleteOpen}
                 setConfirmDeleteIds={setConfirmDeleteIds}
                 handleConfirmDelete={handleConfirmDelete}
+                applyingChangeIds={applyingChangeIds}
+                changeProgress={changeProgress}
               />
             ) : null}
 

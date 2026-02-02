@@ -9,6 +9,7 @@ type LibraryGridProps = {
     fetchCoverOverride: (id: string) => void;
     clearCoverOverride: (id: string) => void;
     viewMode: "grid" | "list";
+    enrichingItems?: Set<string>;
 };
 
 export function LibraryGrid({
@@ -19,6 +20,7 @@ export function LibraryGrid({
     fetchCoverOverride,
     clearCoverOverride,
     viewMode,
+    enrichingItems,
 }: LibraryGridProps) {
     if (viewMode === "list") {
         return (
@@ -40,6 +42,7 @@ export function LibraryGrid({
                         fetchCoverOverride={fetchCoverOverride}
                         clearCoverOverride={clearCoverOverride}
                         viewMode="list"
+                        isEnriching={enrichingItems?.has(book.id) ?? false}
                     />
                 ))}
             </div>
@@ -58,6 +61,7 @@ export function LibraryGrid({
                     fetchCoverOverride={fetchCoverOverride}
                     clearCoverOverride={clearCoverOverride}
                     viewMode="grid"
+                    isEnriching={enrichingItems?.has(book.id) ?? false}
                 />
             ))}
         </div>

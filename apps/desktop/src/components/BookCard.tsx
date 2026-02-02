@@ -1,5 +1,6 @@
 import { getTagColorClass } from "../lib/tagColors";
 import type { BookDisplay } from "../types/library";
+import { ProcessingOverlay } from "./ProgressBar";
 
 type BookCardProps = {
     book: BookDisplay;
@@ -9,6 +10,7 @@ type BookCardProps = {
     fetchCoverOverride: (id: string) => void;
     clearCoverOverride: (id: string) => void;
     viewMode?: "grid" | "list";
+    isEnriching?: boolean;
 };
 
 export function BookCard({
@@ -19,6 +21,7 @@ export function BookCard({
     fetchCoverOverride,
     clearCoverOverride,
     viewMode = "grid",
+    isEnriching = false,
 }: BookCardProps) {
     if (viewMode === "list") {
         return (
@@ -35,7 +38,7 @@ export function BookCard({
                     if (event.key === "Enter") onSelect();
                 }}
             >
-                <div className="grid h-16 w-12 place-items-center overflow-hidden rounded-md border border-[rgba(44,38,33,0.12)] bg-[#fffaf4]">
+                <div className="relative grid h-16 w-12 place-items-center overflow-hidden rounded-md border border-[rgba(44,38,33,0.12)] bg-[#fffaf4]">
                     {book.cover ? (
                         <img
                             key={`${book.id}-${coverRefreshToken}-${book.cover ?? "none"}`}
@@ -52,6 +55,7 @@ export function BookCard({
                             {book.format}
                         </div>
                     )}
+                    <ProcessingOverlay isProcessing={isEnriching} size={14} variant="purple" />
                 </div>
                 <div className="flex flex-col gap-1">
                     <div className="text-sm font-semibold">{book.title}</div>
@@ -122,6 +126,8 @@ export function BookCard({
                         </div>
                     </div>
                 )}
+                {/* Enriching spinner overlay */}
+                <ProcessingOverlay isProcessing={isEnriching} size={24} variant="purple" />
             </div>
             <div className="flex flex-col gap-1 px-3 py-2">
                 <div className="text-[13px] font-semibold">{book.title}</div>

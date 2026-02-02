@@ -236,6 +236,28 @@ struct ScanProgressPayload {
   current: String,
 }
 
+/// Unified progress payload for all background operations.
+/// All operations should emit events conforming to this shape.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct OperationProgress {
+  item_id: String,
+  status: String, // "pending", "processing", "done", "skipped", "error"
+  message: Option<String>,
+  current: usize,
+  total: usize,
+}
+
+/// Unified stats payload for operation completion.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct OperationStats {
+  total: usize,
+  processed: usize,
+  skipped: usize,
+  errors: usize,
+}
+
 struct ExtractedMetadata {
   title: Option<String>,
   authors: Vec<String>,
@@ -567,7 +589,17 @@ fn get_pending_changes(app: tauri::AppHandle, status: Option<String>) -> Result<
 
 #[tauri::command]
 fn apply_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
-  let conn = open_db(&app)?;
+  // Spawn in background thread so UI stays responsive
+  std::thread::spawn(move || {
+    if let Err(e) = apply_pending_changes_sync(&app, ids) {
+      log::error!("Failed to apply pending changes: {}", e);
+    }
+  });
+  Ok(())
+}
+
+fn apply_pending_changes_sync(app: &tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
+  let conn = open_db(app)?;
   let now = chrono::Utc::now().timestamp_millis();
   let mut changes: Vec<PendingChange> = Vec::new();
 
@@ -628,11 +660,29 @@ fn apply_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), 
     }
   }
 
-  for change in changes {
+  use tauri::Emitter;
+  let total = changes.len();
+  let mut stats = OperationStats {
+    total,
+    processed: 0,
+    skipped: 0,
+    errors: 0,
+  };
+
+  for (index, change) in changes.iter().enumerate() {
+    // Emit "processing" event
+    let _ = app.emit("change-progress", OperationProgress {
+      item_id: change.id.clone(),
+      status: "processing".to_string(),
+      message: Some(change.from_path.clone().unwrap_or_default()),
+      current: index + 1,
+      total,
+    });
+
     let result = match change.change_type.as_str() {
-      "rename" => apply_rename_change(&conn, &change, now),
-      "epub_meta" => apply_epub_change(&change, now),
-      "delete" => apply_delete_change(&conn, &change, now),
+      "rename" => apply_rename_change(&conn, change, now),
+      "epub_meta" => apply_epub_change(change, now),
+      "delete" => apply_delete_change(&conn, change, now),
       _ => Err("Unsupported change type".to_string()),
     };
 
@@ -649,6 +699,15 @@ fn apply_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), 
           change.change_type,
           change.file_id
         );
+        stats.processed += 1;
+        // Emit "done" event
+        let _ = app.emit("change-progress", OperationProgress {
+          item_id: change.id.clone(),
+          status: "done".to_string(),
+          message: None,
+          current: index + 1,
+          total,
+        });
       }
       Err(message) => {
         conn.execute(
@@ -663,9 +722,21 @@ fn apply_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), 
           change.file_id,
           message
         );
+        stats.errors += 1;
+        // Emit "error" event
+        let _ = app.emit("change-progress", OperationProgress {
+          item_id: change.id.clone(),
+          status: "error".to_string(),
+          message: Some(message),
+          current: index + 1,
+          total,
+        });
       }
     }
   }
+
+  // Emit event to notify frontend that changes are complete
+  let _ = app.emit("change-complete", stats);
 
   Ok(())
 }
@@ -1195,6 +1266,202 @@ fn search_candidates(
   candidates = score_candidates(candidates, &title, author.as_deref());
   candidates.truncate(5);
   Ok(candidates)
+}
+
+// OperationProgress and OperationProgress are replaced by OperationProgress
+// defined earlier in the file for consistency across all operations.
+
+#[tauri::command]
+fn enrich_all(app: tauri::AppHandle) -> Result<(), String> {
+  // Spawn the enrichment in a background thread so UI stays responsive
+  std::thread::spawn(move || {
+    let _ = enrich_all_sync(&app);
+  });
+  Ok(())
+}
+
+// EnrichStats is replaced by OperationStats for consistency
+
+fn enrich_all_sync(app: &tauri::AppHandle) -> Result<OperationStats, String> {
+  use tauri::Emitter;
+
+  let conn = open_db(app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+
+  // Find all items that need enrichment:
+  // - No "real" cover (only generated text covers or no cover at all)
+  // - OR missing published_year
+  // - OR no authors
+  let mut stmt = conn
+    .prepare(
+      "SELECT DISTINCT items.id, items.title, \
+       GROUP_CONCAT(DISTINCT authors.name) as authors, \
+       (SELECT value FROM identifiers WHERE item_id = items.id AND type IN ('ISBN13', 'ISBN10') LIMIT 1) as isbn, \
+       (SELECT COUNT(*) FROM covers WHERE item_id = items.id AND source != 'generated') as real_cover_count, \
+       (SELECT COUNT(*) FROM item_authors WHERE item_id = items.id) as author_count \
+       FROM items \
+       LEFT JOIN item_authors ON item_authors.item_id = items.id \
+       LEFT JOIN authors ON authors.id = item_authors.author_id \
+       LEFT JOIN files ON files.item_id = items.id AND files.status = 'active' \
+       WHERE files.id IS NOT NULL \
+       GROUP BY items.id \
+       HAVING real_cover_count = 0 OR author_count = 0 OR items.published_year IS NULL"
+    )
+    .map_err(|err| err.to_string())?;
+
+  let items: Vec<(String, Option<String>, Option<String>, Option<String>)> = stmt
+    .query_map(params![], |row| {
+      Ok((
+        row.get::<_, String>(0)?,
+        row.get::<_, Option<String>>(1)?,
+        row.get::<_, Option<String>>(2)?,
+        row.get::<_, Option<String>>(3)?,
+      ))
+    })
+    .map_err(|err| err.to_string())?
+    .filter_map(|r| r.ok())
+    .collect();
+
+  let total = items.len();
+  let mut stats = OperationStats {
+    total,
+    processed: 0,
+    skipped: 0,
+    errors: 0,
+  };
+
+  log::info!("Starting batch enrichment for {} items", total);
+
+  for (idx, (item_id, title, authors, isbn)) in items.into_iter().enumerate() {
+    // Emit progress: searching
+    let _ = app.emit("enrich-progress", OperationProgress {
+      item_id: item_id.clone(),
+      status: "processing".to_string(),
+      message: Some("Searching...".to_string()),
+      current: idx + 1,
+      total,
+    });
+
+    // Try to find candidates
+    let mut candidates: Vec<EnrichmentCandidate> = vec![];
+
+    // First try ISBN if available
+    if let Some(ref isbn_val) = isbn {
+      candidates.extend(fetch_openlibrary_isbn(isbn_val));
+      if candidates.is_empty() {
+        candidates.extend(fetch_google_isbn(isbn_val));
+      }
+    }
+
+    // If no ISBN results, try title search
+    if candidates.is_empty() {
+      if let Some(ref title_val) = title {
+        let author = authors.as_ref().and_then(|a| a.split(',').next());
+        candidates.extend(fetch_openlibrary_search(title_val, author));
+        if candidates.is_empty() {
+          candidates.extend(fetch_google_search(title_val, author));
+        }
+      }
+    }
+
+    // Score and sort candidates - prefer those with covers
+    candidates.sort_by(|a, b| {
+      // Prefer candidates with cover URLs
+      let a_has_cover = a.cover_url.is_some() as i32;
+      let b_has_cover = b.cover_url.is_some() as i32;
+      if a_has_cover != b_has_cover {
+        return b_has_cover.cmp(&a_has_cover);
+      }
+      // Then by confidence
+      b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Take the best candidate
+    let best = candidates.into_iter().next();
+
+    match best {
+      Some(candidate) => {
+        // Emit progress: applying
+        let _ = app.emit("enrich-progress", OperationProgress {
+          item_id: item_id.clone(),
+          status: "processing".to_string(),
+          message: candidate.title.clone(),
+          current: idx + 1,
+          total,
+        });
+
+        // Apply the candidate
+        match apply_enrichment_for_batch(app, &conn, &item_id, &candidate, now) {
+          Ok(()) => {
+            stats.processed += 1;
+            let _ = app.emit("enrich-progress", OperationProgress {
+              item_id: item_id.clone(),
+              status: "done".to_string(),
+              message: candidate.title,
+              current: idx + 1,
+              total,
+            });
+          }
+          Err(err) => {
+            stats.errors += 1;
+            log::warn!("Failed to apply enrichment for {}: {}", item_id, err);
+            let _ = app.emit("enrich-progress", OperationProgress {
+              item_id: item_id.clone(),
+              status: "error".to_string(),
+              message: Some(err),
+              current: idx + 1,
+              total,
+            });
+          }
+        }
+      }
+      None => {
+        stats.skipped += 1;
+        let _ = app.emit("enrich-progress", OperationProgress {
+          item_id: item_id.clone(),
+          status: "skipped".to_string(),
+          message: Some("No matches found".to_string()),
+          current: idx + 1,
+          total,
+        });
+      }
+    }
+
+    // Small delay to avoid rate limiting
+    std::thread::sleep(std::time::Duration::from_millis(200));
+  }
+
+  log::info!("Batch enrichment complete: {:?}", stats);
+  let _ = app.emit("enrich-complete", stats.clone());
+  Ok(stats)
+}
+
+fn apply_enrichment_for_batch(
+  app: &tauri::AppHandle,
+  conn: &Connection,
+  item_id: &str,
+  candidate: &EnrichmentCandidate,
+  now: i64,
+) -> Result<(), String> {
+  apply_enrichment_candidate(app, conn, item_id, candidate, now)?;
+  let _ = queue_epub_changes(conn, item_id, candidate, now);
+
+  // Try to fetch cover
+  let mut cover_fetched = false;
+  if let Some(url) = candidate.cover_url.as_deref() {
+    cover_fetched = fetch_cover_from_url(app, conn, item_id, url, now).unwrap_or(false);
+  }
+  if !cover_fetched {
+    let _ = fetch_cover_fallback(app, conn, item_id, now);
+  }
+
+  conn.execute(
+    "UPDATE issues SET resolved_at = ?1 WHERE item_id = ?2 AND type = 'missing_metadata' AND resolved_at IS NULL",
+    params![now, item_id],
+  )
+  .map_err(|err| err.to_string())?;
+
+  Ok(())
 }
 
 #[tauri::command]
@@ -2711,8 +2978,29 @@ fn fetch_cover_from_url(
     return Ok(false);
   }
 
-  save_cover(app, conn, item_id, bytes, extension, now, "candidate", Some(url))?;
+  save_cover(app, conn, item_id, bytes.clone(), extension, now, "candidate", Some(url))?;
   log::info!("cover saved successfully for item {}", item_id);
+
+  // Also embed the cover into the EPUB file itself
+  let epub_path: Option<String> = conn
+    .query_row(
+      "SELECT path FROM files WHERE item_id = ?1 AND extension = '.epub' AND status = 'active' LIMIT 1",
+      params![item_id],
+      |row| row.get(0),
+    )
+    .optional()
+    .map_err(|err| err.to_string())?;
+
+  if let Some(path) = epub_path {
+    let epub_file = std::path::Path::new(&path);
+    if epub_file.exists() {
+      match crate::parser::epub::write_epub_cover(epub_file, &bytes, extension) {
+        Ok(()) => log::info!("embedded cover into EPUB: {}", path),
+        Err(err) => log::warn!("failed to embed cover into EPUB {}: {}", path, err),
+      }
+    }
+  }
+
   Ok(true)
 }
 
@@ -2771,7 +3059,28 @@ fn fetch_cover_fallback(
   }
 
   log::info!("cover fetched from Open Library: {} ({} bytes)", url, bytes.len());
-  save_cover(app, conn, item_id, bytes, extension, now, "openlibrary", Some(&url))?;
+  save_cover(app, conn, item_id, bytes.clone(), extension, now, "openlibrary", Some(&url))?;
+
+  // Also embed the cover into the EPUB file itself
+  let epub_path: Option<String> = conn
+    .query_row(
+      "SELECT path FROM files WHERE item_id = ?1 AND extension = '.epub' AND status = 'active' LIMIT 1",
+      params![item_id],
+      |row| row.get(0),
+    )
+    .optional()
+    .map_err(|err| err.to_string())?;
+
+  if let Some(path) = epub_path {
+    let epub_file = std::path::Path::new(&path);
+    if epub_file.exists() {
+      match crate::parser::epub::write_epub_cover(epub_file, &bytes, extension) {
+        Ok(()) => log::info!("embedded cover into EPUB: {}", path),
+        Err(err) => log::warn!("failed to embed cover into EPUB {}: {}", path, err),
+      }
+    }
+  }
+
   Ok(true)
 }
 
@@ -3974,6 +4283,7 @@ pub fn run() {
       get_fix_candidates,
       search_candidates,
       apply_fix_candidate,
+      enrich_all,
       plan_organize,
       apply_organize,
       clear_library,
