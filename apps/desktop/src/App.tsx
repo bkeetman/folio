@@ -880,6 +880,16 @@ function App() {
     }
   }, [enriching]);
 
+  const handleCancelEnrich = useCallback(async () => {
+    if (!isTauri()) return;
+    try {
+      await invoke("cancel_enrich");
+      setScanStatus("Cancelling enrichment...");
+    } catch (error) {
+      console.error("Failed to cancel enrich:", error);
+    }
+  }, []);
+
   const handleClearLibrary = async () => {
     if (!isTauri()) {
       setScanStatus("Clear requires the Tauri desktop runtime.");
@@ -1015,6 +1025,7 @@ function App() {
     if (!isDesktop) return;
     let unlistenProgress: (() => void) | undefined;
     let unlistenComplete: (() => void) | undefined;
+    let unlistenCancelled: (() => void) | undefined;
 
     listen<OperationProgress>("enrich-progress", (event) => {
       console.log("enrich-progress event:", event.payload);
@@ -1047,9 +1058,24 @@ function App() {
       unlistenComplete = stop;
     });
 
+    listen<OperationStats>("enrich-cancelled", (event) => {
+      console.log("enrich-cancelled event:", event.payload);
+      setEnrichProgress(null);
+      setEnriching(false);
+      setEnrichingItems(new Set());
+      setScanStatus(
+        `Enrichment cancelled: ${event.payload.processed} enriched before cancellation.`
+      );
+      // Refresh library to show any new covers from before cancellation
+      void refreshLibrary();
+    }).then((stop) => {
+      unlistenCancelled = stop;
+    });
+
     return () => {
       if (unlistenProgress) unlistenProgress();
       if (unlistenComplete) unlistenComplete();
+      if (unlistenCancelled) unlistenCancelled();
     };
   }, [isDesktop]); // Removed enriching and refreshLibrary from deps to prevent re-registration
 
@@ -1498,6 +1524,7 @@ function App() {
                 selectedSeries={selectedSeries}
                 setSelectedSeries={setSelectedSeries}
                 onEnrichAll={handleEnrichAll}
+                onCancelEnrich={handleCancelEnrich}
                 enriching={enriching}
                 enrichingItems={enrichingItems}
                 enrichProgress={enrichProgress}

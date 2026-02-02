@@ -9,11 +9,15 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
 use tauri::menu::{Menu, MenuItem, Submenu};
 use uuid::Uuid;
 use walkdir::WalkDir;
 use zip::ZipArchive;
+
+/// Global flag to cancel the enrich operation
+static ENRICH_CANCELLED: AtomicBool = AtomicBool::new(false);
 
 pub mod db;
 pub mod models;
@@ -1275,10 +1279,19 @@ fn search_candidates(
 
 #[tauri::command]
 fn enrich_all(app: tauri::AppHandle) -> Result<(), String> {
+  // Reset cancellation flag
+  ENRICH_CANCELLED.store(false, Ordering::SeqCst);
   // Spawn the enrichment in a background thread so UI stays responsive
   std::thread::spawn(move || {
     let _ = enrich_all_sync(&app);
   });
+  Ok(())
+}
+
+#[tauri::command]
+fn cancel_enrich() -> Result<(), String> {
+  log::info!("Cancelling enrich operation");
+  ENRICH_CANCELLED.store(true, Ordering::SeqCst);
   Ok(())
 }
 
@@ -1335,6 +1348,13 @@ fn enrich_all_sync(app: &tauri::AppHandle) -> Result<OperationStats, String> {
   log::info!("Starting batch enrichment for {} items", total);
 
   for (idx, (item_id, title, authors, isbn)) in items.into_iter().enumerate() {
+    // Check for cancellation
+    if ENRICH_CANCELLED.load(Ordering::SeqCst) {
+      log::info!("Enrich operation cancelled at item {}/{}", idx + 1, total);
+      let _ = app.emit("enrich-cancelled", stats.clone());
+      return Ok(stats);
+    }
+
     // Emit progress: searching
     let _ = app.emit("enrich-progress", OperationProgress {
       item_id: item_id.clone(),
@@ -4332,6 +4352,7 @@ pub fn run() {
       search_candidates,
       apply_fix_candidate,
       enrich_all,
+      cancel_enrich,
       plan_organize,
       apply_organize,
       clear_library,

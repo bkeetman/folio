@@ -1,4 +1,4 @@
-import { Filter, Loader2, Sparkles, X } from "lucide-react";
+import { Filter, Sparkles, X } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { LibraryGrid } from "../components/LibraryGrid";
 import { ProgressBar } from "../components/ProgressBar";
@@ -29,6 +29,7 @@ type LibraryViewProps = {
   setSelectedSeries: Dispatch<SetStateAction<string[]>>;
   // Enrichment
   onEnrichAll: () => void;
+  onCancelEnrich: () => void;
   enriching: boolean;
   enrichingItems: Set<string>;
   enrichProgress: OperationProgress | null;
@@ -54,6 +55,7 @@ export function LibraryView({
   selectedSeries,
   setSelectedSeries,
   onEnrichAll,
+  onCancelEnrich,
   enriching,
   enrichingItems,
   enrichProgress,
@@ -120,20 +122,27 @@ export function LibraryView({
       {/* Main Toolbar */}
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 bg-app-bg/95 py-2 backdrop-blur-sm transition-all">
         {isDesktop && (
-          <Button
-            variant="default"
-            size="sm"
-            onClick={onEnrichAll}
-            disabled={enriching}
-            className="mr-2 gap-2 shadow-sm"
-          >
-            {enriching ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
+          enriching ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onCancelEnrich}
+              className="mr-2 gap-2 border-red-300 text-red-600 shadow-sm hover:bg-red-50"
+            >
+              <X size={14} />
+              Cancel
+            </Button>
+          ) : (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={onEnrichAll}
+              className="mr-2 gap-2 shadow-sm"
+            >
               <Sparkles size={14} />
-            )}
-            {enriching ? "Processing..." : "Enrich All"}
-          </Button>
+              Enrich All
+            </Button>
+          )
         )}
 
         <div className="flex h-8 items-center rounded-lg border border-app-border bg-app-surface p-1 shadow-sm">
