@@ -1694,7 +1694,6 @@ function App() {
       <main className="flex h-screen flex-col gap-4 overflow-y-auto px-6 py-4">
         <TopToolbar
           view={view}
-          setView={setView}
           checkForUpdates={checkForUpdates}
           query={query}
           setQuery={setQuery}

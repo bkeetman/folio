@@ -5,7 +5,6 @@ import { Download, LayoutGrid, List, Search } from "lucide-react";
 
 type TopToolbarProps = {
   view: View;
-  setView: Dispatch<SetStateAction<View>>;
   checkForUpdates: (silent: boolean) => void;
   query: string;
   setQuery: Dispatch<SetStateAction<string>>;
@@ -22,7 +21,6 @@ type TopToolbarProps = {
 
 export function TopToolbar({
   view,
-  setView,
   checkForUpdates,
   query,
   setQuery,
