@@ -11,7 +11,7 @@ use std::io::Read;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
-use tauri::menu::{Menu, MenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use uuid::Uuid;
 use walkdir::WalkDir;
 use zip::ZipArchive;
@@ -4617,10 +4617,28 @@ fn resolve_sync_collision(dir: &std::path::Path, filename: &str) -> std::path::P
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let app_menu = |app: &tauri::App| {
+    // Folio menu
     let scan_item = MenuItem::with_id(app, "scan_folder", "Scan Folder", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit Folio", true, None::<&str>)?;
     let folio_menu = Submenu::with_items(app, "Folio", true, &[&scan_item, &quit_item])?;
-    Menu::with_items(app, &[&folio_menu])
+
+    // Edit menu with standard shortcuts (Cmd+C, Cmd+V, etc.)
+    let edit_menu = Submenu::with_items(
+      app,
+      "Edit",
+      true,
+      &[
+        &PredefinedMenuItem::undo(app, None)?,
+        &PredefinedMenuItem::redo(app, None)?,
+        &PredefinedMenuItem::separator(app)?,
+        &PredefinedMenuItem::cut(app, None)?,
+        &PredefinedMenuItem::copy(app, None)?,
+        &PredefinedMenuItem::paste(app, None)?,
+        &PredefinedMenuItem::select_all(app, None)?,
+      ],
+    )?;
+
+    Menu::with_items(app, &[&folio_menu, &edit_menu])
   };
 
   tauri::Builder::default()
