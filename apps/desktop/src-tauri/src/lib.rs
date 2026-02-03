@@ -273,6 +273,122 @@ struct ExtractedMetadata {
   series_index: Option<f64>,
 }
 
+#[derive(Serialize)]
+struct FileItem {
+  id: String,
+  path: String,
+  filename: String,
+  format: String,
+}
+
+#[tauri::command]
+fn get_item_files(app: tauri::AppHandle, item_id: String) -> Result<Vec<FileItem>, String> {
+  let conn = open_db(&app)?;
+  let mut stmt = conn
+    .prepare("SELECT id, path, filename, extension FROM files WHERE item_id = ?1 AND status = 'active'")
+    .map_err(|err| err.to_string())?;
+
+  let rows = stmt
+    .query_map(params![item_id], |row| {
+      Ok(FileItem {
+        id: row.get(0)?,
+        path: row.get(1)?,
+        filename: row.get(2)?,
+        format: row.get::<_, String>(3)?.to_uppercase(),
+      })
+    })
+    .map_err(|err| err.to_string())?;
+
+  let mut files = Vec::new();
+  for row in rows {
+    files.push(row.map_err(|err| err.to_string())?);
+  }
+  Ok(files)
+}
+
+#[tauri::command]
+fn reveal_file(path: String) -> Result<(), String> {
+  #[cfg(target_os = "macos")]
+  {
+    std::process::Command::new("open")
+      .arg("-R")
+      .arg(&path)
+      .spawn()
+      .map_err(|err| err.to_string())?;
+  }
+  #[cfg(target_os = "windows")]
+  {
+    std::process::Command::new("explorer")
+      .arg("/select,")
+      .arg(&path)
+      .spawn()
+      .map_err(|err| err.to_string())?;
+  }
+  #[cfg(target_os = "linux")]
+  {
+     // Simple fallback for linux, opening parent dir
+     let parent = std::path::Path::new(&path).parent().unwrap_or(std::path::Path::new("/"));
+     std::process::Command::new("xdg-open")
+      .arg(parent)
+      .spawn()
+      .map_err(|err| err.to_string())?;
+  }
+  Ok(())
+}
+
+#[tauri::command]
+fn get_item_details(app: tauri::AppHandle, item_id: String) -> Result<ItemMetadata, String> {
+  let conn = open_db(&app)?;
+  let (title, published_year, language, series, series_index, description, isbn) = conn
+    .query_row(
+      "SELECT title, published_year, language, series, series_index, description, \
+       (SELECT value FROM identifiers WHERE item_id = items.id AND type IN ('ISBN10', 'ISBN13') LIMIT 1) as isbn \
+       FROM items WHERE id = ?1",
+      params![item_id],
+      |row| {
+        Ok((
+          row.get(0)?,
+          row.get(1)?,
+          row.get(2)?,
+          row.get(3)?,
+          row.get(4)?,
+          row.get(5)?,
+          row.get(6)?,
+        ))
+      },
+    )
+    .map_err(|err| err.to_string())?;
+
+  let mut stmt = conn
+    .prepare(
+      "SELECT authors.name FROM item_authors \
+       JOIN authors ON authors.id = item_authors.author_id \
+       WHERE item_authors.item_id = ?1 \
+       ORDER BY item_authors.ord",
+    )
+    .map_err(|err| err.to_string())?;
+
+  let author_rows = stmt
+    .query_map(params![item_id], |row| row.get::<_, String>(0))
+    .map_err(|err| err.to_string())?;
+
+  let mut authors = Vec::new();
+  for row in author_rows {
+    authors.push(row.map_err(|err| err.to_string())?);
+  }
+
+  Ok(ItemMetadata {
+    title,
+    authors,
+    published_year,
+    language,
+    isbn,
+    series,
+    series_index,
+    description,
+  })
+}
+
 #[tauri::command]
 fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> {
   let conn = open_db(&app)?;
@@ -349,7 +465,7 @@ fn get_inbox_items(app: tauri::AppHandle) -> Result<Vec<InboxItem>, String> {
   let conn = open_db(&app)?;
   let mut stmt = conn
     .prepare(
-      "SELECT issues.id, COALESCE(items.title, 'Untitled') as title, issues.message \
+      "SELECT items.id, COALESCE(items.title, 'Untitled') as title, issues.message \
        FROM issues \
        LEFT JOIN items ON items.id = issues.item_id \
        WHERE issues.type = 'missing_metadata' AND issues.resolved_at IS NULL \
@@ -1497,7 +1613,7 @@ struct ApplyMetadataProgress {
   total: usize,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ItemMetadata {
   title: Option<String>,
@@ -1635,8 +1751,8 @@ fn save_item_metadata(
           let new_id = uuid::Uuid::new_v4().to_string();
           conn
             .execute(
-              "INSERT INTO authors (id, name, created_at) VALUES (?1, ?2, ?3)",
-              params![new_id, author, now],
+              "INSERT INTO authors (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+              params![new_id, author, now, now],
             )
             .map_err(|err| err.to_string())?;
           new_id
@@ -1665,10 +1781,11 @@ fn save_item_metadata(
 
       // Add new ISBN
       let isbn_type = if isbn.len() == 13 { "isbn13" } else { "isbn10" };
+      let identifier_id = uuid::Uuid::new_v4().to_string();
       conn
         .execute(
-          "INSERT INTO identifiers (item_id, type, value) VALUES (?1, ?2, ?3)",
-          params![item_id, isbn_type, isbn],
+          "INSERT INTO identifiers (id, item_id, type, value, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+          params![identifier_id, item_id, isbn_type, isbn, now],
         )
         .map_err(|err| err.to_string())?;
     }
@@ -2292,6 +2409,26 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
   let _ = app.emit("scan-complete", &stats);
 
   Ok(stats)
+}
+
+#[tauri::command]
+fn upload_cover(
+  app: tauri::AppHandle,
+  item_id: String,
+  path: String,
+) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+  let bytes = std::fs::read(&path).map_err(|err| err.to_string())?;
+  let extension = std::path::Path::new(&path)
+    .extension()
+    .and_then(|ext| ext.to_str())
+    .unwrap_or("png")
+    .to_string();
+
+  save_cover(&app, &conn, &item_id, bytes, &extension, now, "manual", None)?;
+
+  Ok(())
 }
 
 fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
@@ -4531,7 +4668,17 @@ pub fn run() {
       remove_from_sync_queue,
       get_sync_queue,
       clear_sync_queue,
-      execute_sync
+      get_sync_queue,
+      clear_sync_queue,
+      execute_sync,
+      get_item_files,
+      get_sync_queue,
+      clear_sync_queue,
+      execute_sync,
+      get_item_files,
+      reveal_file,
+      get_item_details,
+      upload_cover
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
