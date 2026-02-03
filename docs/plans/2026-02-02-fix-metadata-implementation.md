@@ -1,3 +1,427 @@
+# Fix Metadata Page Redesign - Implementation Plan
+
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+
+**Goal:** Redesign Fix Metadata page from single-item queue to full triage workflow with configurable filters, manual editing, and search.
+
+**Architecture:** Three-panel layout (book list | metadata form | search results). Filter logic runs client-side on existing `libraryItems`. New `save_item_metadata` backend command for direct saves.
+
+**Tech Stack:** React, TypeScript, Tailwind CSS, Tauri (Rust backend), SQLite
+
+---
+
+### Task 1: Add FixFilter Type
+
+**Files:**
+- Modify: `apps/desktop/src/types/library.ts`
+
+**Step 1: Add the FixFilter type after LibraryFilter**
+
+Add this type definition after line 12 (after `LibraryFilter`):
+
+```typescript
+export type FixFilter = {
+  missingAuthor: boolean;
+  missingTitle: boolean;
+  missingCover: boolean;
+  missingIsbn: boolean;
+  missingYear: boolean;
+  missingDescription: boolean;
+  missingLanguage: boolean;
+  missingSeries: boolean;
+  includeIssues: boolean;
+};
+```
+
+**Step 2: Add ItemMetadata type for manual saves**
+
+Add after the FixFilter type:
+
+```typescript
+export type ItemMetadata = {
+  title: string | null;
+  authors: string[];
+  publishedYear: number | null;
+  language: string | null;
+  isbn: string | null;
+  series: string | null;
+  seriesIndex: number | null;
+  description: string | null;
+};
+```
+
+**Step 3: Verify build**
+
+Run: `cd apps/desktop && pnpm build`
+Expected: Build succeeds
+
+**Step 4: Commit**
+
+```bash
+git add apps/desktop/src/types/library.ts
+git commit -m "feat(fix-metadata): add FixFilter and ItemMetadata types"
+```
+
+---
+
+### Task 2: Add save_item_metadata Backend Command
+
+**Files:**
+- Modify: `apps/desktop/src-tauri/src/lib.rs`
+
+**Step 1: Add ItemMetadata struct**
+
+Add after the `ApplyMetadataProgress` struct (around line 1498):
+
+```rust
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ItemMetadata {
+  title: Option<String>,
+  authors: Vec<String>,
+  published_year: Option<i64>,
+  language: Option<String>,
+  isbn: Option<String>,
+  series: Option<String>,
+  series_index: Option<f64>,
+  description: Option<String>,
+}
+```
+
+**Step 2: Add save_item_metadata command**
+
+Add after the `apply_fix_candidate` function (around line 1580):
+
+```rust
+#[tauri::command]
+fn save_item_metadata(
+  app: tauri::AppHandle,
+  item_id: String,
+  metadata: ItemMetadata,
+) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+  log::info!("saving manual metadata for item {}: {:?}", item_id, metadata.title);
+
+  // Update items table
+  conn.execute(
+    "UPDATE items SET title = ?1, published_year = ?2, language = ?3, series = ?4, series_index = ?5, description = ?6, updated_at = ?7 WHERE id = ?8",
+    params![
+      metadata.title,
+      metadata.published_year,
+      metadata.language,
+      metadata.series,
+      metadata.series_index,
+      metadata.description,
+      now,
+      item_id
+    ],
+  )
+  .map_err(|err| err.to_string())?;
+
+  // Update authors
+  if !metadata.authors.is_empty() {
+    conn
+      .execute("DELETE FROM item_authors WHERE item_id = ?1", params![item_id])
+      .map_err(|err| err.to_string())?;
+
+    for author in &metadata.authors {
+      let author_id: Option<String> = conn
+        .query_row(
+          "SELECT id FROM authors WHERE name = ?1",
+          params![author],
+          |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+
+      let author_id = match author_id {
+        Some(id) => id,
+        None => {
+          let new_id = uuid::Uuid::new_v4().to_string();
+          conn
+            .execute(
+              "INSERT INTO authors (id, name, created_at) VALUES (?1, ?2, ?3)",
+              params![new_id, author, now],
+            )
+            .map_err(|err| err.to_string())?;
+          new_id
+        }
+      };
+
+      conn
+        .execute(
+          "INSERT OR IGNORE INTO item_authors (item_id, author_id) VALUES (?1, ?2)",
+          params![item_id, author_id],
+        )
+        .map_err(|err| err.to_string())?;
+    }
+  }
+
+  // Update ISBN in identifiers table
+  if let Some(isbn) = &metadata.isbn {
+    if !isbn.is_empty() {
+      // Remove old ISBN
+      conn
+        .execute(
+          "DELETE FROM identifiers WHERE item_id = ?1 AND type IN ('isbn10', 'isbn13')",
+          params![item_id],
+        )
+        .map_err(|err| err.to_string())?;
+
+      // Add new ISBN
+      let isbn_type = if isbn.len() == 13 { "isbn13" } else { "isbn10" };
+      conn
+        .execute(
+          "INSERT INTO identifiers (item_id, type, value) VALUES (?1, ?2, ?3)",
+          params![item_id, isbn_type, isbn],
+        )
+        .map_err(|err| err.to_string())?;
+    }
+  }
+
+  // Mark issues as resolved
+  conn.execute(
+    "UPDATE issues SET resolved_at = ?1 WHERE item_id = ?2 AND resolved_at IS NULL",
+    params![now, item_id],
+  )
+  .map_err(|err| err.to_string())?;
+
+  Ok(())
+}
+```
+
+**Step 3: Register the command**
+
+Find the `invoke_handler` macro (around line 4390) and add `save_item_metadata` to the list:
+
+```rust
+save_item_metadata,
+```
+
+Add it after `apply_fix_candidate`.
+
+**Step 4: Verify build**
+
+Run: `cd apps/desktop/src-tauri && cargo check`
+Expected: Build succeeds
+
+**Step 5: Commit**
+
+```bash
+git add apps/desktop/src-tauri/src/lib.rs
+git commit -m "feat(fix-metadata): add save_item_metadata backend command"
+```
+
+---
+
+### Task 3: Add Fix Metadata State to App.tsx
+
+**Files:**
+- Modify: `apps/desktop/src/App.tsx`
+
+**Step 1: Import new types**
+
+Update the import from `./types/library` (around line 24) to include:
+
+```typescript
+import type {
+  // ... existing imports ...
+  FixFilter,
+  ItemMetadata,
+} from "./types/library";
+```
+
+**Step 2: Add default filter constant**
+
+Add after the `sampleFixCandidates` constant (around line 197):
+
+```typescript
+const DEFAULT_FIX_FILTER: FixFilter = {
+  missingAuthor: true,
+  missingTitle: true,
+  missingCover: true,
+  missingIsbn: false,
+  missingYear: false,
+  missingDescription: false,
+  missingLanguage: false,
+  missingSeries: false,
+  includeIssues: true,
+};
+```
+
+**Step 3: Add state variables**
+
+Add after the existing state declarations (around line 264, after `selectedSeries`):
+
+```typescript
+// Fix Metadata state
+const [fixFilter, setFixFilter] = useState<FixFilter>(() => {
+  const saved = localStorage.getItem("folio-fix-filter");
+  return saved ? JSON.parse(saved) : DEFAULT_FIX_FILTER;
+});
+const [selectedFixItemId, setSelectedFixItemId] = useState<string | null>(null);
+const [fixFormData, setFixFormData] = useState<ItemMetadata | null>(null);
+const [fixSearchQuery, setFixSearchQuery] = useState("");
+const [fixSaving, setFixSaving] = useState(false);
+```
+
+**Step 4: Add fixFilter persistence effect**
+
+Add after the existing useEffect blocks (around line 590):
+
+```typescript
+// Persist fix filter to localStorage
+useEffect(() => {
+  localStorage.setItem("folio-fix-filter", JSON.stringify(fixFilter));
+}, [fixFilter]);
+```
+
+**Step 5: Add booksNeedingFix useMemo**
+
+Add after the `uniqueSeries` useMemo (around line 363):
+
+```typescript
+// Books needing metadata fixes based on filter
+const booksNeedingFix = useMemo(() => {
+  return libraryItems.filter((item) => {
+    if (fixFilter.missingAuthor && item.authors.length === 0) return true;
+    if (fixFilter.missingTitle && !item.title) return true;
+    if (fixFilter.missingCover && !item.cover_path) return true;
+    // For ISBN, we'd need to check identifiers - skip for now, handled by issues
+    if (fixFilter.missingYear && !item.published_year) return true;
+    if (fixFilter.missingLanguage && !item.language) return true;
+    if (fixFilter.missingSeries && !item.series) return true;
+    // includeIssues handled separately via inbox
+    return false;
+  });
+}, [libraryItems, fixFilter]);
+
+// Combine with inbox items if includeIssues is true
+const allFixItems = useMemo(() => {
+  const fixItemIds = new Set(booksNeedingFix.map((item) => item.id));
+  const issueItemIds = fixFilter.includeIssues ? new Set(inbox.map((item) => item.id)) : new Set();
+
+  // Merge: library items that need fixing + inbox items not already in the list
+  const result = [...booksNeedingFix];
+  if (fixFilter.includeIssues) {
+    inbox.forEach((inboxItem) => {
+      if (!fixItemIds.has(inboxItem.id)) {
+        // Find the full library item if it exists
+        const libraryItem = libraryItems.find((li) => li.id === inboxItem.id);
+        if (libraryItem) {
+          result.push(libraryItem);
+        }
+      }
+    });
+  }
+  return result;
+}, [booksNeedingFix, inbox, fixFilter.includeIssues, libraryItems]);
+```
+
+**Step 6: Add handleSaveItemMetadata callback**
+
+Add after `handleMatchApply` (around line 1282):
+
+```typescript
+const handleSaveItemMetadata = useCallback(
+  async (itemId: string, metadata: ItemMetadata) => {
+    if (!isTauri()) return;
+    setFixSaving(true);
+    try {
+      await invoke("save_item_metadata", { itemId, metadata });
+      setScanStatus("Metadata saved.");
+      await refreshLibrary();
+      // Auto-select next item if current one is no longer in list
+      const stillInList = allFixItems.some((item) => item.id === itemId);
+      if (!stillInList && allFixItems.length > 0) {
+        const nextItem = allFixItems.find((item) => item.id !== itemId);
+        if (nextItem) {
+          setSelectedFixItemId(nextItem.id);
+        } else {
+          setSelectedFixItemId(null);
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setScanStatus(`Could not save metadata: ${message}`);
+    } finally {
+      setFixSaving(false);
+    }
+  },
+  [refreshLibrary, allFixItems]
+);
+```
+
+**Step 7: Update FixView props**
+
+Find where FixView is rendered (around line 1600) and replace the entire block:
+
+```typescript
+{view === "fix" ? (
+  <FixView
+    items={allFixItems}
+    inboxItems={inbox}
+    selectedItemId={selectedFixItemId}
+    setSelectedItemId={setSelectedFixItemId}
+    fixFilter={fixFilter}
+    setFixFilter={setFixFilter}
+    formData={fixFormData}
+    setFormData={setFixFormData}
+    searchQuery={fixSearchQuery}
+    setSearchQuery={setFixSearchQuery}
+    searchLoading={fixLoading}
+    searchCandidates={fixCandidates}
+    onSearch={handleFetchCandidates}
+    onSearchWithQuery={async (query: string) => {
+      if (!selectedFixItemId || !isTauri()) return;
+      setFixLoading(true);
+      try {
+        const candidates = await invoke<EnrichmentCandidate[]>("search_candidates", {
+          query,
+          itemId: selectedFixItemId,
+        });
+        setFixCandidates(candidates);
+      } catch {
+        setScanStatus("Could not search metadata sources.");
+        setFixCandidates([]);
+      } finally {
+        setFixLoading(false);
+      }
+    }}
+    onApplyCandidate={handleApplyCandidate}
+    onSaveMetadata={handleSaveItemMetadata}
+    saving={fixSaving}
+    getCandidateCoverUrl={getCandidateCoverUrl}
+    isDesktop={isDesktop}
+  />
+) : null}
+```
+
+**Step 8: Verify build**
+
+Run: `cd apps/desktop && pnpm build`
+Expected: Build fails (FixView props don't match yet - expected)
+
+**Step 9: Commit**
+
+```bash
+git add apps/desktop/src/App.tsx
+git commit -m "feat(fix-metadata): add state management and handlers for new FixView"
+```
+
+---
+
+### Task 4: Rewrite FixView Component
+
+**Files:**
+- Modify: `apps/desktop/src/sections/FixView.tsx`
+
+**Step 1: Replace entire file**
+
+Replace the entire contents of `FixView.tsx` with:
+
+```typescript
 import { BookOpen, Image, User, AlertTriangle, ChevronDown, Search, Save, Loader2 } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect } from "react";
@@ -87,10 +511,10 @@ export function FixView({
       authors: item.authors,
       publishedYear: item.published_year,
       language: item.language ?? null,
-      isbn: null,
+      isbn: null, // Would need to fetch from identifiers
       series: item.series ?? null,
       seriesIndex: item.series_index ?? null,
-      description: null,
+      description: null, // Would need to fetch
     });
     setSearchQuery(item.title ?? "");
   }, [selectedItemId, items, setFormData, setSearchQuery]);
@@ -470,3 +894,171 @@ function FilterCheckbox({
     </label>
   );
 }
+```
+
+**Step 2: Verify build**
+
+Run: `cd apps/desktop && pnpm build`
+Expected: Build succeeds
+
+**Step 3: Commit**
+
+```bash
+git add apps/desktop/src/sections/FixView.tsx
+git commit -m "feat(fix-metadata): rewrite FixView with three-panel layout"
+```
+
+---
+
+### Task 5: Fix Remaining App.tsx Integration
+
+**Files:**
+- Modify: `apps/desktop/src/App.tsx`
+
+**Step 1: Fix handleFetchCandidates to use selectedFixItemId**
+
+Find `handleFetchCandidates` (around line 1165) and update it:
+
+```typescript
+const handleFetchCandidates = async () => {
+  const itemId = selectedFixItemId;
+  if (!itemId) return;
+  if (!isTauri()) {
+    setFixCandidates([]);
+    return;
+  }
+  setFixLoading(true);
+  try {
+    const candidates = await invoke<EnrichmentCandidate[]>(
+      "get_fix_candidates",
+      { itemId }
+    );
+    setFixCandidates(candidates);
+  } catch {
+    setScanStatus("Could not fetch enrichment candidates.");
+  } finally {
+    setFixLoading(false);
+  }
+};
+```
+
+**Step 2: Fix handleApplyCandidate to use selectedFixItemId**
+
+Find `handleApplyCandidate` (around line 1187) and update it:
+
+```typescript
+const handleApplyCandidate = async (candidate: EnrichmentCandidate) => {
+  const itemId = selectedFixItemId;
+  if (!itemId || !isTauri()) return;
+  try {
+    await invoke("apply_fix_candidate", {
+      itemId,
+      candidate,
+    });
+    const queued = await refreshPendingChanges();
+    setScanStatus(
+      queued > 0
+        ? `Metadata updated. ${queued} file changes queued.`
+        : "Metadata updated."
+    );
+    await refreshLibrary();
+    setFixCandidates([]);
+    // Auto-select next item
+    const stillInList = allFixItems.some((item) => item.id === itemId);
+    if (!stillInList && allFixItems.length > 0) {
+      const nextItem = allFixItems.find((item) => item.id !== itemId);
+      if (nextItem) {
+        setSelectedFixItemId(nextItem.id);
+      }
+    }
+  } catch {
+    setScanStatus("Could not apply metadata.");
+  }
+};
+```
+
+**Step 3: Add allFixItems to handleApplyCandidate dependencies**
+
+Make sure `allFixItems` and `selectedFixItemId` are in scope for both handlers.
+
+**Step 4: Verify build**
+
+Run: `cd apps/desktop && pnpm build`
+Expected: Build succeeds
+
+**Step 5: Run the app and test**
+
+Run: `cd apps/desktop && pnpm dev:tauri`
+
+Test:
+1. Navigate to Fix Metadata page
+2. Verify book list appears on left
+3. Select a book, verify form populates
+4. Edit fields and click Save
+5. Use Search and verify results appear
+6. Apply a result and verify book updates
+
+**Step 6: Commit**
+
+```bash
+git add apps/desktop/src/App.tsx
+git commit -m "feat(fix-metadata): integrate new FixView with App state"
+```
+
+---
+
+### Task 6: Final Polish and Testing
+
+**Step 1: Test all filter combinations**
+
+- Toggle each filter checkbox
+- Verify book list updates correctly
+- Verify filter persists after page refresh
+
+**Step 2: Test empty state**
+
+- With strict filters that match no books
+- Verify "All books have complete metadata!" message shows
+
+**Step 3: Test manual save flow**
+
+- Edit metadata manually
+- Save changes
+- Verify book data updates in database
+- Verify book disappears from list if it now passes filter
+
+**Step 4: Test search and apply flow**
+
+- Select book with bad metadata
+- Edit search query
+- Click Search
+- Apply a result
+- Verify metadata updates
+
+**Step 5: Final commit**
+
+```bash
+git add -A
+git commit -m "feat(fix-metadata): complete redesign with triage workflow
+
+- Three-panel layout: book list, metadata form, search results
+- Configurable filters for what counts as 'needs fixing'
+- Manual metadata editing with direct save
+- Search with editable query
+- Auto-advance to next book after fixing"
+```
+
+---
+
+## Verification Checklist
+
+- [ ] Build succeeds: `pnpm build`
+- [ ] App starts: `pnpm dev:tauri`
+- [ ] Book list shows filtered items
+- [ ] Filter dropdown works and persists
+- [ ] Selecting book populates form
+- [ ] Manual edit + Save works
+- [ ] Search returns results
+- [ ] Apply result updates metadata
+- [ ] Book disappears from list when fixed
+- [ ] Empty state shows when all fixed

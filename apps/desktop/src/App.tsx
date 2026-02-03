@@ -9,6 +9,7 @@ import { ScanProgressBar } from "./components/ProgressBar";
 import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
 import { TAG_COLORS } from "./lib/tagColors";
 import { AuthorsView } from "./sections/AuthorsView";
+import { BookEditView } from "./sections/BookEditView";
 import { ChangesView } from "./sections/ChangesView";
 import { DuplicatesView } from "./sections/DuplicatesView";
 import { EReaderView } from "./sections/EReaderView";
@@ -16,18 +17,22 @@ import { FixView } from "./sections/FixView";
 import { InboxView } from "./sections/InboxView";
 import { Inspector } from "./sections/Inspector";
 import { LibraryView } from "./sections/LibraryView";
+import { OrganizerView } from "./sections/OrganizerView"; // Re-adding import
 import { SeriesView } from "./sections/SeriesView";
 import { Sidebar } from "./sections/Sidebar";
 import { StatusBar } from "./sections/StatusBar";
 import { TagsView } from "./sections/TagsView";
 import { TopToolbar } from "./sections/TopToolbar";
 import type {
+  ActivityLogItem,
   Author,
   DuplicateGroup,
   EnrichmentCandidate,
   EReaderBook,
   EReaderDevice,
+  FixFilter,
   InboxItem,
+  ItemMetadata,
   LibraryFilter,
   LibraryHealth,
   LibraryItem,
@@ -40,7 +45,7 @@ import type {
   SyncProgress,
   SyncQueueItem,
   Tag,
-  View,
+  View
 } from "./types/library";
 
 const sampleBooks = [
@@ -126,26 +131,7 @@ const duplicateGroups = [
   },
 ];
 
-const samplePendingChanges: PendingChange[] = [
-  {
-    id: "pc1",
-    file_id: "f1",
-    change_type: "rename",
-    from_path: "/samples/Old Name.epub",
-    to_path: "/samples/New Name.epub",
-    status: "pending",
-    created_at: Date.now(),
-  },
-  {
-    id: "pc2",
-    file_id: "f2",
-    change_type: "epub_meta",
-    from_path: "/samples/Book.epub",
-    changes_json: "{\"title\":\"New Title\",\"author\":\"New Author\"}",
-    status: "pending",
-    created_at: Date.now(),
-  },
-];
+
 
 const sampleFixCandidates: EnrichmentCandidate[] = [
   {
@@ -197,6 +183,8 @@ const sampleFixCandidates: EnrichmentCandidate[] = [
 
 function App() {
   const [view, setView] = useState<View>("library-books");
+  const [previousView, setPreviousView] = useState<View>("library-books");
+  const [activityLog, setActivityLog] = useState<ActivityLogItem[]>([]); // New State
   const [grid, setGrid] = useState(true);
   const [query, setQuery] = useState("");
   const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>("all");
@@ -233,6 +221,24 @@ function App() {
   } | null>(null);
   const [matchQuery, setMatchQuery] = useState("");
   const [coverRefreshToken, setCoverRefreshToken] = useState(0);
+
+
+  // Fix View State
+  const [fixFilter, setFixFilter] = useState<FixFilter>({
+    missingAuthor: true,
+    missingTitle: true,
+    missingCover: true,
+    missingIsbn: true,
+    missingYear: true,
+    missingLanguage: true,
+    missingSeries: true,
+    missingDescription: true,
+    includeIssues: false,
+  });
+  const [selectedFixItemId, setSelectedFixItemId] = useState<string | null>(null);
+  const [fixFormData, setFixFormData] = useState<ItemMetadata | null>(null);
+  const [fixSearchQuery, setFixSearchQuery] = useState("");
+  const [fixSaving, setFixSaving] = useState(false);
   const [coverOverrides, setCoverOverrides] = useState<Record<string, string | null>>({});
   const coverOverrideRef = useRef<Record<string, string | null>>({});
   const [libraryHealth, setLibraryHealth] = useState<LibraryHealth | null>(null);
@@ -360,6 +366,37 @@ function App() {
       .map(([name, bookCount]) => ({ name, bookCount }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [libraryItems]);
+
+  // Books needing metadata fixes based on filter
+  const booksNeedingFix = useMemo(() => {
+    return libraryItems.filter((item) => {
+      if (fixFilter.missingAuthor && item.authors.length === 0) return true;
+      if (fixFilter.missingTitle && !item.title) return true;
+      if (fixFilter.missingCover && !item.cover_path) return true;
+      if (fixFilter.missingYear && !item.published_year) return true;
+      if (fixFilter.missingLanguage && !item.language) return true;
+      if (fixFilter.missingSeries && !item.series) return true;
+      return false;
+    });
+  }, [libraryItems, fixFilter]);
+
+  // Combine with inbox items if includeIssues is true
+  const allFixItems = useMemo(() => {
+    const fixItemIds = new Set(booksNeedingFix.map((item) => item.id));
+
+    const result = [...booksNeedingFix];
+    if (fixFilter.includeIssues) {
+      inbox.forEach((inboxItem) => {
+        if (!fixItemIds.has(inboxItem.id)) {
+          const libraryItem = libraryItems.find((li) => li.id === inboxItem.id);
+          if (libraryItem) {
+            result.push(libraryItem);
+          }
+        }
+      });
+    }
+    return result;
+  }, [booksNeedingFix, inbox, fixFilter.includeIssues, libraryItems]);
 
   useEffect(() => {
     if (!isDesktop) return;
@@ -493,9 +530,9 @@ function App() {
     }
   }, [newTagName, newTagColor, refreshTags]);
 
-  const fetchCoverOverride = useCallback(async (itemId: string) => {
+  const fetchCoverOverride = useCallback(async (itemId: string, force = false) => {
     if (!isTauri()) return;
-    if (typeof coverOverrideRef.current[itemId] === "string") return;
+    if (!force && typeof coverOverrideRef.current[itemId] === "string") return;
     try {
       const result = await invoke<{ mime: string; bytes: number[] } | null>(
         "get_cover_blob",
@@ -966,6 +1003,15 @@ function App() {
       setScanStatus(
         `Scan complete: ${event.payload.added} added, ${event.payload.updated} updated, ${event.payload.moved} moved.`
       );
+      setActivityLog((prev) => [
+        {
+          id: `scan-${Date.now()}`,
+          type: "scan",
+          message: `Scanned: ${event.payload.added} new, ${event.payload.updated} updated`,
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
     }).then((stop) => {
       unlistenComplete = stop;
     });
@@ -975,6 +1021,15 @@ function App() {
       setScanProgress(null);
       setScanning(false);
       setScanStatus(`Scan failed: ${event.payload}`);
+      setActivityLog((prev) => [
+        {
+          id: `scan-err-${Date.now()}`,
+          type: "error",
+          message: `Scan failed: ${event.payload}`,
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
     }).then((stop) => {
       unlistenError = stop;
     });
@@ -1003,12 +1058,21 @@ function App() {
     listen<{ added: number; removed: number; imported: number; errors: string[] }>("sync-complete", (event) => {
       setEreaderSyncProgress(null);
       setEreaderSyncing(false);
-      const parts = [];
+      const parts: string[] = [];
       if (event.payload.added > 0) parts.push(`${event.payload.added} added`);
       if (event.payload.removed > 0) parts.push(`${event.payload.removed} removed`);
       if (event.payload.imported > 0) parts.push(`${event.payload.imported} imported`);
       if (event.payload.errors.length > 0) parts.push(`${event.payload.errors.length} errors`);
       setScanStatus(`Sync complete: ${parts.join(", ")}`);
+      setActivityLog((prev) => [
+        {
+          id: `sync-${Date.now()}`,
+          type: "sync",
+          message: `Synced: ${parts.join(", ")}`,
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
       setEreaderSyncDialogOpen(false);
       // Refresh the queue
       if (selectedEreaderDeviceId) {
@@ -1058,6 +1122,15 @@ function App() {
       setScanStatus(
         `Enrichment complete: ${event.payload.processed} enriched, ${event.payload.skipped} skipped, ${event.payload.errors} errors.`
       );
+      setActivityLog((prev) => [
+        {
+          id: `enrich-${Date.now()}`,
+          type: "enrich",
+          message: `Enriched ${event.payload.processed} items`,
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
       // Refresh library to show new covers
       void refreshLibrary();
     }).then((stop) => {
@@ -1159,11 +1232,7 @@ function App() {
     };
   }, [isDesktop]);
 
-  const currentFixItem = inbox.length ? inbox[0] : inboxItems[0] ?? null;
-  const candidateList = isDesktop ? fixCandidates : sampleFixCandidates;
-
-  const handleFetchCandidates = async () => {
-    if (!currentFixItem) return;
+  const handleFetchCandidatesForItem = async (itemId: string) => {
     if (!isTauri()) {
       setFixCandidates([]);
       return;
@@ -1172,36 +1241,13 @@ function App() {
     try {
       const candidates = await invoke<EnrichmentCandidate[]>(
         "get_fix_candidates",
-        {
-          itemId: currentFixItem.id,
-        }
+        { itemId }
       );
       setFixCandidates(candidates);
     } catch {
       setScanStatus("Could not fetch enrichment candidates.");
     } finally {
       setFixLoading(false);
-    }
-  };
-
-  const handleApplyCandidate = async (candidate: EnrichmentCandidate) => {
-    if (!currentFixItem || !isTauri()) return;
-    try {
-      await invoke("apply_fix_candidate", {
-        itemId: currentFixItem.id,
-        candidate,
-      });
-      const queued = await refreshPendingChanges();
-      setScanStatus(
-        queued > 0
-          ? `Metadata updated. ${queued} file changes queued.`
-          : "Metadata updated."
-      );
-      await fetchCoverOverride(currentFixItem.id);
-      await refreshLibrary();
-      setFixCandidates([]);
-    } catch {
-      setScanStatus("Could not apply metadata.");
     }
   };
 
@@ -1308,6 +1354,15 @@ function App() {
         plan: organizePlan,
       });
       setOrganizeStatus(`Organized files. Log saved to ${logPath}`);
+      setActivityLog((prev) => [
+        {
+          id: `organize-${Date.now()}`,
+          type: "organize",
+          message: `Organized ${organizePlan.entries.length} items`,
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
       await refreshLibrary();
     } catch {
       setOrganizeStatus("Could not apply organize plan.");
@@ -1488,19 +1543,12 @@ function App() {
         scanning={scanning}
         scanStartedAt={scanStartedAt}
         scanProgress={scanProgress}
-        scanEtaLabel={scanEtaLabel}
-        organizeMode={organizeMode}
-        setOrganizeMode={setOrganizeMode}
-        organizeTemplate={organizeTemplate}
-        setOrganizeTemplate={setOrganizeTemplate}
-        organizePlan={organizePlan}
-        handleApplyOrganize={handleApplyOrganize}
-        handleQueueOrganize={handleQueueOrganize}
-        organizeStatus={organizeStatus}
+
         libraryHealth={libraryHealth}
         handleClearLibrary={handleClearLibrary}
         appVersion={appVersion}
         ereaderConnected={ereaderDevices.some((d) => d.isConnected)}
+        activityLog={activityLog}
       />
 
       <main className="flex h-screen flex-col gap-4 overflow-y-auto px-6 py-4">
@@ -1599,12 +1647,73 @@ function App() {
 
             {view === "fix" ? (
               <FixView
-                currentFixItem={currentFixItem}
-                fixLoading={fixLoading}
-                candidateList={candidateList}
+                items={allFixItems}
+                inboxItems={isDesktop ? inbox : []}
+                selectedItemId={selectedFixItemId}
+                setSelectedItemId={setSelectedFixItemId}
+                fixFilter={fixFilter}
+                setFixFilter={setFixFilter}
+                formData={fixFormData}
+                setFormData={setFixFormData}
+                searchQuery={fixSearchQuery}
+                setSearchQuery={setFixSearchQuery}
+                searchLoading={fixLoading}
+                searchCandidates={fixCandidates}
+                onSearch={() => {
+                  if (!selectedFixItemId) return;
+                  handleFetchCandidatesForItem(selectedFixItemId);
+                }}
+                onSearchWithQuery={async (query: string) => {
+                  if (!selectedFixItemId || !isTauri()) return;
+                  setFixLoading(true);
+                  try {
+                    const candidates = await invoke<EnrichmentCandidate[]>("search_candidates", {
+                      query,
+                      itemId: selectedFixItemId,
+                    });
+                    setFixCandidates(candidates);
+                  } catch {
+                    setScanStatus("Could not search metadata sources.");
+                    setFixCandidates([]);
+                  } finally {
+                    setFixLoading(false);
+                  }
+                }}
+                onApplyCandidate={async (candidate) => {
+                  if (!selectedFixItemId || !isTauri()) return;
+                  try {
+                    await invoke("apply_fix_candidate", {
+                      itemId: selectedFixItemId,
+                      candidate,
+                    });
+                    const queued = await refreshPendingChanges();
+                    setScanStatus(
+                      queued > 0
+                        ? `Metadata updated. ${queued} file changes queued.`
+                        : "Metadata updated."
+                    );
+                    await refreshLibrary();
+                    setFixCandidates([]);
+                  } catch {
+                    setScanStatus("Could not apply metadata.");
+                  }
+                }}
+                onSaveMetadata={async (id, data) => {
+                  if (!isDesktop) return;
+                  setFixSaving(true);
+                  try {
+                    await invoke("save_item_metadata", { itemId: id, metadata: data });
+                    setScanStatus("Metadata saved.");
+                    await refreshLibrary();
+                  } catch (e) {
+                    console.error("Failed to save metadata", e);
+                    setScanStatus("Could not save metadata.");
+                  } finally {
+                    setFixSaving(false);
+                  }
+                }}
+                saving={fixSaving}
                 getCandidateCoverUrl={getCandidateCoverUrl}
-                handleFetchCandidates={handleFetchCandidates}
-                handleApplyCandidate={handleApplyCandidate}
                 isDesktop={isDesktop}
               />
             ) : null}
@@ -1615,7 +1724,7 @@ function App() {
                 setPendingChangesStatus={setPendingChangesStatus}
                 pendingChangesApplying={pendingChangesApplying}
                 pendingChangesLoading={pendingChangesLoading}
-                pendingChanges={isDesktop ? pendingChanges : samplePendingChanges}
+                pendingChanges={pendingChanges}
                 selectedChangeIds={selectedChangeIds}
                 toggleChangeSelection={toggleChangeSelection}
                 handleApplyAllChanges={handleApplyAllChanges}
@@ -1630,6 +1739,34 @@ function App() {
                 changeProgress={changeProgress}
               />
             ) : null}
+
+            {view === "organize" ? (
+              <OrganizerView
+                organizeMode={organizeMode}
+                setOrganizeMode={setOrganizeMode}
+                organizeTemplate={organizeTemplate}
+                setOrganizeTemplate={setOrganizeTemplate}
+                organizePlan={organizePlan}
+                handleApplyOrganize={handleApplyOrganize}
+                handleQueueOrganize={handleQueueOrganize}
+                organizeStatus={organizeStatus}
+              />
+            ) : null}
+
+            {view === "edit" ? (
+              <BookEditView
+                selectedItemId={selectedItemId}
+                libraryItems={libraryItems}
+                setView={setView}
+                previousView={previousView}
+                isDesktop={isDesktop}
+                onItemUpdate={refreshLibrary}
+                coverUrl={selectedItemId ? coverOverrides[selectedItemId] : null}
+                onFetchCover={fetchCoverOverride}
+                onClearCover={clearCoverOverride}
+              />
+            ) : null}
+
 
             {view === "tags" ? (
               <TagsView
@@ -1734,6 +1871,10 @@ function App() {
             };
           })() : null}
           onQueueEreaderAdd={handleQueueEreaderAdd}
+          onNavigateToEdit={() => {
+            setPreviousView(view);
+            setView("edit");
+          }}
         />
       ) : null}
     </div>

@@ -8,7 +8,9 @@ export type View =
   | "fix"
   | "changes"
   | "tags"
-  | "ereader";
+  | "ereader"
+  | "organize"
+  | "edit";
 export type LibraryFilter = "all" | "epub" | "pdf" | "needs-metadata" | "tagged";
 
 export type FixFilter = {
@@ -228,4 +230,18 @@ export type OperationStats = {
   processed: number;
   skipped: number;
   errors: number;
+};
+
+export type ActivityLogItem = {
+  id: string;
+  type: "scan" | "enrich" | "sync" | "organize" | "error";
+  message: string;
+  timestamp: number;
+};
+
+export type FileItem = {
+  id: string;
+  path: string;
+  filename: string;
+  format: string;
 };
