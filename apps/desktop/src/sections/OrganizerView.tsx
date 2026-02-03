@@ -100,34 +100,32 @@ export function OrganizerView({
                     </div>
 
                     <div className="rounded-xl border border-app-border bg-white overflow-hidden shadow-sm">
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left text-sm">
-                                <thead className="bg-app-bg border-b border-app-border text-xs font-semibold uppercase text-app-ink-muted tracking-wider">
-                                    <tr>
-                                        <th className="px-4 py-3">Source</th>
-                                        <th className="px-4 py-3 w-12"></th>
-                                        <th className="px-4 py-3">Target</th>
+                        <table className="w-full text-left text-sm table-fixed">
+                            <thead className="bg-app-bg border-b border-app-border text-xs font-semibold uppercase text-app-ink-muted tracking-wider">
+                                <tr>
+                                    <th className="px-4 py-3 w-[45%]">Source</th>
+                                    <th className="px-4 py-3 w-[10%] text-center"></th>
+                                    <th className="px-4 py-3 w-[45%]">Target</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-app-border/40">
+                                {organizePlan.entries.map((entry, i) => (
+                                    <tr key={i} className="hover:bg-app-bg/30">
+                                        <td className="px-4 py-3" title={entry.source_path}>
+                                            <div className="font-medium text-app-ink truncate">{entry.source_path.split(/[/\\]/).pop()}</div>
+                                            <div className="text-xs text-app-ink-muted/60 truncate">{entry.source_path}</div>
+                                        </td>
+                                        <td className="px-4 py-3 text-center text-app-ink-muted">
+                                            <ArrowRight size={14} className="mx-auto" />
+                                        </td>
+                                        <td className="px-4 py-3" title={entry.target_path}>
+                                            <div className="font-medium text-app-ink truncate">{entry.target_path.split(/[/\\]/).pop()}</div>
+                                            <div className="text-xs text-app-ink-muted/60 truncate">{entry.target_path}</div>
+                                        </td>
                                     </tr>
-                                </thead>
-                                <tbody className="divide-y divide-app-border/40">
-                                    {organizePlan.entries.map((entry, i) => (
-                                        <tr key={i} className="hover:bg-app-bg/30">
-                                            <td className="px-4 py-3 text-app-ink-muted" title={entry.source_path}>
-                                                <div className="font-medium text-app-ink truncate">{entry.source_path.split(/[/\\]/).pop()}</div>
-                                                <div className="text-xs text-app-ink-muted/60 truncate max-w-lg">{entry.source_path}</div>
-                                            </td>
-                                            <td className="px-4 py-3 text-center text-app-ink-muted w-12">
-                                                <ArrowRight size={14} className="mx-auto" />
-                                            </td>
-                                            <td className="px-4 py-3" title={entry.target_path}>
-                                                <div className="font-medium text-app-ink truncate">{entry.target_path.split(/[/\\]/).pop()}</div>
-                                                <div className="text-xs text-app-ink-muted/60 truncate max-w-lg">{entry.target_path}</div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             ) : organizePlan ? (
