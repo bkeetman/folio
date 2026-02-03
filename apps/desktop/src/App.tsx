@@ -1747,6 +1747,7 @@ function App() {
                 organizeTemplate={organizeTemplate}
                 setOrganizeTemplate={setOrganizeTemplate}
                 organizePlan={organizePlan}
+                handlePlanOrganize={handlePlanOrganize}
                 handleApplyOrganize={handleApplyOrganize}
                 handleQueueOrganize={handleQueueOrganize}
                 organizeStatus={organizeStatus}

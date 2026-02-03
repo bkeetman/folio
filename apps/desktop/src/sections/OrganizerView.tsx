@@ -10,6 +10,7 @@ type OrganizerViewProps = {
     organizeTemplate: string;
     setOrganizeTemplate: Dispatch<SetStateAction<string>>;
     organizePlan: OrganizePlan | null;
+    handlePlanOrganize: () => void;
     handleApplyOrganize: () => void;
     handleQueueOrganize: () => void;
     organizeStatus: string | null;
@@ -21,6 +22,7 @@ export function OrganizerView({
     organizeTemplate,
     setOrganizeTemplate,
     organizePlan,
+    handlePlanOrganize,
     handleApplyOrganize,
     handleQueueOrganize,
     organizeStatus,
@@ -79,8 +81,11 @@ export function OrganizerView({
                             {organizeStatus}
                         </span>
                     )}
-                    <Button variant="outline" onClick={handleQueueOrganize}>
+                    <Button variant="outline" onClick={handlePlanOrganize}>
                         Generate Preview
+                    </Button>
+                    <Button variant="outline" onClick={handleQueueOrganize} disabled={!organizePlan?.entries.length}>
+                        Queue Changes
                     </Button>
                     <Button variant="primary" onClick={handleApplyOrganize} disabled={!organizePlan?.entries.length}>
                         Apply Changes
