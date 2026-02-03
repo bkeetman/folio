@@ -109,21 +109,28 @@ export function OrganizerView({
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-app-border/40">
-                                {organizePlan.entries.map((entry, i) => (
-                                    <tr key={i} className="hover:bg-app-bg/30">
-                                        <td className="px-4 py-3" title={entry.source_path}>
-                                            <div className="font-medium text-app-ink truncate">{entry.source_path.split(/[/\\]/).pop()}</div>
-                                            <div className="text-xs text-app-ink-muted/60 truncate">{entry.source_path}</div>
-                                        </td>
-                                        <td className="px-4 py-3 text-center text-app-ink-muted">
-                                            <ArrowRight size={14} className="mx-auto" />
-                                        </td>
-                                        <td className="px-4 py-3" title={entry.target_path}>
-                                            <div className="font-medium text-app-ink truncate">{entry.target_path.split(/[/\\]/).pop()}</div>
-                                            <div className="text-xs text-app-ink-muted/60 truncate">{entry.target_path}</div>
-                                        </td>
-                                    </tr>
-                                ))}
+                                {organizePlan.entries.map((entry, i) => {
+                                    const sourceParts = entry.source_path.split(/[/\\]/);
+                                    const targetParts = entry.target_path.split(/[/\\]/);
+                                    // Show last 2 parts (folder/file) for better context
+                                    const sourceDisplay = sourceParts.slice(-2).join("/");
+                                    const targetDisplay = targetParts.slice(-2).join("/");
+                                    return (
+                                        <tr key={i} className="hover:bg-app-bg/30">
+                                            <td className="px-4 py-3" title={entry.source_path}>
+                                                <div className="font-medium text-app-ink truncate">{sourceDisplay}</div>
+                                                <div className="text-xs text-app-ink-muted/60 truncate">{entry.source_path}</div>
+                                            </td>
+                                            <td className="px-4 py-3 text-center text-app-ink-muted">
+                                                <ArrowRight size={14} className="mx-auto" />
+                                            </td>
+                                            <td className="px-4 py-3" title={entry.target_path}>
+                                                <div className="font-medium text-app-ink truncate">{targetDisplay}</div>
+                                                <div className="text-xs text-app-ink-muted/60 truncate">{entry.target_path}</div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
