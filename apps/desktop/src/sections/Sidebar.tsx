@@ -1,75 +1,45 @@
 import {
-  AlertCircle,
+  AlertTriangle,
   BookOpen,
   Copy,
   FileClock,
+  FolderOpen,
   FolderInput,
   HardDrive,
   Inbox,
   Library,
-  RefreshCw,
-  Search,
   Tag,
   User,
-  Wand,
   Wrench
 } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
-import { useEffect, useState } from "react";
-import { Button, Panel, SidebarItem } from "../components/ui";
+import { Panel, SidebarItem } from "../components/ui";
 import type {
-  ActivityLogItem,
   LibraryHealth,
-  ScanProgress,
   View
 } from "../types/library";
 
 type SidebarProps = {
   view: View;
   setView: Dispatch<SetStateAction<View>>;
-  scanStatus: string | null;
   scanning: boolean;
-  scanStartedAt: number | null;
-  scanProgress: ScanProgress | null;
+  handleScan: () => void;
   libraryHealth: LibraryHealth | null;
   handleClearLibrary: () => void;
   appVersion: string | null;
   ereaderConnected: boolean;
-  activityLog?: ActivityLogItem[];
 };
 
 export function Sidebar({
   view,
   setView,
-  scanStatus,
   scanning,
-  scanStartedAt,
-  scanProgress,
+  handleScan,
   libraryHealth,
   handleClearLibrary,
   appVersion,
   ereaderConnected,
-  activityLog = [],
 }: SidebarProps) {
-  const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!scanning || !scanStartedAt) {
-      return;
-    }
-
-    const updateElapsed = () => {
-      setElapsedSeconds(Math.floor((Date.now() - scanStartedAt) / 1000));
-    };
-
-    const timeoutId = window.setTimeout(updateElapsed, 0);
-    const intervalId = window.setInterval(updateElapsed, 1000);
-    return () => {
-      window.clearTimeout(timeoutId);
-      window.clearInterval(intervalId);
-    };
-  }, [scanning, scanStartedAt]);
-
   return (
     <aside className="flex h-screen flex-col overflow-hidden border-r border-app-border bg-app-surface">
       <div className="flex-none flex items-center gap-3 border-b border-app-border px-4 py-5 bg-app-surface">
@@ -137,6 +107,10 @@ export function Sidebar({
           <div className="text-[11px] font-semibold text-app-ink-muted/70 px-2 py-2 mb-1">
             MAINTENANCE
           </div>
+          <SidebarItem active={scanning} onClick={handleScan}>
+            <FolderOpen size={16} />
+            Add Books
+          </SidebarItem>
           <SidebarItem active={view === "inbox"} onClick={() => setView("inbox")}>
             <Inbox size={16} />
             Inbox
@@ -157,68 +131,19 @@ export function Sidebar({
             <FolderInput size={16} />
             Organizer
           </SidebarItem>
+          <SidebarItem
+            onClick={handleClearLibrary}
+            className="text-red-600 hover:text-red-700"
+          >
+            <AlertTriangle size={16} />
+            <span className="flex flex-col">
+              <span>Clear Library Data</span>
+              <span className="text-[10px] font-normal text-red-500/80">
+                Deletes all items
+              </span>
+            </span>
+          </SidebarItem>
         </nav>
-
-        <Panel title="Activity" className="mb-4">
-          {scanStatus ? (
-            <div className="rounded-md border border-app-border/60 bg-white p-3 shadow-sm mb-2">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-app-ink">{scanStatus}</span>
-                {elapsedSeconds !== null && (
-                  <span className="text-[10px] tabular-nums text-app-ink-muted">{elapsedSeconds}s</span>
-                )}
-              </div>
-
-              {scanProgress && (
-                <div className="space-y-2">
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-app-border/30">
-                    <div
-                      className="h-full rounded-full bg-app-accent transition-[width] duration-300 ease-out"
-                      style={{
-                        width:
-                          scanProgress.total > 0
-                            ? `${Math.min(100, Math.round((scanProgress.processed / scanProgress.total) * 100))}%`
-                            : "10%",
-                      }}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between text-[10px] text-app-ink-muted">
-                    <span>{scanProgress.current ? `Processing: ${scanProgress.current}` : "Preparing..."}</span>
-                    <span className="font-mono">{scanProgress.processed}/{scanProgress.total || "?"}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : null}
-
-          {activityLog.length > 0 ? (
-            <div className="flex flex-col gap-1">
-              {activityLog.slice(0, 5).map((item) => (
-                <div key={item.id} className="flex gap-2 rounded-md px-2 py-1.5 hover:bg-white/50 text-[11px] text-app-ink-muted transition-colors">
-                  <div className="mt-0.5 flex-none text-app-ink-muted/60">
-                    {item.type === 'scan' && <Search size={12} />}
-                    {item.type === 'enrich' && <Wand size={12} />}
-                    {item.type === 'sync' && <RefreshCw size={12} />}
-                    {item.type === 'organize' && <Copy size={12} />}
-                    {item.type === 'error' && <AlertCircle size={12} className="text-red-500" />}
-                  </div>
-                  <div className="flex flex-col gap-0.5 min-w-0">
-                    <span className="truncate font-medium text-app-ink">{item.message}</span>
-                    <span className="text-[9px] opacity-70">
-                      {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : !scanStatus && (
-            <div className="rounded-md border border-dashed border-app-border bg-app-bg/50 px-3 py-4 text-center text-xs text-app-ink-muted">
-              No recent activity
-            </div>
-          )}
-        </Panel>
-
-
 
         <Panel title="Library Health" className="mb-6">
           <div className="rounded-lg border border-app-border bg-white p-3 shadow-sm">
@@ -256,11 +181,6 @@ export function Sidebar({
           </div>
         </Panel>
 
-        <Panel title="Danger Zone" className="border-red-100 bg-red-50/50 mb-6">
-          <Button variant="danger" size="sm" onClick={handleClearLibrary} className="w-full justify-center shadow-sm">
-            Clear Library Data
-          </Button>
-        </Panel>
       </div>
     </aside >
   );

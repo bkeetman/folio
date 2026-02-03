@@ -36,6 +36,7 @@ import type {
   LibraryFilter,
   LibraryHealth,
   LibraryItem,
+  LibrarySort,
   OperationProgress,
   OperationStats,
   OrganizePlan,
@@ -100,6 +101,7 @@ const sampleBooks = [
     tags: [{ id: "t3", name: "Classic", color: "emerald" }],
   },
 ];
+
 
 const sampleTags: Tag[] = [
   { id: "t1", name: "Favorites", color: "amber" },
@@ -188,6 +190,7 @@ function App() {
   const [grid, setGrid] = useState(true);
   const [query, setQuery] = useState("");
   const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>("all");
+  const [librarySort, setLibrarySort] = useState<LibrarySort>("default");
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [scanStatus, setScanStatus] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -254,6 +257,8 @@ function App() {
   const [applyingChangeIds, setApplyingChangeIds] = useState<Set<string>>(new Set());
   const [changeProgress, setChangeProgress] = useState<OperationProgress | null>(null);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [tags, setTags] = useState<Tag[]>([]);
   const [newTagName, setNewTagName] = useState("");
@@ -301,6 +306,8 @@ function App() {
       const result = await check();
       if (!result) {
         console.info("[updater] no update available");
+        setUpdateAvailable(false);
+        setUpdateVersion(null);
         if (!silent) setUpdateStatus("No updates found.");
         return;
       }
@@ -308,6 +315,9 @@ function App() {
         version: result.version,
         currentVersion: result.currentVersion,
       });
+      setUpdateAvailable(true);
+      setUpdateVersion(result.version);
+      if (silent) return;
       setUpdateStatus(`Update ${result.version} available. Downloading…`);
       await result.downloadAndInstall();
       console.info("[updater] download complete, relaunching");
@@ -315,6 +325,7 @@ function App() {
       await relaunch();
     } catch (error) {
       console.error("[updater] check failed", error);
+      if (silent) return;
       if (!silent) {
         const message = error instanceof Error ? error.message : String(error ?? "Update failed.");
         setUpdateStatus(`Update failed: ${message}`);
@@ -380,6 +391,15 @@ function App() {
     });
   }, [libraryItems, fixFilter]);
 
+  const enrichableCount = useMemo(() => {
+    return libraryItems.reduce((count, item) => {
+      if (!item.cover_path || item.authors.length === 0 || item.published_year === null) {
+        return count + 1;
+      }
+      return count;
+    }, 0);
+  }, [libraryItems]);
+
   // Combine with inbox items if includeIssues is true
   const allFixItems = useMemo(() => {
     const fixItemIds = new Set(booksNeedingFix.map((item) => item.id));
@@ -422,13 +442,15 @@ function App() {
         language: item.language ?? null,
         series: item.series ?? null,
         seriesIndex: item.series_index ?? null,
+        createdAt: item.created_at,
       }))
-      : sampleBooks.map((book) => ({
+      : sampleBooks.map((book, index) => ({
         ...book,
         authors: [book.author],
         language: null as string | null,
         series: null as string | null,
         seriesIndex: null as number | null,
+        createdAt: Date.now() - index * 1000,
       }));
 
     // Format filter
@@ -491,6 +513,66 @@ function App() {
     selectedAuthorNames,
     selectedSeries,
   ]);
+
+  const sortedBooks = useMemo(() => {
+    if (librarySort === "default") return filteredBooks;
+
+    const toLower = (value: string) => value.toLowerCase();
+    const compareText = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });
+    const getYearValue = (value: number | string) => {
+      if (typeof value === "number") return value;
+      const parsed = Number.parseInt(String(value), 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const withIndex = filteredBooks.map((book, index) => ({ book, index }));
+
+    withIndex.sort((a, b) => {
+      const left = a.book;
+      const right = b.book;
+      let result = 0;
+
+      switch (librarySort) {
+        case "title-asc":
+          result = compareText(toLower(left.title), toLower(right.title));
+          break;
+        case "title-desc":
+          result = compareText(toLower(right.title), toLower(left.title));
+          break;
+        case "author-asc":
+          result = compareText(toLower(left.author), toLower(right.author));
+          break;
+        case "year-desc": {
+          const leftYear = getYearValue(left.year);
+          const rightYear = getYearValue(right.year);
+          if (leftYear === null && rightYear === null) result = 0;
+          else if (leftYear === null) result = 1;
+          else if (rightYear === null) result = -1;
+          else result = rightYear - leftYear;
+          break;
+        }
+        case "year-asc": {
+          const leftYear = getYearValue(left.year);
+          const rightYear = getYearValue(right.year);
+          if (leftYear === null && rightYear === null) result = 0;
+          else if (leftYear === null) result = 1;
+          else if (rightYear === null) result = -1;
+          else result = leftYear - rightYear;
+          break;
+        }
+        case "recent":
+          result = right.createdAt - left.createdAt;
+          break;
+        default:
+          result = 0;
+      }
+
+      if (result !== 0) return result;
+      return a.index - b.index;
+    });
+
+    return withIndex.map(({ book }) => book);
+  }, [filteredBooks, librarySort]);
 
   const refreshTags = useCallback(async () => {
     if (!isTauri()) {
@@ -959,6 +1041,14 @@ function App() {
       return;
     }
     if (enriching) return;
+    const needsEnrichment = libraryItems.some(
+      (item) =>
+        !item.cover_path || item.authors.length === 0 || item.published_year === null
+    );
+    if (!needsEnrichment) {
+      setScanStatus("No items need enrichment.");
+      return;
+    }
     setEnriching(true);
     setEnrichProgress(null);
     setEnrichingItems(new Set());
@@ -973,7 +1063,7 @@ function App() {
       setEnriching(false);
       setEnrichingItems(new Set());
     }
-  }, [enriching]);
+  }, [enriching, libraryItems]);
 
   const handleCancelEnrich = useCallback(async () => {
     if (!isTauri()) return;
@@ -1589,27 +1679,21 @@ function App() {
           : "grid h-screen grid-cols-[210px_minmax(0,1fr)] overflow-hidden bg-[var(--app-bg)] text-[var(--app-ink)]"
       }
     >
-      <Sidebar
-        view={view}
-        setView={setView}
-        scanStatus={scanStatus}
-        scanning={scanning}
-        scanStartedAt={scanStartedAt}
-        scanProgress={scanProgress}
+        <Sidebar
+          view={view}
+          setView={setView}
+          scanning={scanning}
+          handleScan={handleScan}
 
-        libraryHealth={libraryHealth}
-        handleClearLibrary={handleClearLibrary}
-        appVersion={appVersion}
-        ereaderConnected={ereaderDevices.some((d) => d.isConnected)}
-        activityLog={activityLog}
-      />
+          libraryHealth={libraryHealth}
+          handleClearLibrary={handleClearLibrary}
+          appVersion={appVersion}
+          ereaderConnected={ereaderDevices.some((d) => d.isConnected)}
+        />
 
       <main className="flex h-screen flex-col gap-4 overflow-y-auto px-6 py-4">
         <TopToolbar
           view={view}
-          scanning={scanning}
-          handleScan={handleScan}
-          handlePlanOrganize={handlePlanOrganize}
           setView={setView}
           checkForUpdates={checkForUpdates}
           query={query}
@@ -1618,6 +1702,11 @@ function App() {
           setGrid={setGrid}
           libraryReady={libraryReady}
           updateStatus={updateStatus}
+          updateAvailable={updateAvailable}
+          updateVersion={updateVersion}
+          scanStatus={scanStatus}
+          scanProgress={scanProgress}
+          activityLog={activityLog}
         />
 
         <ScanProgressBar
@@ -1640,11 +1729,13 @@ function App() {
               <LibraryView
                 isDesktop={isDesktop}
                 libraryItemsLength={libraryItems.length}
-                filteredBooks={filteredBooks}
+                filteredBooks={sortedBooks}
                 selectedItemId={selectedItemId}
                 setSelectedItemId={setSelectedItemId}
                 libraryFilter={libraryFilter}
                 setLibraryFilter={setLibraryFilter}
+                librarySort={librarySort}
+                setLibrarySort={setLibrarySort}
                 tags={tags}
                 selectedTagIds={selectedTagIds}
                 setSelectedTagIds={setSelectedTagIds}
@@ -1661,6 +1752,7 @@ function App() {
                 enriching={enriching}
                 enrichingItems={enrichingItems}
                 enrichProgress={enrichProgress}
+                enrichableCount={enrichableCount}
               />
             ) : null}
 

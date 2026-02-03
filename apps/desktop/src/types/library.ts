@@ -13,6 +13,15 @@ export type View =
   | "edit";
 export type LibraryFilter = "all" | "epub" | "pdf" | "needs-metadata" | "tagged";
 
+export type LibrarySort =
+  | "default"
+  | "title-asc"
+  | "title-desc"
+  | "author-asc"
+  | "year-desc"
+  | "year-asc"
+  | "recent";
+
 export type FixFilter = {
   missingAuthor: boolean;
   missingTitle: boolean;
@@ -47,6 +56,7 @@ export type LibraryItem = {
   id: string;
   title: string | null;
   published_year: number | null;
+  created_at: number;
   authors: string[];
   file_count: number;
   formats: string[];
@@ -70,6 +80,7 @@ export type BookDisplay = {
   language?: string | null;
   series?: string | null;
   seriesIndex?: number | null;
+  createdAt: number;
 };
 
 export type ScanStats = {

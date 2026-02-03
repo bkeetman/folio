@@ -5,7 +5,7 @@ import { ProgressBar } from "../components/ProgressBar";
 import { Button } from "../components/ui";
 import { getTagColorClass } from "../lib/tagColors";
 import { cn } from "../lib/utils";
-import type { BookDisplay, LibraryFilter, OperationProgress, Tag } from "../types/library";
+import type { BookDisplay, LibraryFilter, LibrarySort, OperationProgress, Tag } from "../types/library";
 
 type LibraryViewProps = {
   isDesktop: boolean;
@@ -15,6 +15,8 @@ type LibraryViewProps = {
   setSelectedItemId: Dispatch<SetStateAction<string | null>>;
   libraryFilter: LibraryFilter;
   setLibraryFilter: Dispatch<SetStateAction<LibraryFilter>>;
+  librarySort: LibrarySort;
+  setLibrarySort: Dispatch<SetStateAction<LibrarySort>>;
   tags: Tag[];
   selectedTagIds: string[];
   setSelectedTagIds: Dispatch<SetStateAction<string[]>>;
@@ -33,6 +35,7 @@ type LibraryViewProps = {
   enriching: boolean;
   enrichingItems: Set<string>;
   enrichProgress: OperationProgress | null;
+  enrichableCount: number;
 };
 
 export function LibraryView({
@@ -43,6 +46,8 @@ export function LibraryView({
   setSelectedItemId,
   libraryFilter,
   setLibraryFilter,
+  librarySort,
+  setLibrarySort,
   tags,
   selectedTagIds,
   setSelectedTagIds,
@@ -59,8 +64,13 @@ export function LibraryView({
   enriching,
   enrichingItems,
   enrichProgress,
+  enrichableCount,
 }: LibraryViewProps) {
   const hasActiveFilter = selectedAuthorNames.length > 0 || selectedSeries.length > 0;
+  const enrichLabel =
+    enrichableCount > 0
+      ? `${enrichableCount} need enrichment`
+      : "Up to date";
 
   return (
     <>
@@ -122,27 +132,32 @@ export function LibraryView({
       {/* Main Toolbar */}
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 bg-app-bg/95 py-2 backdrop-blur-sm transition-all">
         {isDesktop && (
-          enriching ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onCancelEnrich}
-              className="mr-2 gap-2 border-red-300 text-red-600 shadow-sm hover:bg-red-50"
-            >
-              <X size={14} />
-              Cancel
-            </Button>
-          ) : (
-            <Button
-              variant="default"
-              size="sm"
-              onClick={onEnrichAll}
-              className="mr-2 gap-2 shadow-sm"
-            >
-              <Sparkles size={14} />
-              Enrich All
-            </Button>
-          )
+          <div className="mr-2 flex items-center gap-2">
+            {enriching ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onCancelEnrich}
+                className="gap-2 border-red-300 text-red-600 shadow-sm hover:bg-red-50"
+              >
+                <X size={14} />
+                Cancel
+              </Button>
+            ) : (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={onEnrichAll}
+                className="gap-2 shadow-sm"
+              >
+                <Sparkles size={14} />
+                Enrich All
+              </Button>
+            )}
+            <span className="text-[11px] text-app-ink-muted">
+              {enrichLabel}
+            </span>
+          </div>
         )}
 
         <div className="flex h-8 items-center rounded-lg border border-app-border bg-app-surface p-1 shadow-sm">
@@ -177,6 +192,25 @@ export function LibraryView({
             onClick={() => setLibraryFilter("tagged")}
             label="Tagged"
           />
+        </div>
+
+        <div className="ml-2 flex h-8 items-center gap-2 rounded-lg border border-app-border bg-app-surface px-2 shadow-sm">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-app-ink-muted">
+            Sort
+          </span>
+          <select
+            value={librarySort}
+            onChange={(event) => setLibrarySort(event.target.value as LibrarySort)}
+            className="h-7 rounded-md border border-[var(--app-border)] bg-white px-2 text-[11px]"
+          >
+            <option value="default">Default</option>
+            <option value="title-asc">Title A–Z</option>
+            <option value="title-desc">Title Z–A</option>
+            <option value="author-asc">Author A–Z</option>
+            <option value="year-desc">Year (newest)</option>
+            <option value="year-asc">Year (oldest)</option>
+            <option value="recent">Recently added</option>
+          </select>
         </div>
 
         {tags.length > 0 && (
