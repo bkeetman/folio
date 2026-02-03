@@ -2530,6 +2530,22 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
 }
 
 #[tauri::command]
+fn close_splashscreen(app: tauri::AppHandle) -> Result<(), String> {
+  // Close the splash screen
+  if let Some(splash) = app.get_webview_window("splashscreen") {
+    let _ = splash.close();
+  }
+
+  // Show the main window
+  if let Some(main) = app.get_webview_window("main") {
+    let _ = main.show();
+    let _ = main.set_focus();
+  }
+
+  Ok(())
+}
+
+#[tauri::command]
 fn upload_cover(
   app: tauri::AppHandle,
   item_id: String,
@@ -4742,9 +4758,9 @@ pub fn run() {
       }
       let menu = app_menu(app)?;
       app.set_menu(menu)?;
-      let main_window = app.get_webview_window("main");
-      if let Some(window) = main_window {
-        let _ = window.set_focus();
+
+      // Configure main window (stays hidden until close_splashscreen is called)
+      if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_title("Folio");
         let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
           width: 1360.0,
@@ -4815,7 +4831,8 @@ pub fn run() {
       get_item_files,
       reveal_file,
       get_item_details,
-      upload_cover
+      upload_cover,
+      close_splashscreen
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

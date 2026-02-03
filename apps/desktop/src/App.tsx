@@ -860,6 +860,12 @@ function App() {
         setScanStatus("Could not load library data.");
       } finally {
         setLibraryReady(true);
+        // Close splash screen and show main window
+        try {
+          await invoke("close_splashscreen");
+        } catch {
+          // Splash screen might not exist (e.g., in dev mode)
+        }
       }
     };
     load();
