@@ -1,6 +1,6 @@
 use rusqlite::{Connection, Result};
 use std::fs;
-use std::path::Path;
+
 use tauri::AppHandle;
 use tauri::Manager;
 

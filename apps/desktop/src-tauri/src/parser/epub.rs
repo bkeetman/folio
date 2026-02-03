@@ -1,11 +1,11 @@
 use std::fs::File;
-use std::io::{Read, Write, Cursor, Seek};
+use std::io::{Read, Write};
 use std::path::Path;
 use zip::{ZipArchive, ZipWriter};
 use zip::write::SimpleFileOptions;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
-use crate::models::Book;
+
 
 pub struct EpubMetadata {
     pub title: Option<String>,

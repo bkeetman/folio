@@ -1,5 +1,7 @@
 # Folio
 
+[![release](https://github.com/bkeetman/folio/actions/workflows/release.yml/badge.svg)](https://github.com/bkeetman/folio/actions/workflows/release.yml)
+
 Calm, modern, Mac-first personal book library.
 
 ## Installation on macOS
