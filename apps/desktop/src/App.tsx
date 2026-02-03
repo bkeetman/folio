@@ -1364,8 +1364,9 @@ function App() {
         ...prev,
       ]);
       await refreshLibrary();
-    } catch {
-      setOrganizeStatus("Could not apply organize plan.");
+    } catch (err) {
+      console.error("Organize error:", err);
+      setOrganizeStatus(`Error: ${err}`);
     }
   };
 

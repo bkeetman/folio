@@ -1948,7 +1948,15 @@ fn apply_organize(app: tauri::AppHandle, plan: OrganizePlan) -> Result<String, S
       )
       .map_err(|err| err.to_string())?;
     } else {
-      std::fs::rename(&entry.source_path, &entry.target_path).map_err(|err| err.to_string())?;
+      // Move operation: try rename first, fall back to copy+delete for cross-filesystem moves
+      let move_result = std::fs::rename(&entry.source_path, &entry.target_path);
+      if move_result.is_err() {
+        // Fallback: copy then delete original
+        std::fs::copy(&entry.source_path, &entry.target_path)
+          .map_err(|err| format!("Failed to copy {}: {}", entry.source_path, err))?;
+        std::fs::remove_file(&entry.source_path)
+          .map_err(|err| format!("Failed to remove original {}: {}", entry.source_path, err))?;
+      }
       let filename = std::path::Path::new(&entry.target_path)
         .file_name()
         .and_then(|value| value.to_str())
