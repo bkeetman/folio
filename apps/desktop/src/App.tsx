@@ -228,12 +228,12 @@ function App() {
     missingAuthor: true,
     missingTitle: true,
     missingCover: true,
-    missingIsbn: true,
-    missingYear: true,
-    missingLanguage: true,
-    missingSeries: true,
-    missingDescription: true,
-    includeIssues: false,
+    missingIsbn: false,
+    missingYear: false,
+    missingLanguage: false,
+    missingSeries: false,
+    missingDescription: false,
+    includeIssues: true,
   });
   const [selectedFixItemId, setSelectedFixItemId] = useState<string | null>(null);
   const [fixFormData, setFixFormData] = useState<ItemMetadata | null>(null);

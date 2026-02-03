@@ -95,9 +95,14 @@ export function FixView({
     setSearchQuery(item.title ?? "");
   }, [selectedItemId, items, setFormData, setSearchQuery]);
 
-  // Auto-select first item if none selected
+  // Auto-select first item if none selected, or if selected item no longer exists
   useEffect(() => {
-    if (!selectedItemId && items.length > 0) {
+    if (items.length === 0) {
+      if (selectedItemId) setSelectedItemId(null);
+      return;
+    }
+    const selectedStillExists = items.some((i) => i.id === selectedItemId);
+    if (!selectedStillExists) {
       setSelectedItemId(items[0].id);
     }
   }, [selectedItemId, items, setSelectedItemId]);
