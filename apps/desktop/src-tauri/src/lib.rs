@@ -1497,6 +1497,19 @@ struct ApplyMetadataProgress {
   total: usize,
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ItemMetadata {
+  title: Option<String>,
+  authors: Vec<String>,
+  published_year: Option<i64>,
+  language: Option<String>,
+  isbn: Option<String>,
+  series: Option<String>,
+  series_index: Option<f64>,
+  description: Option<String>,
+}
+
 #[tauri::command]
 fn apply_fix_candidate(
   app: tauri::AppHandle,
@@ -1571,6 +1584,103 @@ fn apply_fix_candidate(
   });
 
   log::info!("fix candidate applied for item {}", item_id);
+  Ok(())
+}
+
+#[tauri::command]
+fn save_item_metadata(
+  app: tauri::AppHandle,
+  item_id: String,
+  metadata: ItemMetadata,
+) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+  log::info!("saving manual metadata for item {}: {:?}", item_id, metadata.title);
+
+  // Update items table
+  conn.execute(
+    "UPDATE items SET title = ?1, published_year = ?2, language = ?3, series = ?4, series_index = ?5, description = ?6, updated_at = ?7 WHERE id = ?8",
+    params![
+      metadata.title,
+      metadata.published_year,
+      metadata.language,
+      metadata.series,
+      metadata.series_index,
+      metadata.description,
+      now,
+      item_id
+    ],
+  )
+  .map_err(|err| err.to_string())?;
+
+  // Update authors
+  if !metadata.authors.is_empty() {
+    conn
+      .execute("DELETE FROM item_authors WHERE item_id = ?1", params![item_id])
+      .map_err(|err| err.to_string())?;
+
+    for author in &metadata.authors {
+      let author_id: Option<String> = conn
+        .query_row(
+          "SELECT id FROM authors WHERE name = ?1",
+          params![author],
+          |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+
+      let author_id = match author_id {
+        Some(id) => id,
+        None => {
+          let new_id = uuid::Uuid::new_v4().to_string();
+          conn
+            .execute(
+              "INSERT INTO authors (id, name, created_at) VALUES (?1, ?2, ?3)",
+              params![new_id, author, now],
+            )
+            .map_err(|err| err.to_string())?;
+          new_id
+        }
+      };
+
+      conn
+        .execute(
+          "INSERT OR IGNORE INTO item_authors (item_id, author_id) VALUES (?1, ?2)",
+          params![item_id, author_id],
+        )
+        .map_err(|err| err.to_string())?;
+    }
+  }
+
+  // Update ISBN in identifiers table
+  if let Some(isbn) = &metadata.isbn {
+    if !isbn.is_empty() {
+      // Remove old ISBN
+      conn
+        .execute(
+          "DELETE FROM identifiers WHERE item_id = ?1 AND type IN ('isbn10', 'isbn13')",
+          params![item_id],
+        )
+        .map_err(|err| err.to_string())?;
+
+      // Add new ISBN
+      let isbn_type = if isbn.len() == 13 { "isbn13" } else { "isbn10" };
+      conn
+        .execute(
+          "INSERT INTO identifiers (item_id, type, value) VALUES (?1, ?2, ?3)",
+          params![item_id, isbn_type, isbn],
+        )
+        .map_err(|err| err.to_string())?;
+    }
+  }
+
+  // Mark issues as resolved
+  conn.execute(
+    "UPDATE issues SET resolved_at = ?1 WHERE item_id = ?2 AND resolved_at IS NULL",
+    params![now, item_id],
+  )
+  .map_err(|err| err.to_string())?;
+
   Ok(())
 }
 
@@ -4404,6 +4514,7 @@ pub fn run() {
       get_fix_candidates,
       search_candidates,
       apply_fix_candidate,
+      save_item_metadata,
       enrich_all,
       cancel_enrich,
       plan_organize,
