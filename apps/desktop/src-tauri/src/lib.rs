@@ -52,6 +52,7 @@ struct LibraryItem {
   id: String,
   title: Option<String>,
   published_year: Option<i64>,
+  created_at: i64,
   authors: Vec<String>,
   file_count: i64,
   formats: Vec<String>,
@@ -394,7 +395,7 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
   let conn = open_db(&app)?;
   let mut stmt = conn
     .prepare(
-      "SELECT items.id, items.title, items.published_year, \
+       "SELECT items.id, items.title, items.published_year, items.created_at, \
        GROUP_CONCAT(DISTINCT authors.name) as authors, \
        COUNT(DISTINCT files.id) as file_count, \
        GROUP_CONCAT(DISTINCT files.extension) as formats, \
@@ -422,21 +423,22 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
 
   let rows = stmt
     .query_map(params![], |row| {
-      let authors: Option<String> = row.get(3)?;
-      let formats: Option<String> = row.get(5)?;
-      let cover_path: Option<String> = row.get(6)?;
-      let tags: Option<String> = row.get(7)?;
+      let authors: Option<String> = row.get(4)?;
+      let formats: Option<String> = row.get(6)?;
+      let cover_path: Option<String> = row.get(7)?;
+      let tags: Option<String> = row.get(8)?;
       Ok(LibraryItem {
         id: row.get(0)?,
         title: row.get(1)?,
         published_year: row.get(2)?,
+        created_at: row.get(3)?,
         authors: authors
           .unwrap_or_default()
           .split(',')
           .filter(|value| !value.trim().is_empty())
           .map(|value| value.trim().to_string())
           .collect(),
-        file_count: row.get(4)?,
+        file_count: row.get(5)?,
         formats: formats
           .unwrap_or_default()
           .split(',')
@@ -445,9 +447,9 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
           .collect(),
         cover_path,
         tags: parse_tags(tags),
-        language: row.get(8)?,
-        series: row.get(9)?,
-        series_index: row.get(10)?,
+        language: row.get(9)?,
+        series: row.get(10)?,
+        series_index: row.get(11)?,
       })
     })
     .map_err(|err| err.to_string())?;
