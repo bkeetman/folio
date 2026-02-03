@@ -720,6 +720,29 @@ fn apply_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), 
   Ok(())
 }
 
+#[tauri::command]
+fn remove_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<i64, String> {
+  let conn = open_db(&app)?;
+  let mut removed = 0i64;
+
+  if ids.is_empty() {
+    // Remove all pending changes
+    removed = conn
+      .execute("DELETE FROM pending_changes WHERE status = 'pending'", params![])
+      .map_err(|err| err.to_string())? as i64;
+  } else {
+    // Remove specific changes
+    for id in &ids {
+      let result = conn
+        .execute("DELETE FROM pending_changes WHERE id = ?1 AND status = 'pending'", params![id])
+        .map_err(|err| err.to_string())?;
+      removed += result as i64;
+    }
+  }
+
+  Ok(removed)
+}
+
 fn apply_pending_changes_sync(app: &tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
   let conn = open_db(app)?;
   let now = chrono::Utc::now().timestamp_millis();
