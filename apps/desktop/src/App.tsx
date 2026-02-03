@@ -740,6 +740,52 @@ function App() {
     }
   };
 
+  const handleRemoveChange = async (changeId: string) => {
+    if (!isTauri()) return;
+    try {
+      await invoke("remove_pending_changes", { ids: [changeId] });
+      const result = await invoke<PendingChange[]>("get_pending_changes", {
+        status: pendingChangesStatus,
+      });
+      setPendingChanges(result);
+      setSelectedChangeIds((prev) => {
+        const next = new Set(prev);
+        next.delete(changeId);
+        return next;
+      });
+    } catch {
+      setScanStatus("Could not remove change.");
+    }
+  };
+
+  const handleRemoveSelectedChanges = async () => {
+    if (!isTauri() || !selectedChangeIds.size) return;
+    try {
+      await invoke("remove_pending_changes", { ids: Array.from(selectedChangeIds) });
+      const result = await invoke<PendingChange[]>("get_pending_changes", {
+        status: pendingChangesStatus,
+      });
+      setPendingChanges(result);
+      setSelectedChangeIds(new Set());
+    } catch {
+      setScanStatus("Could not remove changes.");
+    }
+  };
+
+  const handleRemoveAllChanges = async () => {
+    if (!isTauri()) return;
+    try {
+      await invoke("remove_pending_changes", { ids: [] });
+      const result = await invoke<PendingChange[]>("get_pending_changes", {
+        status: pendingChangesStatus,
+      });
+      setPendingChanges(result);
+      setSelectedChangeIds(new Set());
+    } catch {
+      setScanStatus("Could not remove changes.");
+    }
+  };
+
   const selectedItem = useMemo(() => {
     if (!selectedItemId) return null;
     return filteredBooks.find((book) => book.id === selectedItemId) ?? null;
@@ -1731,6 +1777,9 @@ function App() {
                 handleApplyAllChanges={handleApplyAllChanges}
                 handleApplySelectedChanges={handleApplySelectedChanges}
                 handleApplyChange={handleApplyChange}
+                handleRemoveChange={handleRemoveChange}
+                handleRemoveAllChanges={handleRemoveAllChanges}
+                handleRemoveSelectedChanges={handleRemoveSelectedChanges}
                 confirmDeleteOpen={confirmDeleteOpen}
                 confirmDeleteIds={confirmDeleteIds}
                 setConfirmDeleteOpen={setConfirmDeleteOpen}

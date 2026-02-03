@@ -4676,6 +4676,7 @@ pub fn run() {
       get_duplicate_groups,
       get_pending_changes,
       apply_pending_changes,
+      remove_pending_changes,
       generate_pending_changes_from_organize,
       resolve_duplicate_group,
       get_library_health,

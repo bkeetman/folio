@@ -14,6 +14,9 @@ type ChangesViewProps = {
   handleApplyAllChanges: () => void;
   handleApplySelectedChanges: () => void;
   handleApplyChange: (id: string) => void;
+  handleRemoveChange: (id: string) => void;
+  handleRemoveAllChanges: () => void;
+  handleRemoveSelectedChanges: () => void;
   confirmDeleteOpen: boolean;
   confirmDeleteIds: string[];
   setConfirmDeleteOpen: (open: boolean) => void;
@@ -34,6 +37,9 @@ export function ChangesView({
   handleApplyAllChanges,
   handleApplySelectedChanges,
   handleApplyChange,
+  handleRemoveChange,
+  handleRemoveAllChanges,
+  handleRemoveSelectedChanges,
   confirmDeleteOpen,
   confirmDeleteIds,
   setConfirmDeleteOpen,
@@ -75,7 +81,7 @@ export function ChangesView({
           variant="primary"
           size="sm"
           onClick={handleApplyAllChanges}
-          disabled={pendingChangesApplying}
+          disabled={pendingChangesApplying || !pendingChanges.length}
         >
           Apply All
         </Button>
@@ -86,6 +92,23 @@ export function ChangesView({
           disabled={!selectedChangeIds.size || pendingChangesApplying}
         >
           Apply Selected
+        </Button>
+        <div className="h-4 w-px bg-[var(--app-border)]" />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleRemoveSelectedChanges}
+          disabled={!selectedChangeIds.size || pendingChangesApplying}
+        >
+          Remove Selected
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleRemoveAllChanges}
+          disabled={pendingChangesApplying || !pendingChanges.length}
+        >
+          Remove All
         </Button>
       </div>
 
@@ -152,13 +175,24 @@ export function ChangesView({
                     <div className="text-xs text-[var(--app-ink-muted)]">Error: {change.error}</div>
                   ) : null}
                 </div>
-                <Button
-                  variant="ghost"
-                  onClick={() => handleApplyChange(change.id)}
-                  disabled={pendingChangesApplying || change.status !== "pending"}
-                >
-                  {isApplying ? <Loader2 size={14} className="animate-spin" /> : "Apply"}
-                </Button>
+                <div className="flex gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleApplyChange(change.id)}
+                    disabled={pendingChangesApplying || change.status !== "pending"}
+                  >
+                    {isApplying ? <Loader2 size={14} className="animate-spin" /> : "Apply"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleRemoveChange(change.id)}
+                    disabled={pendingChangesApplying || change.status !== "pending"}
+                  >
+                    Remove
+                  </Button>
+                </div>
               </div>
             );
           })
