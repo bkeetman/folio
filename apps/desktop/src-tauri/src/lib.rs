@@ -1337,6 +1337,59 @@ fn get_library_health(app: tauri::AppHandle) -> Result<LibraryHealth, String> {
   })
 }
 
+/// Clean up a title for search - remove file extensions, special characters, etc.
+fn clean_search_title(title: &str) -> String {
+  let mut cleaned = title.to_string();
+
+  // Remove common file extensions
+  for ext in &[".epub", ".pdf", ".mobi", ".azw", ".azw3", ".fb2", ".djvu"] {
+    if cleaned.to_lowercase().ends_with(ext) {
+      cleaned = cleaned[..cleaned.len() - ext.len()].to_string();
+    }
+  }
+
+  // Remove content in brackets that looks like metadata (e.g., "[calibre]", "(z-lib)")
+  let bracket_re = Regex::new(r"\s*[\[\(][^\]\)]*(?:calibre|z-lib|epub|pdf|lib\.org|libgen|www\.|http)[^\]\)]*[\]\)]").unwrap();
+  cleaned = bracket_re.replace_all(&cleaned, "").to_string();
+
+  // Remove trailing numbers that might be edition numbers in parentheses
+  let edition_re = Regex::new(r"\s*\(\d+\)\s*$").unwrap();
+  cleaned = edition_re.replace_all(&cleaned, "").to_string();
+
+  // Replace underscores and multiple spaces with single space
+  cleaned = cleaned.replace('_', " ");
+  let multi_space_re = Regex::new(r"\s+").unwrap();
+  cleaned = multi_space_re.replace_all(&cleaned, " ").to_string();
+
+  // Remove leading/trailing whitespace and special characters
+  cleaned = cleaned.trim().trim_matches(|c: char| !c.is_alphanumeric() && c != ' ').to_string();
+
+  cleaned
+}
+
+/// Clean up author name for search
+fn clean_search_author(author: &str) -> Option<String> {
+  let cleaned = author.trim();
+
+  // Skip if it looks like garbage (too short, or mostly non-alphabetic)
+  if cleaned.len() < 2 {
+    return None;
+  }
+
+  let alpha_count = cleaned.chars().filter(|c| c.is_alphabetic()).count();
+  if alpha_count < cleaned.len() / 2 {
+    return None;
+  }
+
+  // Skip common garbage patterns
+  let lower = cleaned.to_lowercase();
+  if lower.contains("unknown") || lower.contains("various") || lower == "author" {
+    return None;
+  }
+
+  Some(cleaned.to_string())
+}
+
 #[tauri::command]
 fn get_fix_candidates(app: tauri::AppHandle, item_id: String) -> Result<Vec<EnrichmentCandidate>, String> {
   let conn = open_db(&app)?;
@@ -1367,14 +1420,35 @@ fn get_fix_candidates(app: tauri::AppHandle, item_id: String) -> Result<Vec<Enri
     .map_err(|err| err.to_string())?;
 
   let mut candidates: Vec<EnrichmentCandidate> = vec![];
+
+  // Strategy 1: Search by ISBN if available
   if let Some(isbn) = isbn {
     candidates.extend(fetch_openlibrary_isbn(&isbn));
     candidates.extend(fetch_google_isbn(&isbn));
-  } else if let Some(title) = &title {
-    let author = authors.first().cloned();
-    candidates.extend(fetch_openlibrary_search(title, author.as_deref()));
-    candidates.extend(fetch_google_search(title, author.as_deref()));
-    candidates = score_candidates(candidates, title, author.as_deref());
+  }
+
+  // Strategy 2: Search by title (and optionally author)
+  if candidates.is_empty() {
+    if let Some(title) = &title {
+      let clean_title = clean_search_title(title);
+      if !clean_title.is_empty() {
+        let clean_author = authors.first().and_then(|a| clean_search_author(a));
+
+        // First try: search with title + author
+        if clean_author.is_some() {
+          candidates.extend(fetch_openlibrary_search(&clean_title, clean_author.as_deref()));
+          candidates.extend(fetch_google_search(&clean_title, clean_author.as_deref()));
+        }
+
+        // Fallback: if no results with author, try title only
+        if candidates.is_empty() {
+          candidates.extend(fetch_openlibrary_search(&clean_title, None));
+          candidates.extend(fetch_google_search(&clean_title, None));
+        }
+
+        candidates = score_candidates(candidates, &clean_title, clean_author.as_deref());
+      }
+    }
   }
 
   Ok(candidates)
@@ -1394,6 +1468,7 @@ fn search_candidates(
     return Ok(vec![]);
   }
 
+  // First check if it's an ISBN
   if let Some(isbn) = normalize_isbn(trimmed) {
     let mut candidates: Vec<EnrichmentCandidate> = vec![];
     candidates.extend(fetch_openlibrary_isbn(&isbn));
@@ -1404,10 +1479,22 @@ fn search_candidates(
     return Ok(candidates);
   }
 
-  let (title, author) = parse_search_query(trimmed);
+  // Clean up the query
+  let cleaned_query = clean_search_title(trimmed);
+  let (title, author) = parse_search_query(&cleaned_query);
+
   let mut candidates: Vec<EnrichmentCandidate> = vec![];
+
+  // Search with title + author if parsed
   candidates.extend(fetch_openlibrary_search(&title, author.as_deref()));
   candidates.extend(fetch_google_search(&title, author.as_deref()));
+
+  // If no results and we had an author, try without author
+  if candidates.is_empty() && author.is_some() {
+    candidates.extend(fetch_openlibrary_search(&title, None));
+    candidates.extend(fetch_google_search(&title, None));
+  }
+
   candidates = score_candidates(candidates, &title, author.as_deref());
   candidates.truncate(5);
   Ok(candidates)
