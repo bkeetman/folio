@@ -17,34 +17,43 @@
           <h1>Download Folio</h1>
           <p class="version" id="release-version">Latest release</p>
           <p class="lede">
-            A calm, local library for people with folders full of ebooks who want a clean, organized shelf.
+            Folio helpt je ebook-collectie lokaal op orde te brengen: metadata verbeteren, bestandsnamen opschonen en je mapstructuur rustig houden.
           </p>
         </div>
       </header>
 
       <section class="overview">
         <div class="overview-card">
-          <h3>What it does</h3>
+          <h3>Wat het is</h3>
           <p>
-            Scans your library, matches metadata, and lets you approve clean file changes.
+            Een desktop app voor grote ebook-mappen, met focus op controle en betrouwbare metadata.
           </p>
         </div>
         <div class="overview-card">
-          <h3>How it works</h3>
+          <h3>Wat je ermee doet</h3>
           <p>
-            Choose a folder, review suggested fixes, then apply only what you want.
+            Scan je bibliotheek, review voorgestelde aanpassingen en pas alleen toe wat jij goedkeurt.
           </p>
         </div>
         <div class="overview-card">
-          <h3>Ideal for</h3>
+          <h3>Voor wie</h3>
           <p>
-            Calm, local collectors who want stable filenames and a tidy shelf.
+            Lezers en verzamelaars die lokaal werken en geen cloud lock-in willen.
           </p>
         </div>
       </section>
 
+      <section class="compatibility" aria-label="Installatiehulp per systeem">
+        <h3>Kies de juiste installer</h3>
+        <ul>
+          <li><strong>macOS:</strong> kies <em>Apple Silicon</em> voor M1/M2/M3/M4, of <em>Intel</em> voor oudere Macs.</li>
+          <li><strong>Windows:</strong> begin met <em>MSI</em>; gebruik <em>EXE</em> als alternatief.</li>
+          <li><strong>Linux:</strong> gebruik <em>AppImage</em> voor portable, of <em>DEB/RPM</em> voor package-based install.</li>
+        </ul>
+      </section>
+
       <section class="downloads" id="downloads">
-        <a class="card" data-platform="darwin-aarch64" href="https://github.com/bkeetman/folio/releases/latest" target="_blank" rel="noreferrer">
+        <article class="card" data-platform="darwin-aarch64">
           <div class="card-header">
             <div class="platform-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" role="img">
@@ -53,16 +62,17 @@
             </div>
             <div>
               <h2>macOS</h2>
-              <p class="card-subtitle">Signed DMG installers for Apple Silicon or Intel.</p>
+              <p class="card-subtitle">DMG installers voor Apple Silicon en Intel.</p>
             </div>
           </div>
           <div class="card-meta">
             <p class="card-file" data-file>DMG</p>
             <p class="card-version" data-version>Latest</p>
           </div>
+          <a class="primary-download" data-primary-link href="https://github.com/bkeetman/folio/releases/latest" target="_blank" rel="noreferrer">Download aanbevolen versie</a>
           <div class="card-links" data-links></div>
-        </a>
-        <a class="card" data-platform="windows-x86_64" href="https://github.com/bkeetman/folio/releases/latest" target="_blank" rel="noreferrer">
+        </article>
+        <article class="card" data-platform="windows-x86_64">
           <div class="card-header">
             <div class="platform-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" role="img">
@@ -74,16 +84,17 @@
             </div>
             <div>
               <h2>Windows</h2>
-              <p class="card-subtitle">MSI installer with EXE fallback for Windows 10/11.</p>
+              <p class="card-subtitle">Voor Windows 10/11 met MSI als standaard.</p>
             </div>
           </div>
           <div class="card-meta">
             <p class="card-file" data-file>MSI</p>
             <p class="card-version" data-version>Latest</p>
           </div>
+          <a class="primary-download" data-primary-link href="https://github.com/bkeetman/folio/releases/latest" target="_blank" rel="noreferrer">Download aanbevolen versie</a>
           <div class="card-links" data-links></div>
-        </a>
-        <a class="card" data-platform="linux-x86_64" href="https://github.com/bkeetman/folio/releases/latest" target="_blank" rel="noreferrer">
+        </article>
+        <article class="card" data-platform="linux-x86_64">
           <div class="card-header">
             <div class="platform-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" role="img">
@@ -95,27 +106,38 @@
             </div>
             <div>
               <h2>Linux</h2>
-              <p class="card-subtitle">AppImage with DEB or RPM options for package installs.</p>
+              <p class="card-subtitle">AppImage, DEB en RPM voor verschillende distro's.</p>
             </div>
           </div>
           <div class="card-meta">
             <p class="card-file" data-file>AppImage</p>
             <p class="card-version" data-version>Latest</p>
           </div>
+          <a class="primary-download" data-primary-link href="https://github.com/bkeetman/folio/releases/latest" target="_blank" rel="noreferrer">Download aanbevolen versie</a>
           <div class="card-links" data-links></div>
-        </a>
+        </article>
       </section>
 
       <section class="notes">
-        <h3>Notes</h3>
+        <h3>Versies en release-info</h3>
+        <ul class="release-links">
+          <li><a id="release-page-link" href="https://github.com/bkeetman/folio/releases/latest" target="_blank" rel="noreferrer">Releasepagina van huidige versie</a></li>
+          <li><a href="https://github.com/bkeetman/folio/releases" target="_blank" rel="noreferrer">Alle versies op GitHub Releases</a></li>
+          <li><a href="https://github.com/bkeetman/folio" target="_blank" rel="noreferrer">Project repository en broncode</a></li>
+        </ul>
+      </section>
+
+      <section class="notes">
+        <h3>Belangrijke notities</h3>
         <ul>
-          <li>Downloads are served from GitHub Releases.</li>
-          <li>macOS builds should be signed and notarized for best UX.</li>
+          <li>Downloads worden direct vanaf GitHub Releases aangeboden.</li>
+          <li>Op macOS werkt een gesigneerde en genotariseerde build het soepelst.</li>
         </ul>
       </section>
     </main>
       <script>
         const versionEl = document.getElementById("release-version");
+        const releasePageLink = document.getElementById("release-page-link");
         const cards = Array.from(document.querySelectorAll("[data-platform]"));
 
         fetch("latest.json", { cache: "no-store" })
@@ -123,7 +145,10 @@
           .then((data) => {
             if (!data) return;
             if (versionEl) {
-              versionEl.textContent = `Latest release: v${data.version}`;
+              versionEl.textContent = `Laatste release: v${data.version}`;
+            }
+            if (releasePageLink && data.version) {
+              releasePageLink.href = `https://github.com/bkeetman/folio/releases/tag/v${data.version}`;
             }
             const downloads = data.downloads || {};
             const platformLinks = {
@@ -155,8 +180,9 @@
               const platformInfo = data.platforms?.[platform];
               const download = platformLinks[platform];
               const primaryUrl = download?.primary || platformInfo?.url;
-              if (primaryUrl) {
-                card.setAttribute("href", primaryUrl);
+              const primaryLink = card.querySelector("[data-primary-link]");
+              if (primaryUrl && primaryLink) {
+                primaryLink.setAttribute("href", primaryUrl);
               }
               const versionLabel = card.querySelector("[data-version]");
               if (versionLabel) {

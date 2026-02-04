@@ -81,6 +81,29 @@ body {
   margin: 20px 0 8px;
 }
 
+.compatibility {
+  margin: 18px 0 8px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.compatibility h3 {
+  margin: 0 0 10px;
+  color: var(--accent);
+}
+
+.compatibility ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-soft);
+}
+
+.compatibility li + li {
+  margin-top: 6px;
+}
+
 .overview-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -106,7 +129,6 @@ body {
   border: 1px solid var(--border);
   border-radius: 18px;
   padding: 18px;
-  text-decoration: none;
   color: inherit;
   box-shadow: 0 12px 24px rgba(24, 18, 12, 0.08);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
@@ -180,6 +202,23 @@ body {
   margin-top: 12px;
 }
 
+.primary-download {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 13px;
+  text-decoration: none;
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 8px 12px;
+  border-radius: 10px;
+}
+
+.primary-download:hover {
+  background: #9e4f1f;
+  border-color: #9e4f1f;
+}
+
 .card-link {
   font-size: 12px;
   text-decoration: none;
@@ -204,4 +243,16 @@ body {
 .notes ul {
   margin: 10px 0 0;
   padding-left: 18px;
+}
+
+.release-links {
+  padding-left: 18px;
+}
+
+.release-links a {
+  color: var(--accent);
+}
+
+.release-links a:hover {
+  color: #9e4f1f;
 }
