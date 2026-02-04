@@ -65,12 +65,12 @@ export function TopToolbar({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          <div className="flex items-center gap-3 rounded-full border border-[var(--app-border)] bg-white/70 px-3 py-1.5 shadow-soft max-w-[320px]">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-3 rounded-full border border-[var(--app-border)] bg-white/70 px-4 py-1.5 shadow-soft flex-1 min-w-[320px]">
             <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-app-ink-muted">
               Activity
             </div>
-            <div className="flex items-center gap-2 min-w-0">
+            <div className="flex flex-1 items-center gap-3 min-w-0">
               <span className="truncate text-xs text-app-ink">{activityMessage}</span>
               {activityTime ? (
                 <span className="text-[10px] tabular-nums text-app-ink-muted">{activityTime}</span>
@@ -78,7 +78,7 @@ export function TopToolbar({
             </div>
             {scanProgress ? (
               <div className="flex items-center gap-2">
-                <div className="h-1 w-20 overflow-hidden rounded-full bg-app-border/40">
+                <div className="h-1 w-32 overflow-hidden rounded-full bg-app-border/40">
                   <div
                     className="h-full rounded-full bg-app-accent transition-[width] duration-300 ease-out"
                     style={{ width: progressPercent ? `${progressPercent}%` : "10%" }}
@@ -100,12 +100,12 @@ export function TopToolbar({
             ) : null}
           </div>
 
-          <div className="relative w-48">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--app-ink-muted)]" />
-            <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title or author" className="pl-8" />
-          </div>
-
-          <div className="flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] p-1">
+          <div className="flex items-center gap-2">
+            <div className="relative w-48">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--app-ink-muted)]" />
+              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title or author" className="pl-8" />
+            </div>
+            <div className="flex items-center rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] p-1">
             <Button
               variant="toolbar"
               size="sm"
@@ -118,7 +118,6 @@ export function TopToolbar({
               onClick={() => setGrid(true)}
             >
               <LayoutGrid size={14} />
-              Grid
             </Button>
             <Button
               variant="toolbar"
@@ -132,8 +131,8 @@ export function TopToolbar({
               onClick={() => setGrid(false)}
             >
               <List size={14} />
-              List
             </Button>
+            </div>
           </div>
 
           {view === "library" && !libraryReady ? <Badge variant="muted">Loading</Badge> : null}

@@ -23,6 +23,8 @@ type FixViewProps = {
   onSaveMetadata: (itemId: string, metadata: ItemMetadata) => Promise<void>;
   saving: boolean;
   getCandidateCoverUrl: (candidate: EnrichmentCandidate) => string | null;
+  coverUrl: string | null;
+  onFetchCover: (itemId: string, force?: boolean) => Promise<void>;
   isDesktop: boolean;
 };
 
@@ -49,6 +51,11 @@ function getIssueIcon(item: LibraryItem, inboxItems: InboxItem[]) {
   return <AlertTriangle size={14} className="text-stone-400" />;
 }
 
+function getIssueReason(item: LibraryItem, inboxItems: InboxItem[]) {
+  const match = inboxItems.find((inbox) => inbox.id === item.id);
+  return match?.reason ?? null;
+}
+
 export function FixView({
   items,
   inboxItems,
@@ -67,6 +74,8 @@ export function FixView({
   onSaveMetadata,
   saving,
   getCandidateCoverUrl,
+  coverUrl,
+  onFetchCover,
   isDesktop,
 }: FixViewProps) {
   // Initialize form data when selection changes
@@ -93,7 +102,10 @@ export function FixView({
       description: null,
     });
     setSearchQuery(item.title ?? "");
-  }, [selectedItemId, items, setFormData, setSearchQuery]);
+    if (isDesktop && selectedItemId && !coverUrl) {
+      void onFetchCover(selectedItemId);
+    }
+  }, [selectedItemId, items, setFormData, setSearchQuery, isDesktop, coverUrl, onFetchCover]);
 
   // Auto-select first item if none selected, or if selected item no longer exists
   useEffect(() => {
@@ -130,20 +142,30 @@ export function FixView({
           <FilterDropdown filter={fixFilter} setFilter={setFixFilter} />
         </div>
         <div className="flex-1 overflow-y-auto">
-          {items.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setSelectedItemId(item.id)}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--app-bg)] transition-colors ${
-                item.id === selectedItemId ? "bg-[var(--app-accent)]/10 border-l-2 border-[var(--app-accent)]" : ""
-              }`}
-            >
-              {getIssueIcon(item, inboxItems)}
-              <span className="truncate text-[var(--app-ink)]">
-                {item.title || "Untitled"}
-              </span>
-            </button>
-          ))}
+          {items.map((item) => {
+            const issueReason = getIssueReason(item, inboxItems);
+            return (
+              <button
+                key={item.id}
+                onClick={() => setSelectedItemId(item.id)}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--app-bg)] transition-colors ${
+                  item.id === selectedItemId ? "bg-[var(--app-accent)]/10 border-l-2 border-[var(--app-accent)]" : ""
+                }`}
+              >
+                {getIssueIcon(item, inboxItems)}
+                <span className="flex flex-col min-w-0">
+                  <span className="truncate text-[var(--app-ink)]">
+                    {item.title || "Untitled"}
+                  </span>
+                  {issueReason ? (
+                    <span className="truncate text-[10px] text-[var(--app-ink-muted)]">
+                      {issueReason}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -154,7 +176,19 @@ export function FixView({
         </div>
         {selectedItem && formData ? (
           <div className="flex-1 overflow-y-auto p-4">
-            <div className="space-y-4">
+            <div className="flex gap-4">
+              <div className="w-24 flex-shrink-0">
+                <div className="h-36 w-24 overflow-hidden rounded-md border border-[var(--app-border)] bg-[#fffaf4]">
+                  {coverUrl ? (
+                    <img src={coverUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-[10px] text-[var(--app-ink-muted)]">
+                      No cover
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="flex-1 space-y-4">
               <div>
                 <label className="block text-[10px] uppercase tracking-wider text-[var(--app-ink-muted)] mb-1">
                   Title
@@ -306,6 +340,7 @@ export function FixView({
                   Use as Search
                 </Button>
               </div>
+            </div>
             </div>
           </div>
         ) : (

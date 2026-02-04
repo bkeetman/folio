@@ -6,7 +6,6 @@ import {
   FolderOpen,
   FolderInput,
   HardDrive,
-  Inbox,
   Library,
   Tag,
   User,
@@ -111,13 +110,17 @@ export function Sidebar({
             <FolderOpen size={16} />
             Add Books
           </SidebarItem>
-          <SidebarItem active={view === "inbox"} onClick={() => setView("inbox")}>
-            <Inbox size={16} />
-            Inbox
-          </SidebarItem>
           <SidebarItem active={view === "duplicates"} onClick={() => setView("duplicates")}>
             <Copy size={16} />
             Duplicates
+          </SidebarItem>
+          <SidebarItem active={view === "missing-files"} onClick={() => setView("missing-files")}>
+            <HardDrive size={16} />
+            Missing Files
+          </SidebarItem>
+          <SidebarItem active={view === "settings"} onClick={() => setView("settings")}>
+            <Wrench size={16} />
+            Settings
           </SidebarItem>
           <SidebarItem active={view === "fix"} onClick={() => setView("fix")}>
             <Wrench size={16} />

@@ -2,11 +2,12 @@
 import { ArrowRight, FolderInput } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { Button, Input } from "../components/ui";
-import type { OrganizePlan } from "../types/library";
+import type { OperationProgress, OrganizePlan, OrganizerLog } from "../types/library";
 
 type OrganizerViewProps = {
     organizeMode: string;
     setOrganizeMode: Dispatch<SetStateAction<string>>;
+    organizeRoot: string | null;
     organizeTemplate: string;
     setOrganizeTemplate: Dispatch<SetStateAction<string>>;
     organizePlan: OrganizePlan | null;
@@ -14,11 +15,15 @@ type OrganizerViewProps = {
     handleApplyOrganize: () => void;
     handleQueueOrganize: () => void;
     organizeStatus: string | null;
+    organizeProgress: OperationProgress | null;
+    organizing: boolean;
+    organizeLog: OrganizerLog | null;
 };
 
 export function OrganizerView({
     organizeMode,
     setOrganizeMode,
+    organizeRoot,
     organizeTemplate,
     setOrganizeTemplate,
     organizePlan,
@@ -26,7 +31,16 @@ export function OrganizerView({
     handleApplyOrganize,
     handleQueueOrganize,
     organizeStatus,
+    organizeProgress,
+    organizing,
+    organizeLog,
 }: OrganizerViewProps) {
+    const actionableEntries = organizePlan
+        ? organizePlan.entries.filter((entry) => entry.action !== "skip")
+        : [];
+    const progressPercent = organizeProgress && organizeProgress.total > 0
+        ? Math.min(100, Math.round((organizeProgress.current / organizeProgress.total) * 100))
+        : 0;
     return (
         <div className="flex flex-col gap-6 p-6">
             <div className="flex flex-col gap-2">
@@ -62,6 +76,14 @@ export function OrganizerView({
                     </div>
 
                     <div className="flex flex-col gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-wider text-app-ink-muted">Library Root</label>
+                        <Input value={organizeRoot ?? ""} readOnly placeholder="Set in Settings" />
+                        <p className="text-xs text-app-ink-muted mt-1">
+                            Set the default root in Maintenance → Settings.
+                        </p>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
                         <label className="text-xs font-semibold uppercase tracking-wider text-app-ink-muted">Path Template</label>
                         <Input
                             className="font-mono text-sm"
@@ -75,28 +97,79 @@ export function OrganizerView({
                     </div>
                 </div>
 
-                <div className="flex justify-end gap-3 mt-2 border-t border-app-border pt-4">
+                <div className="flex flex-wrap items-center gap-3 mt-2 border-t border-app-border pt-4">
                     {organizeStatus && (
-                        <span className="flex items-center text-sm font-medium text-emerald-600 mr-auto">
+                        <span className="flex items-center text-sm text-app-ink-muted">
                             {organizeStatus}
                         </span>
                     )}
-                    <Button variant="outline" onClick={handlePlanOrganize}>
+                    {organizeProgress && (
+                        <div className="flex items-center gap-2 text-xs text-app-ink-muted">
+                            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-app-border/40">
+                                <div
+                                    className="h-full rounded-full bg-app-accent transition-[width] duration-300 ease-out"
+                                    style={{ width: `${progressPercent}%` }}
+                                />
+                            </div>
+                            <span className="tabular-nums">
+                                {organizeProgress.current}/{organizeProgress.total}
+                            </span>
+                        </div>
+                    )}
+                    <Button variant="outline" onClick={handlePlanOrganize} disabled={organizing}>
                         Generate Preview
                     </Button>
-                    <Button variant="outline" onClick={handleQueueOrganize} disabled={!organizePlan?.entries.length}>
+                    <Button
+                        variant="outline"
+                        onClick={handleQueueOrganize}
+                        disabled={actionableEntries.length === 0 || organizing}
+                    >
                         Queue Changes
                     </Button>
-                    <Button variant="primary" onClick={handleApplyOrganize} disabled={!organizePlan?.entries.length}>
+                    <Button
+                        variant="primary"
+                        onClick={handleApplyOrganize}
+                        disabled={actionableEntries.length === 0 || organizing}
+                    >
                         Apply Changes
                     </Button>
                 </div>
             </div>
 
-            {organizePlan && organizePlan.entries.length > 0 ? (
+            {organizeLog ? (
+                <div className="rounded-xl border border-app-border bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <div className="text-xs font-semibold uppercase tracking-wider text-app-ink-muted">
+                                Last Run
+                            </div>
+                            <div className="text-sm text-app-ink">
+                                {organizeLog.processed} applied, {organizeLog.errors} errors
+                            </div>
+                        </div>
+                        <div className="text-[10px] text-app-ink-muted">
+                            {new Date(organizeLog.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </div>
+                    </div>
+                    {organizeLog.errors > 0 ? (
+                        <div className="mt-3 space-y-2">
+                            {organizeLog.entries.filter((entry) => entry.error).slice(0, 5).map((entry, index) => (
+                                <div key={`${entry.from}-${index}`} className="rounded-md border border-app-border/60 bg-app-bg/40 px-3 py-2 text-xs text-app-ink">
+                                    <div className="font-medium">{entry.error}</div>
+                                    <div className="text-[10px] text-app-ink-muted truncate">{entry.from}</div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="mt-2 text-xs text-app-ink-muted">No errors reported.</div>
+                    )}
+                </div>
+            ) : null}
+
+            {organizePlan && actionableEntries.length > 0 ? (
                 <div className="flex flex-col gap-4">
                     <div className="flex items-center justify-between">
-                        <h2 className="text-lg font-semibold text-app-ink">Preview ({organizePlan.entries.length} items)</h2>
+                        <h2 className="text-lg font-semibold text-app-ink">Preview ({actionableEntries.length} items)</h2>
                     </div>
 
                     <div className="rounded-xl border border-app-border bg-white overflow-hidden shadow-sm">
@@ -109,7 +182,7 @@ export function OrganizerView({
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-app-border/40">
-                                {organizePlan.entries.map((entry, i) => {
+                                {actionableEntries.map((entry, i) => {
                                     const sourceParts = entry.source_path.split(/[/\\]/);
                                     const targetParts = entry.target_path.split(/[/\\]/);
                                     // Show last 2 parts (folder/file) for better context
