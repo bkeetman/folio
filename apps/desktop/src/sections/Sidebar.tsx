@@ -3,8 +3,8 @@ import {
   BookOpen,
   Copy,
   FileClock,
-  FolderOpen,
   FolderInput,
+  FolderOpen,
   HardDrive,
   Library,
   Sparkles,
@@ -44,7 +44,7 @@ export function Sidebar({
     <aside className="flex h-screen flex-col overflow-hidden border-r border-app-border bg-app-surface">
       <div className="flex-none flex items-center gap-3 border-b border-app-border px-4 py-5 bg-app-surface">
         <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-sm border border-app-border/50">
-          <img src="/src-tauri/icons/icon.png" alt="Folio" className="h-8 w-8" />
+          <img src="/folio-icon.png" alt="Folio" className="h-8 w-8" />
         </div>
         <div className="flex flex-col justify-center">
           <span className="text-lg font-bold tracking-tight text-app-ink leading-none">Folio</span>
