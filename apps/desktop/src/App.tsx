@@ -121,20 +121,26 @@ const inboxItems = [
   { id: "i3", title: "A New Ecology", reason: "Missing cover" },
 ];
 
-const duplicateGroups = [
+const duplicateGroups: DuplicateGroup[] = [
   {
     id: "d1",
+    kind: "hash",
     title: "The Shallows",
     files: ["The Shallows.epub", "The Shallows (1).epub"],
     file_ids: ["d1-file-1", "d1-file-2"],
     file_paths: ["/samples/The Shallows.epub", "/samples/The Shallows (1).epub"],
+    file_titles: ["The Shallows", "The Shallows"],
+    file_sizes: [1_048_576, 1_048_576],
   },
   {
     id: "d2",
+    kind: "hash",
     title: "Silent Spring",
     files: ["Silent Spring.pdf", "Silent Spring - copy.pdf"],
     file_ids: ["d2-file-1", "d2-file-2"],
     file_paths: ["/samples/Silent Spring.pdf", "/samples/Silent Spring - copy.pdf"],
+    file_titles: ["Silent Spring", "Silent Spring"],
+    file_sizes: [2_097_152, 2_097_152],
   },
 ];
 
@@ -208,6 +214,8 @@ function App() {
   const [libraryReady, setLibraryReady] = useState(false);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [duplicates, setDuplicates] = useState<DuplicateGroup[]>([]);
+  const [titleDuplicates, setTitleDuplicates] = useState<DuplicateGroup[]>([]);
+  const [fuzzyDuplicates, setFuzzyDuplicates] = useState<DuplicateGroup[]>([]);
   const [missingFiles, setMissingFiles] = useState<MissingFileItem[]>([]);
   const [fixCandidates, setFixCandidates] = useState<EnrichmentCandidate[]>([]);
   const [fixLoading, setFixLoading] = useState(false);
@@ -266,6 +274,7 @@ function App() {
   const [pendingChangesStatus, setPendingChangesStatus] = useState<
     "pending" | "applied" | "error"
   >("pending");
+  const pendingChangesStatusRef = useRef<"pending" | "applied" | "error">("pending");
   const [applyingChangeIds, setApplyingChangeIds] = useState<Set<string>>(new Set());
   const [changeProgress, setChangeProgress] = useState<OperationProgress | null>(null);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
@@ -294,6 +303,10 @@ function App() {
   const [ereaderSyncDialogOpen, setEreaderSyncDialogOpen] = useState(false);
   const [ereaderSyncing, setEreaderSyncing] = useState(false);
   const [ereaderSyncProgress, setEreaderSyncProgress] = useState<SyncProgress | null>(null);
+
+  useEffect(() => {
+    pendingChangesStatusRef.current = pendingChangesStatus;
+  }, [pendingChangesStatus]);
 
   const refreshPendingChanges = useCallback(async () => {
     if (!isTauri()) return 0;
@@ -1013,10 +1026,12 @@ function App() {
         setLibraryItems(items);
         const inboxItems = await invoke<InboxItem[]>("get_inbox_items");
         setInbox(inboxItems);
-        const duplicateGroups = await invoke<DuplicateGroup[]>(
-          "get_duplicate_groups"
-        );
+        const duplicateGroups = await invoke<DuplicateGroup[]>("get_duplicate_groups");
+        const titleGroups = await invoke<DuplicateGroup[]>("get_title_duplicate_groups");
+        const fuzzyGroups = await invoke<DuplicateGroup[]>("get_fuzzy_duplicate_groups");
         setDuplicates(duplicateGroups);
+        setTitleDuplicates(titleGroups);
+        setFuzzyDuplicates(fuzzyGroups);
         const missing = await invoke<MissingFileItem[]>("get_missing_files");
         setMissingFiles(missing);
         const health = await invoke<LibraryHealth>("get_library_health");
@@ -1044,10 +1059,12 @@ function App() {
       setLibraryItems(items);
       const inboxItems = await invoke<InboxItem[]>("get_inbox_items");
       setInbox(inboxItems);
-      const duplicateGroups = await invoke<DuplicateGroup[]>(
-        "get_duplicate_groups"
-      );
+      const duplicateGroups = await invoke<DuplicateGroup[]>("get_duplicate_groups");
+      const titleGroups = await invoke<DuplicateGroup[]>("get_title_duplicate_groups");
+      const fuzzyGroups = await invoke<DuplicateGroup[]>("get_fuzzy_duplicate_groups");
       setDuplicates(duplicateGroups);
+      setTitleDuplicates(titleGroups);
+      setFuzzyDuplicates(fuzzyGroups);
       const missing = await invoke<MissingFileItem[]>("get_missing_files");
       setMissingFiles(missing);
       const health = await invoke<LibraryHealth>("get_library_health");
@@ -1384,7 +1401,7 @@ function App() {
       if (unlistenComplete) unlistenComplete();
       if (unlistenCancelled) unlistenCancelled();
     };
-  }, [isDesktop]); // Removed enriching and refreshLibrary from deps to prevent re-registration
+  }, [isDesktop, refreshLibrary]);
 
   // Listen for apply-metadata-progress events (single item metadata apply)
   useEffect(() => {
@@ -1443,9 +1460,9 @@ function App() {
       );
       // Refresh the pending changes list
       try {
-        const result = await invoke<PendingChange[]>("get_pending_changes", {
-          status: pendingChangesStatus,
-        });
+          const result = await invoke<PendingChange[]>("get_pending_changes", {
+            status: pendingChangesStatusRef.current,
+          });
         setPendingChanges(result);
       } catch {
         // ignore
@@ -1651,21 +1668,27 @@ function App() {
     return bestId;
   }, []);
 
-  const handleResolveDuplicate = async (groupId: string, keepFileId: string) => {
+  const handleResolveDuplicate = async (group: DuplicateGroup, keepFileId: string) => {
     if (!isTauri()) return;
     try {
-      const group = duplicates.find((entry) => entry.id === groupId);
       const keepId = keepFileId || (group ? pickBestDuplicate(group) : "");
       if (!keepId) {
         setScanStatus("Pick a file to keep first.");
         return;
       }
-      await invoke("resolve_duplicate_group", { groupId, keepFileId: keepId });
+      if (group.kind === "hash") {
+        await invoke("resolve_duplicate_group", { groupId: group.id, keepFileId: keepId });
+      } else {
+        await invoke("resolve_duplicate_group_by_files", {
+          keepFileId: keepId,
+          fileIds: group.file_ids,
+        });
+      }
       setScanStatus("Duplicate resolved.");
       await refreshLibrary();
       setDuplicateKeepSelection((prev) => {
         const next = { ...prev };
-        delete next[groupId];
+        delete next[group.id];
         return next;
       });
     } catch {
@@ -1673,23 +1696,33 @@ function App() {
     }
   };
 
-  const handleAutoSelectDuplicates = useCallback(() => {
-    const next: Record<string, string> = {};
-    duplicates.forEach((group) => {
-      next[group.id] = pickBestDuplicate(group);
-    });
-    setDuplicateKeepSelection(next);
-  }, [duplicates, pickBestDuplicate]);
+  const handleAutoSelectDuplicates = useCallback(
+    (groups: DuplicateGroup[]) => {
+      const next: Record<string, string> = {};
+      groups.forEach((group) => {
+        next[group.id] = pickBestDuplicate(group);
+      });
+      setDuplicateKeepSelection(next);
+    },
+    [pickBestDuplicate]
+  );
 
   const handleResolveAllDuplicates = useCallback(
-    async (applyNow: boolean) => {
+    async (groups: DuplicateGroup[], applyNow: boolean) => {
       if (!isTauri()) return;
       try {
         let resolved = 0;
-        for (const group of duplicates) {
+        for (const group of groups) {
           const keepId = duplicateKeepSelection[group.id] || pickBestDuplicate(group);
           if (!keepId) continue;
-          await invoke("resolve_duplicate_group", { groupId: group.id, keepFileId: keepId });
+          if (group.kind === "hash") {
+            await invoke("resolve_duplicate_group", { groupId: group.id, keepFileId: keepId });
+          } else {
+            await invoke("resolve_duplicate_group_by_files", {
+              keepFileId: keepId,
+              fileIds: group.file_ids,
+            });
+          }
           resolved += 1;
         }
         if (applyNow) {
@@ -1702,7 +1735,7 @@ function App() {
         setScanStatus("Could not resolve duplicates.");
       }
     },
-    [duplicates, duplicateKeepSelection, pickBestDuplicate, refreshLibrary]
+    [duplicateKeepSelection, pickBestDuplicate, refreshLibrary]
   );
 
   // eReader handlers
@@ -1946,7 +1979,9 @@ function App() {
 
             {view === "duplicates" ? (
               <DuplicatesView
-                groups={isDesktop ? duplicates : duplicateGroups}
+                hashGroups={isDesktop ? duplicates : duplicateGroups}
+                titleGroups={isDesktop ? titleDuplicates : []}
+                fuzzyGroups={isDesktop ? fuzzyDuplicates : []}
                 duplicateKeepSelection={duplicateKeepSelection}
                 setDuplicateKeepSelection={setDuplicateKeepSelection}
                 handleResolveDuplicate={handleResolveDuplicate}

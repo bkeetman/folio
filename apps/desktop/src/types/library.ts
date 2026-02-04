@@ -146,6 +146,7 @@ export type InboxItem = {
 
 export type DuplicateGroup = {
   id: string;
+  kind: "hash" | "title" | "fuzzy";
   title: string;
   files: string[];
   file_ids: string[];

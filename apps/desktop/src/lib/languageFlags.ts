@@ -101,6 +101,14 @@ const languageNames: Record<string, string> = {
   tl: "Tagalog",
 };
 
+export const LANGUAGE_OPTIONS = Object.entries(languageNames)
+  .map(([code, name]) => ({
+    code,
+    name,
+    flag: getLanguageFlag(code),
+  }))
+  .sort((left, right) => left.name.localeCompare(right.name));
+
 /**
  * Get the flag emoji for a language code.
  * Returns undefined if the language is not recognized.

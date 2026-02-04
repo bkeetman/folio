@@ -147,6 +147,7 @@ struct InboxItem {
 #[derive(Serialize)]
 struct DuplicateGroup {
   id: String,
+  kind: String,
   title: String,
   files: Vec<String>,
   file_ids: Vec<String>,
@@ -834,6 +835,7 @@ fn get_duplicate_groups(app: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, St
       let file_sizes: Option<String> = row.get(6)?;
       Ok(DuplicateGroup {
         id: row.get(0)?,
+        kind: "hash".to_string(),
         title: row.get(1)?,
         files: filenames
           .unwrap_or_default()
@@ -874,6 +876,98 @@ fn get_duplicate_groups(app: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, St
     groups.push(row.map_err(|err| err.to_string())?);
   }
   Ok(groups)
+}
+
+#[tauri::command]
+fn get_title_duplicate_groups(app: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, String> {
+  get_title_like_duplicate_groups(&app, "title")
+}
+
+#[tauri::command]
+fn get_fuzzy_duplicate_groups(app: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, String> {
+  get_title_like_duplicate_groups(&app, "fuzzy")
+}
+
+fn get_title_like_duplicate_groups(app: &tauri::AppHandle, mode: &str) -> Result<Vec<DuplicateGroup>, String> {
+  let conn = open_db(app)?;
+  let mut stmt = conn
+    .prepare(
+      "SELECT files.id, files.filename, files.path, COALESCE(files.size_bytes, 0), \
+       items.title, items.published_year, \
+       GROUP_CONCAT(DISTINCT authors.name) as authors \
+       FROM files \
+       JOIN items ON items.id = files.item_id \
+       LEFT JOIN item_authors ON item_authors.item_id = items.id \
+       LEFT JOIN authors ON authors.id = item_authors.author_id \
+       WHERE files.status = 'active' \
+       GROUP BY files.id",
+    )
+    .map_err(|err| err.to_string())?;
+
+  let rows = stmt
+    .query_map(params![], |row| {
+      Ok((
+        row.get::<_, String>(0)?,
+        row.get::<_, String>(1)?,
+        row.get::<_, String>(2)?,
+        row.get::<_, i64>(3)?,
+        row.get::<_, Option<String>>(4)?,
+        row.get::<_, Option<i64>>(5)?,
+        row.get::<_, Option<String>>(6)?,
+      ))
+    })
+    .map_err(|err| err.to_string())?;
+
+  let mut groups: std::collections::HashMap<String, DuplicateGroup> = std::collections::HashMap::new();
+  for row in rows {
+    let (file_id, filename, path, size_bytes, title, published_year, authors) =
+      row.map_err(|err| err.to_string())?;
+    let title_value = title.unwrap_or_else(|| "Untitled".to_string());
+    let normalized_title = normalize_title_for_matching(&title_value);
+    if normalized_title.len() < 3 {
+      continue;
+    }
+    let author_value = authors
+      .unwrap_or_default()
+      .split(',')
+      .next()
+      .unwrap_or("")
+      .trim()
+      .to_string();
+    let normalized_author = normalize_author_for_matching(&author_value);
+    if normalized_author.is_empty() {
+      continue;
+    }
+    let year = published_year.unwrap_or(0);
+    let key = if mode == "fuzzy" {
+      format!("fuzzy:{}:{}", normalized_title, normalized_author)
+    } else {
+      format!("title:{}:{}:{}", normalized_title, normalized_author, year)
+    };
+    let group = groups.entry(key.clone()).or_insert(DuplicateGroup {
+      id: key.clone(),
+      kind: mode.to_string(),
+      title: title_value.clone(),
+      files: Vec::new(),
+      file_ids: Vec::new(),
+      file_paths: Vec::new(),
+      file_titles: Vec::new(),
+      file_sizes: Vec::new(),
+    });
+    group.files.push(filename);
+    group.file_ids.push(file_id);
+    group.file_paths.push(path);
+    group.file_titles.push(title_value);
+    group.file_sizes.push(size_bytes);
+  }
+
+  let mut result = Vec::new();
+  for (_, group) in groups {
+    if group.file_ids.len() > 1 {
+      result.push(group);
+    }
+  }
+  Ok(result)
 }
 
 #[tauri::command]
@@ -1150,6 +1244,49 @@ fn resolve_duplicate_group(
   Ok(())
 }
 
+#[tauri::command]
+fn resolve_duplicate_group_by_files(
+  app: tauri::AppHandle,
+  file_ids: Vec<String>,
+  keep_file_id: String,
+) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+  let mut queued = 0i64;
+  for file_id in &file_ids {
+    if file_id == &keep_file_id {
+      continue;
+    }
+    let path: Option<String> = conn
+      .query_row(
+        "SELECT path FROM files WHERE id = ?1 AND status = 'active'",
+        params![file_id],
+        |row| row.get(0),
+      )
+      .optional()
+      .map_err(|err| err.to_string())?;
+    if let Some(path) = path {
+      let change_id = Uuid::new_v4().to_string();
+      conn.execute(
+        "INSERT INTO pending_changes (id, file_id, type, from_path, to_path, changes_json, status, created_at) \
+         VALUES (?1, ?2, 'delete', ?3, NULL, NULL, 'pending', ?4)",
+        params![change_id, file_id, path, now],
+      )
+      .map_err(|err| err.to_string())?;
+      queued += 1;
+    }
+    conn.execute(
+      "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE id = ?2",
+      params![now, file_id],
+    )
+    .map_err(|err| err.to_string())?;
+  }
+  if queued > 0 {
+    log::info!("queued delete changes: {} for duplicate files", queued);
+  }
+  Ok(())
+}
+
 fn apply_rename_change(
   conn: &Connection,
   change: &PendingChange,
@@ -1216,7 +1353,16 @@ fn apply_delete_change(conn: &Connection, change: &PendingChange, now: i64) -> R
     .from_path
     .as_ref()
     .ok_or_else(|| "Missing file path".to_string())?;
-  let _ = std::fs::remove_file(path);
+  if let Err(err) = std::fs::remove_file(path) {
+    if err.kind() != std::io::ErrorKind::NotFound {
+      // Keep file visible in the library when delete could not be applied.
+      let _ = conn.execute(
+        "UPDATE files SET status = 'active', updated_at = ?1 WHERE id = ?2",
+        params![now, change.file_id],
+      );
+      return Err(format!("Could not delete file {}: {}", path, err));
+    }
+  }
   conn.execute(
     "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE id = ?2",
     params![now, change.file_id],
@@ -2738,17 +2884,24 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
       .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
       .map(|value| value.as_millis() as i64);
 
-    let existing_by_path: Option<(String, Option<i64>, Option<i64>)> = conn
+    let existing_by_path: Option<(String, Option<i64>, Option<i64>, String)> = conn
       .query_row(
-        "SELECT id, modified_at, size_bytes FROM files WHERE path = ?1",
+        "SELECT id, modified_at, size_bytes, status FROM files WHERE path = ?1 AND status != 'inactive'",
         params![path_str],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
       )
       .optional()
       .map_err(|err| err.to_string())?;
 
-    if let Some((file_id, existing_mtime, existing_size)) = existing_by_path.clone() {
+    if let Some((file_id, existing_mtime, existing_size, existing_status)) = existing_by_path.clone() {
       if existing_mtime == modified_at && existing_size == Some(size_bytes) {
+        if existing_status == "missing" {
+          conn.execute(
+            "UPDATE files SET status = 'active', updated_at = ?1 WHERE id = ?2",
+            params![now, file_id],
+          )
+          .map_err(|err| err.to_string())?;
+        }
         stats.unchanged += 1;
         conn.execute(
           "INSERT INTO scan_entries (id, session_id, path, modified_at, size_bytes, action, file_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -2763,7 +2916,10 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
 
     let existing_by_hash: Option<(String, String)> = conn
       .query_row(
-        "SELECT id, path FROM files WHERE sha256 = ?1 AND hash_algo = 'sha256'",
+        "SELECT id, path FROM files \
+         WHERE sha256 = ?1 AND hash_algo = 'sha256' AND status != 'inactive' \
+         ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'missing' THEN 1 ELSE 2 END, updated_at DESC \
+         LIMIT 1",
         params![sha256],
         |row| Ok((row.get(0)?, row.get(1)?)),
       )
@@ -2824,7 +2980,7 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
       continue;
     }
 
-    if let Some((file_id, _, _)) = existing_by_path {
+    if let Some((file_id, _, _, _)) = existing_by_path {
       stats.updated += 1;
       let filename = path.file_name().and_then(|value| value.to_str()).unwrap_or("file");
       conn.execute(
@@ -3618,6 +3774,10 @@ fn normalize_title_for_matching(title: &str) -> String {
     .join(" ");
 
   result
+}
+
+fn normalize_author_for_matching(author: &str) -> String {
+  normalize_title_for_matching(author)
 }
 
 /// Extract the likely last name from an author string
@@ -5448,6 +5608,9 @@ pub fn run() {
       remove_tag_from_item,
       get_cover_blob,
       get_duplicate_groups,
+      get_title_duplicate_groups,
+      get_fuzzy_duplicate_groups,
+      resolve_duplicate_group_by_files,
       get_pending_changes,
       apply_pending_changes,
       remove_pending_changes,

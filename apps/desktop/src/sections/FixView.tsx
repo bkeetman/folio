@@ -2,6 +2,7 @@ import { BookOpen, Image, User, AlertTriangle, ChevronDown, Search, Save, Loader
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect } from "react";
 import { Button, Input } from "../components/ui";
+import { LANGUAGE_OPTIONS } from "../lib/languageFlags";
 import type { EnrichmentCandidate, FixFilter, InboxItem, ItemMetadata, LibraryItem } from "../types/library";
 
 type FixViewProps = {
@@ -27,19 +28,6 @@ type FixViewProps = {
   onFetchCover: (itemId: string, force?: boolean) => Promise<void>;
   isDesktop: boolean;
 };
-
-const LANGUAGES = [
-  { code: "nl", name: "Dutch" },
-  { code: "en", name: "English" },
-  { code: "de", name: "German" },
-  { code: "fr", name: "French" },
-  { code: "es", name: "Spanish" },
-  { code: "it", name: "Italian" },
-  { code: "pt", name: "Portuguese" },
-  { code: "ru", name: "Russian" },
-  { code: "zh", name: "Chinese" },
-  { code: "ja", name: "Japanese" },
-];
 
 function getIssueIcon(item: LibraryItem, inboxItems: InboxItem[]) {
   if (!item.title) return <BookOpen size={14} className="text-amber-600" />;
@@ -246,9 +234,9 @@ export function FixView({
                     className="w-full h-9 rounded-md border border-[var(--app-border)] bg-white px-3 text-sm"
                   >
                     <option value="">Select...</option>
-                    {LANGUAGES.map((lang) => (
+                    {LANGUAGE_OPTIONS.map((lang) => (
                       <option key={lang.code} value={lang.code}>
-                        {lang.name}
+                        {lang.flag ? `${lang.flag} ${lang.name}` : lang.name}
                       </option>
                     ))}
                   </select>

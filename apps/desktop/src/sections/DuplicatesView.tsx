@@ -3,12 +3,14 @@ import { useMemo, useState } from "react";
 import { Button } from "../components/ui";
 
 type DuplicatesViewProps = {
-  groups: DuplicateGroup[];
+  hashGroups: DuplicateGroup[];
+  titleGroups: DuplicateGroup[];
+  fuzzyGroups: DuplicateGroup[];
   duplicateKeepSelection: Record<string, string>;
   setDuplicateKeepSelection: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  handleResolveDuplicate: (groupId: string, keepFileId: string) => void;
-  handleAutoSelectAll: () => void;
-  handleResolveAll: (applyNow: boolean) => void;
+  handleResolveDuplicate: (group: DuplicateGroup, keepFileId: string) => void;
+  handleAutoSelectAll: (groups: DuplicateGroup[]) => void;
+  handleResolveAll: (groups: DuplicateGroup[], applyNow: boolean) => void;
   applyNow: boolean;
   setApplyNow: React.Dispatch<React.SetStateAction<boolean>>;
 };
@@ -39,7 +41,9 @@ function trimPrefix(path: string, prefix: string[]) {
 }
 
 export function DuplicatesView({
-  groups,
+  hashGroups,
+  titleGroups,
+  fuzzyGroups,
   duplicateKeepSelection,
   setDuplicateKeepSelection,
   handleResolveDuplicate,
@@ -48,16 +52,21 @@ export function DuplicatesView({
   applyNow,
   setApplyNow,
 }: DuplicatesViewProps) {
+  const [mode, setMode] = useState<"hash" | "title" | "fuzzy">("hash");
   const [hideTitleMismatches, setHideTitleMismatches] = useState(true);
-  const selectedCount = groups.filter((group) => duplicateKeepSelection[group.id]).length;
+  const [ignoredGroupIds, setIgnoredGroupIds] = useState<Set<string>>(new Set());
+  const baseGroups = mode === "hash" ? hashGroups : mode === "title" ? titleGroups : fuzzyGroups;
   const filteredGroups = useMemo(() => {
-    if (!hideTitleMismatches) return groups;
-    return groups.filter((group) => {
+    if (mode !== "hash" || !hideTitleMismatches) return baseGroups;
+    return baseGroups.filter((group) => {
       const titles = group.file_titles.length ? group.file_titles : [group.title];
       const normalized = titles.map((title) => title.trim().toLowerCase());
       return new Set(normalized).size <= 1;
     });
-  }, [groups, hideTitleMismatches]);
+  }, [baseGroups, hideTitleMismatches, mode]);
+  const visibleGroups = filteredGroups.filter((group) => !ignoredGroupIds.has(group.id));
+  const selectedCount = visibleGroups.filter((group) => duplicateKeepSelection[group.id]).length;
+  const ignoredInModeCount = filteredGroups.length - visibleGroups.length;
 
   const formatBytes = (value: number) => {
     if (!value) return "—";
@@ -69,16 +78,49 @@ export function DuplicatesView({
   };
 
   const hashSuffix = (hash: string) => (hash.length > 8 ? hash.slice(-8) : hash);
+  const helperText =
+    mode === "hash"
+      ? "Duplicates are detected by file content (hash), not by title."
+      : mode === "title"
+        ? "Title + Author groups are matched by normalized title, author and year."
+        : "Fuzzy groups are matched by normalized title + author (year ignored).";
   return (
     <section className="flex flex-col gap-4">
-      <div className="text-xs text-[var(--app-ink-muted)]">
-        Duplicates are detected by file content (hash), not by title.
-      </div>
+      <div className="text-xs text-[var(--app-ink-muted)]">{helperText}</div>
       <div className="flex flex-wrap items-center gap-3">
-        <Button variant="outline" onClick={handleAutoSelectAll}>
+        <div className="flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] p-1">
+          <Button
+            variant="toolbar"
+            size="sm"
+            data-active={mode === "hash"}
+            className={mode === "hash" ? "bg-white shadow-soft" : "hover:bg-white/80"}
+            onClick={() => setMode("hash")}
+          >
+            Hash
+          </Button>
+          <Button
+            variant="toolbar"
+            size="sm"
+            data-active={mode === "title"}
+            className={mode === "title" ? "bg-white shadow-soft" : "hover:bg-white/80"}
+            onClick={() => setMode("title")}
+          >
+            Title + Author
+          </Button>
+          <Button
+            variant="toolbar"
+            size="sm"
+            data-active={mode === "fuzzy"}
+            className={mode === "fuzzy" ? "bg-white shadow-soft" : "hover:bg-white/80"}
+            onClick={() => setMode("fuzzy")}
+          >
+            Fuzzy
+          </Button>
+        </div>
+        <Button variant="outline" onClick={() => handleAutoSelectAll(visibleGroups)}>
           Auto-select best
         </Button>
-        <Button variant="primary" onClick={() => handleResolveAll(applyNow)}>
+        <Button variant="primary" onClick={() => handleResolveAll(visibleGroups, applyNow)}>
           Resolve all
         </Button>
         <label className="flex items-center gap-2 text-xs text-[var(--app-ink-muted)]">
@@ -89,20 +131,35 @@ export function DuplicatesView({
           />
           Apply changes now
         </label>
-        <label className="flex items-center gap-2 text-xs text-[var(--app-ink-muted)]">
-          <input
-            type="checkbox"
-            checked={hideTitleMismatches}
-            onChange={(event) => setHideTitleMismatches(event.target.checked)}
-          />
-          Hide title mismatches
-        </label>
+        {mode === "hash" ? (
+          <label className="flex items-center gap-2 text-xs text-[var(--app-ink-muted)]">
+            <input
+              type="checkbox"
+              checked={hideTitleMismatches}
+              onChange={(event) => setHideTitleMismatches(event.target.checked)}
+            />
+            Hide title mismatches
+          </label>
+        ) : null}
         <span className="text-xs text-[var(--app-ink-muted)]">
-          Selected {selectedCount}/{filteredGroups.length}
+          Selected {selectedCount}/{visibleGroups.length}
         </span>
+        {ignoredInModeCount > 0 ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIgnoredGroupIds((prev) => {
+              const next = new Set(prev);
+              filteredGroups.forEach((group) => next.delete(group.id));
+              return next;
+            })}
+          >
+            Restore ignored ({ignoredInModeCount})
+          </Button>
+        ) : null}
       </div>
       <div className="flex flex-col gap-3">
-        {filteredGroups.map((group) => {
+        {visibleGroups.map((group) => {
           const filePathParts = group.file_paths.map((path) => splitPath(path));
           const prefix = commonPrefix(filePathParts);
           return (
@@ -141,7 +198,8 @@ export function DuplicatesView({
                           {trimPrefix(filePath, prefix)}
                         </span>
                         <span className="text-[10px] text-[var(--app-ink-muted)]">
-                          {formatBytes(fileSize)} · {hashSuffix(group.id)}
+                          {formatBytes(fileSize)}
+                          {group.kind === "hash" ? ` · ${hashSuffix(group.id)}` : ""}
                         </span>
                       </label>
                     </li>
@@ -149,18 +207,38 @@ export function DuplicatesView({
                 })}
               </ul>
             </div>
-            <Button
-              variant="ghost"
-              onClick={() =>
-                handleResolveDuplicate(group.id, duplicateKeepSelection[group.id])
-              }
-              disabled={!duplicateKeepSelection[group.id]}
-            >
-              Resolve
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                onClick={() =>
+                  handleResolveDuplicate(group, duplicateKeepSelection[group.id])
+                }
+                disabled={!duplicateKeepSelection[group.id]}
+              >
+                Resolve
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIgnoredGroupIds((prev) => new Set([...prev, group.id]));
+                  setDuplicateKeepSelection((prev) => {
+                    const next = { ...prev };
+                    delete next[group.id];
+                    return next;
+                  });
+                }}
+              >
+                Not duplicate
+              </Button>
+            </div>
             </div>
           );
         })}
+        {visibleGroups.length === 0 ? (
+          <div className="rounded-md border border-dashed border-[var(--app-border)] bg-white/50 p-4 text-sm text-[var(--app-ink-muted)]">
+            No duplicate groups to review in this mode.
+          </div>
+        ) : null}
       </div>
     </section>
   );

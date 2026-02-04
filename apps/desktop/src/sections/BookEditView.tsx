@@ -1,9 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowLeft, Check, Image as ImageIcon, Loader2, X } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useState } from "react";
 import { Button, Input } from "../components/ui";
+import { LANGUAGE_OPTIONS } from "../lib/languageFlags";
 import type { ItemMetadata, LibraryItem, View } from "../types/library";
 
 type BookEditViewProps = {
@@ -93,6 +93,7 @@ export function BookEditView({
         if (!selectedItemId) return;
 
         try {
+            const { open } = await import("@tauri-apps/plugin-dialog");
             const selected = await open({
                 multiple: false,
                 filters: [
@@ -276,12 +277,18 @@ export function BookEditView({
                                     </div>
                                     <div>
                                         <label className="mb-1.5 block text-sm font-medium text-app-ink">Language</label>
-                                        <Input
-                                            value={formData.language || ""}
+                                        <select
+                                            value={formData.language ?? ""}
                                             onChange={(e) => setFormData({ ...formData, language: e.target.value || null })}
-                                            placeholder="e.g. en, nl, de"
-                                            className="w-full"
-                                        />
+                                            className="h-10 w-full rounded-md border border-app-border bg-white px-3 text-sm text-app-ink"
+                                        >
+                                            <option value="">Select...</option>
+                                            {LANGUAGE_OPTIONS.map((lang) => (
+                                                <option key={lang.code} value={lang.code}>
+                                                    {lang.flag ? `${lang.flag} ${lang.name}` : lang.name}
+                                                </option>
+                                            ))}
+                                        </select>
                                     </div>
                                 </div>
 

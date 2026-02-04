@@ -7,6 +7,7 @@ import {
   FolderInput,
   HardDrive,
   Library,
+  Sparkles,
   Tag,
   User,
   Wrench
@@ -123,7 +124,7 @@ export function Sidebar({
             Settings
           </SidebarItem>
           <SidebarItem active={view === "fix"} onClick={() => setView("fix")}>
-            <Wrench size={16} />
+            <Sparkles size={16} />
             Fix Metadata
           </SidebarItem>
           <SidebarItem active={view === "changes"} onClick={() => setView("changes")}>

@@ -67,20 +67,27 @@ export function Inspector({
   onQueueEreaderAdd,
   onNavigateToEdit,
 }: InspectorProps) {
-  const [files, setFiles] = useState<FileItem[]>([]);
-
+  const [fileState, setFileState] = useState<{ itemId: string | null; files: FileItem[] }>({
+    itemId: null,
+    files: [],
+  });
+  const selectedItemId = selectedItem?.id ?? null;
 
   useEffect(() => {
-    if (selectedItem) {
-      invoke<FileItem[]>("get_item_files", { itemId: selectedItem.id })
-        .then(setFiles)
-        .catch(console.error);
-    } else {
-      setFiles([]);
-    }
-  }, [selectedItem]);
+    if (!selectedItemId) return;
+    let cancelled = false;
+    invoke<FileItem[]>("get_item_files", { itemId: selectedItemId })
+      .then((files) => {
+        if (cancelled) return;
+        setFileState({ itemId: selectedItemId, files });
+      })
+      .catch(console.error);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedItemId]);
 
-
+  const files = selectedItem && fileState.itemId === selectedItem.id ? fileState.files : [];
 
   const handleReveal = (path: string) => {
     invoke("reveal_file", { path }).catch(console.error);
