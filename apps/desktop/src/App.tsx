@@ -1562,6 +1562,7 @@ function App() {
             status: pendingChangesStatusRef.current,
           });
         setPendingChanges(result);
+        await refreshLibrary();
       } catch {
         // ignore
       }
@@ -1573,7 +1574,7 @@ function App() {
       if (unlistenProgress) unlistenProgress();
       if (unlistenComplete) unlistenComplete();
     };
-  }, [isDesktop]);
+  }, [isDesktop, refreshLibrary]);
 
   const handleFetchCandidatesForItem = async (itemId: string) => {
     if (!isTauri()) {

@@ -152,6 +152,7 @@ export type DuplicateGroup = {
   file_ids: string[];
   file_paths: string[];
   file_titles: string[];
+  file_authors: string[];
   file_sizes: number[];
 };
 

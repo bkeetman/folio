@@ -176,6 +176,8 @@ export function DuplicatesView({
                 {group.files.map((file, index) => {
                   const fileId = group.file_ids[index] ?? file;
                   const filePath = group.file_paths[index] ?? file;
+                  const fileTitle = group.file_titles[index] ?? group.title;
+                  const fileAuthor = group.file_authors[index] ?? "";
                   const fileSize = group.file_sizes[index] ?? 0;
                   const isSelected = duplicateKeepSelection[group.id] === fileId;
                   return (
@@ -193,11 +195,23 @@ export function DuplicatesView({
                             }))
                           }
                         />
-                        <span className="font-medium text-[var(--app-ink)]">{file}</span>
-                        <span className="text-[10px] text-[var(--app-ink-muted)] break-all">
-                          {trimPrefix(filePath, prefix)}
+                        <span className="min-w-0">
+                          <span className="block text-[11px] font-semibold text-[var(--app-ink)]">
+                            {fileTitle}
+                          </span>
+                          {fileAuthor ? (
+                            <span className="block text-[10px] text-[var(--app-ink-muted)]">
+                              {fileAuthor}
+                            </span>
+                          ) : null}
+                          <span className="mt-1 block text-[10px] text-[var(--app-ink-muted)] break-all">
+                            {file}
+                          </span>
+                          <span className="block text-[10px] text-[var(--app-ink-muted)] break-all">
+                            {trimPrefix(filePath, prefix)}
+                          </span>
                         </span>
-                        <span className="text-[10px] text-[var(--app-ink-muted)]">
+                        <span className="text-[10px] text-[var(--app-ink-muted)] whitespace-nowrap">
                           {formatBytes(fileSize)}
                           {group.kind === "hash" ? ` · ${hashSuffix(group.id)}` : ""}
                         </span>

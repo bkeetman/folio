@@ -165,6 +165,7 @@ struct DuplicateGroup {
   file_ids: Vec<String>,
   file_paths: Vec<String>,
   file_titles: Vec<String>,
+  file_authors: Vec<String>,
   file_sizes: Vec<i64>,
 }
 
@@ -843,10 +844,14 @@ fn get_duplicate_groups(app: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, St
        GROUP_CONCAT(files.id, '|') as file_ids, \
        GROUP_CONCAT(files.path, '|') as file_paths, \
        GROUP_CONCAT(COALESCE(items.title, 'Untitled'), '|') as item_titles, \
+       GROUP_CONCAT(COALESCE((SELECT GROUP_CONCAT(a.name, ', ') \
+         FROM item_authors ia \
+         JOIN authors a ON a.id = ia.author_id \
+         WHERE ia.item_id = files.item_id), ''), '|') as item_authors, \
        GROUP_CONCAT(COALESCE(files.size_bytes, 0), '|') as file_sizes \
-       FROM files \
+       FROM (SELECT * FROM files WHERE status = 'active' ORDER BY id) files \
        LEFT JOIN items ON items.id = files.item_id \
-       WHERE files.sha256 IS NOT NULL AND files.status = 'active' \
+       WHERE files.sha256 IS NOT NULL \
        GROUP BY files.sha256 \
        HAVING COUNT(files.id) > 1"
     )
@@ -858,7 +863,8 @@ fn get_duplicate_groups(app: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, St
       let file_ids: Option<String> = row.get(3)?;
       let file_paths: Option<String> = row.get(4)?;
       let item_titles: Option<String> = row.get(5)?;
-      let file_sizes: Option<String> = row.get(6)?;
+      let file_authors: Option<String> = row.get(6)?;
+      let file_sizes: Option<String> = row.get(7)?;
       Ok(DuplicateGroup {
         id: row.get(0)?,
         kind: "hash".to_string(),
@@ -885,6 +891,11 @@ fn get_duplicate_groups(app: tauri::AppHandle) -> Result<Vec<DuplicateGroup>, St
           .unwrap_or_default()
           .split('|')
           .filter(|value| !value.trim().is_empty())
+          .map(|value| value.trim().to_string())
+          .collect(),
+        file_authors: file_authors
+          .unwrap_or_default()
+          .split('|')
           .map(|value| value.trim().to_string())
           .collect(),
         file_sizes: file_sizes
@@ -978,12 +989,14 @@ fn get_title_like_duplicate_groups(app: &tauri::AppHandle, mode: &str) -> Result
       file_ids: Vec::new(),
       file_paths: Vec::new(),
       file_titles: Vec::new(),
+      file_authors: Vec::new(),
       file_sizes: Vec::new(),
     });
     group.files.push(filename);
     group.file_ids.push(file_id);
     group.file_paths.push(path);
     group.file_titles.push(title_value);
+    group.file_authors.push(author_value);
     group.file_sizes.push(size_bytes);
   }
 
@@ -1701,32 +1714,55 @@ fn rewrite_epub_with_opf(path: &str, opf_path: &str, updated_opf: String) -> Res
 fn get_library_health(app: tauri::AppHandle) -> Result<LibraryHealth, String> {
   let conn = open_db(&app)?;
   let total: i64 = conn
-    .query_row("SELECT COUNT(*) FROM items", params![], |row| row.get(0))
+    .query_row(
+      "SELECT COUNT(DISTINCT item_id) FROM files WHERE status = 'active'",
+      params![],
+      |row| row.get(0),
+    )
     .map_err(|err| err.to_string())?;
   let missing_isbn: i64 = conn
     .query_row(
-      "SELECT COUNT(*) FROM items WHERE id NOT IN (SELECT item_id FROM identifiers WHERE type IN ('ISBN10','ISBN13'))",
+      "SELECT COUNT(*) FROM (
+         SELECT DISTINCT item_id FROM files WHERE status = 'active'
+       ) active_items
+       WHERE item_id NOT IN (
+         SELECT item_id FROM identifiers WHERE type IN ('ISBN10','ISBN13','OTHER','isbn10','isbn13','other')
+       )",
       params![],
       |row| row.get(0),
     )
     .map_err(|err| err.to_string())?;
   let duplicates: i64 = conn
     .query_row(
-      "SELECT COUNT(*) FROM (SELECT sha256 FROM files WHERE sha256 IS NOT NULL GROUP BY sha256 HAVING COUNT(*) > 1)",
+      "SELECT COUNT(*) FROM (
+         SELECT sha256 FROM files
+         WHERE sha256 IS NOT NULL AND status = 'active'
+         GROUP BY sha256
+         HAVING COUNT(*) > 1
+       )",
       params![],
       |row| row.get(0),
     )
     .map_err(|err| err.to_string())?;
   let complete: i64 = conn
     .query_row(
-      "SELECT COUNT(*) FROM items WHERE title IS NOT NULL AND id IN (SELECT item_id FROM item_authors)",
+      "SELECT COUNT(*) FROM items
+       WHERE id IN (SELECT DISTINCT item_id FROM files WHERE status = 'active')
+       AND title IS NOT NULL
+       AND TRIM(title) != ''
+       AND id IN (SELECT item_id FROM item_authors)
+       AND id IN (SELECT item_id FROM identifiers WHERE type IN ('ISBN10','ISBN13','OTHER','isbn10','isbn13','other'))
+       AND id IN (SELECT item_id FROM covers)",
       params![],
       |row| row.get(0),
     )
     .map_err(|err| err.to_string())?;
   let missing_cover: i64 = conn
     .query_row(
-      "SELECT COUNT(*) FROM items WHERE id NOT IN (SELECT item_id FROM covers)",
+      "SELECT COUNT(*) FROM (
+         SELECT DISTINCT item_id FROM files WHERE status = 'active'
+       ) active_items
+       WHERE item_id NOT IN (SELECT item_id FROM covers)",
       params![],
       |row| row.get(0),
     )
@@ -2644,6 +2680,76 @@ fn generate_pending_changes_from_organize(
   Ok(created)
 }
 
+fn prune_empty_dirs(start: &std::path::Path, root: &std::path::Path) {
+  let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+  let mut current = start.to_path_buf();
+
+  loop {
+    let canonical_current = match current.canonicalize() {
+      Ok(value) => value,
+      Err(_) => break,
+    };
+    if canonical_current == canonical_root {
+      break;
+    }
+    if !canonical_current.starts_with(&canonical_root) {
+      break;
+    }
+
+    let is_empty = std::fs::read_dir(&canonical_current)
+      .map(|mut entries| entries.next().is_none())
+      .unwrap_or(false);
+
+    if !is_empty {
+      break;
+    }
+
+    if std::fs::remove_dir(&canonical_current).is_err() {
+      break;
+    }
+
+    if let Some(parent) = canonical_current.parent() {
+      current = parent.to_path_buf();
+    } else {
+      break;
+    }
+  }
+}
+
+fn prune_empty_dirs_recursive(root: &std::path::Path) {
+  let canonical_root = match root.canonicalize() {
+    Ok(value) => value,
+    Err(_) => return,
+  };
+
+  fn walk(dir: &std::path::Path, root: &std::path::Path) {
+    let entries = match std::fs::read_dir(dir) {
+      Ok(value) => value,
+      Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+      let path = entry.path();
+      if path.is_dir() {
+        walk(&path, root);
+      }
+    }
+
+    if dir == root {
+      return;
+    }
+
+    let is_empty = std::fs::read_dir(dir)
+      .map(|mut entries| entries.next().is_none())
+      .unwrap_or(false);
+    if is_empty {
+      let _ = std::fs::remove_dir(dir);
+    }
+  }
+
+  walk(&canonical_root, &canonical_root);
+}
+
 #[tauri::command]
 fn apply_organize(app: tauri::AppHandle, plan: OrganizePlan) -> Result<String, String> {
   let conn = open_db(&app)?;
@@ -2878,6 +2984,10 @@ fn apply_organize(app: tauri::AppHandle, plan: OrganizePlan) -> Result<String, S
         params![entry.target_path, filename, extension, now, entry.file_id],
       )
       .map_err(|err| err.to_string())?;
+
+      if let Some(parent) = std::path::Path::new(&entry.source_path).parent() {
+        prune_empty_dirs(parent, std::path::Path::new(&plan.library_root));
+      }
     }
 
     log_entries.push(OrganizerLogEntry {
@@ -2898,6 +3008,10 @@ fn apply_organize(app: tauri::AppHandle, plan: OrganizePlan) -> Result<String, S
         total,
       },
     );
+  }
+
+  if plan.mode == "move" || plan.mode == "copy" {
+    prune_empty_dirs_recursive(std::path::Path::new(&plan.library_root));
   }
 
   let log_id = Uuid::new_v4().to_string();
