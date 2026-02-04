@@ -10,6 +10,8 @@ export type View =
   | "tags"
   | "ereader"
   | "organize"
+  | "missing-files"
+  | "settings"
   | "edit";
 export type LibraryFilter = "all" | "epub" | "pdf" | "needs-metadata" | "tagged";
 
@@ -65,6 +67,16 @@ export type LibraryItem = {
   language?: string | null;
   series?: string | null;
   series_index?: number | null;
+  isbn?: string | null;
+};
+
+export type MissingFileItem = {
+  fileId: string;
+  itemId: string;
+  title: string;
+  authors: string[];
+  path: string;
+  extension: string;
 };
 
 export type BookDisplay = {
@@ -81,6 +93,28 @@ export type BookDisplay = {
   series?: string | null;
   seriesIndex?: number | null;
   createdAt: number;
+};
+
+export type OrganizerSettings = {
+  libraryRoot: string | null;
+  mode: string;
+  template: string;
+};
+
+export type OrganizerLogEntry = {
+  action: string;
+  from: string;
+  to: string;
+  timestamp: number;
+  error?: string | null;
+};
+
+export type OrganizerLog = {
+  id: string;
+  createdAt: number;
+  processed: number;
+  errors: number;
+  entries: OrganizerLogEntry[];
 };
 
 export type ScanStats = {
@@ -116,6 +150,8 @@ export type DuplicateGroup = {
   files: string[];
   file_ids: string[];
   file_paths: string[];
+  file_titles: string[];
+  file_sizes: number[];
 };
 
 export type PendingChange = {
