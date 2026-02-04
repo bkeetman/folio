@@ -145,6 +145,29 @@ body {
   font-size: 16px;
 }
 
+/* App Preview */
+.app-preview {
+  margin-bottom: 80px;
+  text-align: center;
+}
+
+.screenshot-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 32px;
+  padding: 12px;
+  box-shadow: var(--shadow-lg);
+  display: inline-block;
+  max-width: 100%;
+}
+
+.app-screenshot {
+  width: 100%;
+  height: auto;
+  border-radius: 20px;
+  display: block;
+}
+
 /* Platform Selector */
 .platform-selector {
   margin-bottom: 80px;
