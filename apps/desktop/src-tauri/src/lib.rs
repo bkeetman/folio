@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use tauri::{Emitter, Manager};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use uuid::Uuid;
@@ -18,6 +19,7 @@ use zip::ZipArchive;
 
 /// Global flag to cancel the enrich operation
 static ENRICH_CANCELLED: AtomicBool = AtomicBool::new(false);
+static BOL_TOKEN_CACHE: OnceLock<Mutex<Option<BolAccessToken>>> = OnceLock::new();
 
 pub mod db;
 pub mod models;
@@ -229,6 +231,7 @@ struct EpubChangeSet {
   title: Option<String>,
   author: Option<String>,
   isbn: Option<String>,
+  description: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -246,6 +249,13 @@ struct CoverBlob {
   bytes: Vec<u8>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DescriptionCleanupResult {
+  items_updated: i64,
+  files_queued: i64,
+}
+
 #[derive(Serialize, serde::Deserialize, Clone)]
 struct EnrichmentCandidate {
   id: String,
@@ -256,6 +266,12 @@ struct EnrichmentCandidate {
   cover_url: Option<String>,
   source: String,
   confidence: f64,
+}
+
+#[derive(Clone)]
+struct BolAccessToken {
+  access_token: String,
+  expires_at: i64,
 }
 
 #[derive(Serialize, serde::Deserialize)]
@@ -435,7 +451,7 @@ fn get_item_details(app: tauri::AppHandle, item_id: String) -> Result<ItemMetada
     isbn,
     series,
     series_index,
-    description,
+    description: normalize_optional_description(description),
   })
 }
 
@@ -1436,6 +1452,7 @@ fn rewrite_opf_metadata(opf: &str, changes: &EpubChangeSet) -> Result<String, St
   let mut replaced_title = false;
   let mut replaced_creator = false;
   let mut replaced_identifier = false;
+  let mut replaced_description = false;
 
   loop {
     match reader.read_event_into(&mut buf) {
@@ -1491,6 +1508,19 @@ fn rewrite_opf_metadata(opf: &str, changes: &EpubChangeSet) -> Result<String, St
           ))
           .map_err(|err| err.to_string())?;
           replaced_identifier = true;
+        } else if in_metadata && local == "description" && changes.description.is_some() && !replaced_description {
+          writer.write_event(quick_xml::events::Event::Start(e.clone()))
+            .map_err(|err| err.to_string())?;
+          writer.write_event(quick_xml::events::Event::Text(
+            quick_xml::events::BytesText::new(changes.description.as_ref().unwrap()),
+          ))
+          .map_err(|err| err.to_string())?;
+          consume_element(&mut reader, &name)?;
+          writer.write_event(quick_xml::events::Event::End(
+            quick_xml::events::BytesEnd::new(name.as_str()),
+          ))
+          .map_err(|err| err.to_string())?;
+          replaced_description = true;
         } else {
           writer.write_event(quick_xml::events::Event::Start(e.clone()))
             .map_err(|err| err.to_string())?;
@@ -1538,6 +1568,21 @@ fn rewrite_opf_metadata(opf: &str, changes: &EpubChangeSet) -> Result<String, St
               .map_err(|err| err.to_string())?;
               writer.write_event(quick_xml::events::Event::Text(
                 quick_xml::events::BytesText::new(changes.isbn.as_ref().unwrap()),
+              ))
+              .map_err(|err| err.to_string())?;
+              writer.write_event(quick_xml::events::Event::End(
+                quick_xml::events::BytesEnd::new(tag.as_str()),
+              ))
+              .map_err(|err| err.to_string())?;
+            }
+            if changes.description.is_some() && !replaced_description {
+              let tag = format!("{}:description", prefix);
+              writer.write_event(quick_xml::events::Event::Start(
+                quick_xml::events::BytesStart::new(tag.as_str()),
+              ))
+              .map_err(|err| err.to_string())?;
+              writer.write_event(quick_xml::events::Event::Text(
+                quick_xml::events::BytesText::new(changes.description.as_ref().unwrap()),
               ))
               .map_err(|err| err.to_string())?;
               writer.write_event(quick_xml::events::Event::End(
@@ -1772,6 +1817,9 @@ fn get_fix_candidates(app: tauri::AppHandle, item_id: String) -> Result<Vec<Enri
   // Strategy 1: Search by ISBN if available
   if let Some(isbn) = isbn {
     candidates.extend(fetch_openlibrary_isbn(&isbn));
+    if candidates.is_empty() {
+      candidates.extend(fetch_bol_isbn(&isbn));
+    }
     candidates.extend(fetch_google_isbn(&isbn));
   }
 
@@ -1820,6 +1868,9 @@ fn search_candidates(
   if let Some(isbn) = normalize_isbn(trimmed) {
     let mut candidates: Vec<EnrichmentCandidate> = vec![];
     candidates.extend(fetch_openlibrary_isbn(&isbn));
+    if candidates.is_empty() {
+      candidates.extend(fetch_bol_isbn(&isbn));
+    }
     candidates.extend(fetch_google_isbn(&isbn));
     candidates
       .sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
@@ -1944,6 +1995,9 @@ fn enrich_all_sync(app: &tauri::AppHandle) -> Result<OperationStats, String> {
     // First try ISBN if available
     if let Some(ref isbn_val) = isbn {
       candidates.extend(fetch_openlibrary_isbn(isbn_val));
+      if candidates.is_empty() {
+        candidates.extend(fetch_bol_isbn(isbn_val));
+      }
       if candidates.is_empty() {
         candidates.extend(fetch_google_isbn(isbn_val));
       }
@@ -2173,6 +2227,7 @@ fn save_item_metadata(
 ) -> Result<(), String> {
   let conn = open_db(&app)?;
   let now = chrono::Utc::now().timestamp_millis();
+  let description = normalize_optional_description(metadata.description.clone());
   log::info!("saving manual metadata for item {}: {:?}", item_id, metadata.title);
 
   // Update items table
@@ -2184,7 +2239,7 @@ fn save_item_metadata(
       metadata.language,
       metadata.series,
       metadata.series_index,
-      metadata.description,
+      description,
       now,
       item_id
     ],
@@ -2259,6 +2314,29 @@ fn save_item_metadata(
         )
         .map_err(|err| err.to_string())?;
     }
+  }
+
+  let queued_epub_changes = queue_epub_changes_for_item(
+    &conn,
+    &item_id,
+    &EpubChangeSet {
+      title: metadata.title.clone(),
+      author: metadata.authors.first().cloned(),
+      isbn: metadata
+        .isbn
+        .as_ref()
+        .and_then(|raw| normalize_isbn(raw).or_else(|| Some(raw.trim().to_string())))
+        .filter(|value| !value.is_empty()),
+      description: Some(description.clone().unwrap_or_default()),
+    },
+    now,
+  )?;
+  if queued_epub_changes > 0 {
+    log::info!(
+      "queued epub metadata changes for {} files after manual save of item {}",
+      queued_epub_changes,
+      item_id
+    );
   }
 
   if let Ok(false) = has_cover(&conn, &item_id) {
@@ -2787,6 +2865,55 @@ fn clear_library(app: tauri::AppHandle) -> Result<(), String> {
   .map_err(|err| err.to_string())?;
   conn.execute_batch("VACUUM;").map_err(|err| err.to_string())?;
   Ok(())
+}
+
+#[tauri::command]
+fn normalize_item_descriptions(app: tauri::AppHandle) -> Result<DescriptionCleanupResult, String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+  let mut stmt = conn
+    .prepare("SELECT id, description FROM items WHERE description IS NOT NULL")
+    .map_err(|err| err.to_string())?;
+  let rows = stmt
+    .query_map(params![], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+    .map_err(|err| err.to_string())?;
+
+  let mut updates: Vec<(String, Option<String>)> = Vec::new();
+  for row in rows {
+    let (item_id, description) = row.map_err(|err| err.to_string())?;
+    let normalized = normalize_optional_description(Some(description.clone()));
+    if normalized.as_deref() != Some(description.as_str()) {
+      updates.push((item_id, normalized));
+    }
+  }
+
+  let mut changed = 0i64;
+  let mut queued = 0i64;
+  for (item_id, description) in updates {
+    conn.execute(
+      "UPDATE items SET description = ?1, updated_at = ?2 WHERE id = ?3",
+      params![description, now, item_id],
+    )
+    .map_err(|err| err.to_string())?;
+    changed += 1;
+
+    queued += queue_epub_changes_for_item(
+      &conn,
+      &item_id,
+      &EpubChangeSet {
+        title: None,
+        author: None,
+        isbn: None,
+        description: Some(description.unwrap_or_default()),
+      },
+      now,
+    )?;
+  }
+
+  Ok(DescriptionCleanupResult {
+    items_updated: changed,
+    files_queued: queued,
+  })
 }
 
 #[tauri::command]
@@ -3522,7 +3649,7 @@ fn extract_pdf_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, Str
         metadata.authors.push(author);
       }
       if let Some(subject) = dict_string(info, b"Subject") {
-        metadata.description = Some(subject);
+        metadata.description = normalize_optional_description(Some(subject));
       }
       if let Some(keywords) = dict_string(info, b"Keywords") {
         metadata.identifiers.extend(extract_isbn_candidates(&keywords));
@@ -3553,6 +3680,47 @@ fn dict_string(dict: &lopdf::Dictionary, key: &[u8]) -> Option<String> {
   }
 }
 
+fn normalize_optional_description(value: Option<String>) -> Option<String> {
+  let raw = value?;
+  let decoded = quick_xml::escape::unescape(&raw)
+    .map(|text| text.into_owned())
+    .unwrap_or(raw)
+    .replace('\u{00a0}', " ");
+
+  let html_tag_re = Regex::new(r"(?is)<\s*/?\s*[a-z][^>]*>").expect("valid html tag regex");
+  let mut normalized = if html_tag_re.is_match(&decoded) {
+    let break_re = Regex::new(r"(?is)<br\s*/?>").expect("valid break regex");
+    let block_end_re = Regex::new(r"(?is)</(p|div|li|ul|ol|h[1-6])>").expect("valid block-end regex");
+    let block_start_re = Regex::new(r"(?is)<li[^>]*>").expect("valid list-item regex");
+    let strip_re = Regex::new(r"(?is)<[^>]+>").expect("valid strip regex");
+
+    let with_breaks = break_re.replace_all(&decoded, "\n");
+    let with_block_breaks = block_end_re.replace_all(&with_breaks, "\n");
+    let with_list_prefix = block_start_re.replace_all(&with_block_breaks, "- ");
+    strip_re.replace_all(&with_list_prefix, "").into_owned()
+  } else {
+    decoded
+  };
+
+  normalized = normalized
+    .replace("\r\n", "\n")
+    .replace('\r', "\n");
+
+  let lines: Vec<String> = normalized
+    .lines()
+    .map(|line| line.trim())
+    .filter(|line| !line.is_empty())
+    .map(|line| line.to_string())
+    .collect();
+
+  if lines.is_empty() {
+    return None;
+  }
+
+  let collapsed = lines.join("\n");
+  Some(collapsed)
+}
+
 fn apply_metadata(
   conn: &Connection,
   item_id: &str,
@@ -3570,7 +3738,7 @@ fn apply_metadata(
   let title = existing.0.or_else(|| metadata.title.clone());
   let language = existing.1.or_else(|| metadata.language.clone());
   let published_year = existing.2.or(metadata.published_year);
-  let description = existing.3.or_else(|| metadata.description.clone());
+  let description = normalize_optional_description(existing.3.or_else(|| metadata.description.clone()));
   let series = existing.4.or_else(|| metadata.series.clone());
   let series_index = existing.5.or(metadata.series_index);
 
@@ -3888,7 +4056,7 @@ fn parse_opf_metadata(opf: &str, metadata: &mut ExtractedMetadata) -> Result<(),
           }
           "dc:description" => {
             if metadata.description.is_none() {
-              metadata.description = Some(text);
+              metadata.description = normalize_optional_description(Some(text));
             }
           }
           _ => {}
@@ -4442,6 +4610,63 @@ fn fetch_openlibrary_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
   }]
 }
 
+fn fetch_bol_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
+  let ean = match isbn_to_ean13(isbn) {
+    Some(value) => value,
+    None => return vec![],
+  };
+
+  let token = match get_bol_access_token() {
+    Some(value) => value,
+    None => return vec![],
+  };
+
+  let client = reqwest::blocking::Client::new();
+  let url = format!("https://api.bol.com/marketing/catalog/v1/products/{}", ean);
+  let response = match client
+    .get(url)
+    .bearer_auth(token)
+    .header(reqwest::header::ACCEPT, "application/json")
+    .send()
+  {
+    Ok(value) => value,
+    Err(err) => {
+      log::warn!("bol isbn request failed for {}: {}", ean, err);
+      return vec![];
+    }
+  };
+  if !response.status().is_success() {
+    log::warn!("bol isbn request returned {} for {}", response.status(), ean);
+    return vec![];
+  }
+
+  let data: serde_json::Value = match response.json() {
+    Ok(value) => value,
+    Err(err) => {
+      log::warn!("bol isbn response parse failed for {}: {}", ean, err);
+      return vec![];
+    }
+  };
+
+  let title = json_find_string(&data, "title");
+  let authors = json_collect_strings(&data, &["author", "authors"], 3);
+  let published_year = json_find_string(&data, "releaseDate")
+    .or_else(|| json_find_string(&data, "publicationDate"))
+    .and_then(|value| extract_year(&value));
+  let cover_url = json_find_first_image_url(&data);
+
+  vec![EnrichmentCandidate {
+    id: Uuid::new_v4().to_string(),
+    title,
+    authors,
+    published_year,
+    identifiers: vec![ean],
+    cover_url,
+    source: "Bol.com".to_string(),
+    confidence: 0.82,
+  }]
+}
+
 fn fetch_google_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
   let url = format!("https://www.googleapis.com/books/v1/volumes?q=isbn:{}", isbn);
   let response = reqwest::blocking::get(url);
@@ -4498,6 +4723,176 @@ fn fetch_google_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
       }
     })
     .collect()
+}
+
+fn get_bol_access_token() -> Option<String> {
+  let now = chrono::Utc::now().timestamp_millis();
+  let cache = BOL_TOKEN_CACHE.get_or_init(|| Mutex::new(None));
+  if let Ok(guard) = cache.lock() {
+    if let Some(token) = guard.clone() {
+      // Refresh shortly before expiry to avoid edge race during requests.
+      if token.expires_at > now + 15_000 {
+        return Some(token.access_token);
+      }
+    }
+  }
+
+  let client_id = match std::env::var("BOL_CLIENT_ID") {
+    Ok(value) if !value.trim().is_empty() => value,
+    _ => return None,
+  };
+  let client_secret = match std::env::var("BOL_CLIENT_SECRET") {
+    Ok(value) if !value.trim().is_empty() => value,
+    _ => return None,
+  };
+
+  let client = reqwest::blocking::Client::new();
+  let response = match client
+    .post("https://login.bol.com/token?grant_type=client_credentials")
+    .basic_auth(client_id, Some(client_secret))
+    .header(reqwest::header::ACCEPT, "application/json")
+    .send()
+  {
+    Ok(value) => value,
+    Err(err) => {
+      log::warn!("bol token request failed: {}", err);
+      return None;
+    }
+  };
+  if !response.status().is_success() {
+    log::warn!("bol token request returned {}", response.status());
+    return None;
+  }
+
+  let data: serde_json::Value = match response.json() {
+    Ok(value) => value,
+    Err(err) => {
+      log::warn!("bol token parse failed: {}", err);
+      return None;
+    }
+  };
+
+  let access_token = match data.get("access_token").and_then(|value| value.as_str()) {
+    Some(value) if !value.is_empty() => value.to_string(),
+    _ => return None,
+  };
+  let expires_in = data
+    .get("expires_in")
+    .and_then(|value| value.as_i64())
+    .unwrap_or(299);
+  let token = BolAccessToken {
+    access_token: access_token.clone(),
+    expires_at: now + (expires_in * 1000),
+  };
+
+  if let Ok(mut guard) = cache.lock() {
+    *guard = Some(token);
+  }
+  Some(access_token)
+}
+
+fn json_find_string(value: &serde_json::Value, key: &str) -> Option<String> {
+  match value {
+    serde_json::Value::Object(map) => {
+      if let Some(found) = map.get(key).and_then(|entry| entry.as_str()) {
+        let trimmed = found.trim();
+        if !trimmed.is_empty() {
+          return Some(trimmed.to_string());
+        }
+      }
+      for entry in map.values() {
+        if let Some(found) = json_find_string(entry, key) {
+          return Some(found);
+        }
+      }
+      None
+    }
+    serde_json::Value::Array(values) => values.iter().find_map(|entry| json_find_string(entry, key)),
+    _ => None,
+  }
+}
+
+fn json_collect_strings(value: &serde_json::Value, keys: &[&str], max_items: usize) -> Vec<String> {
+  let mut values: Vec<String> = vec![];
+  for key in keys {
+    collect_strings_for_key(value, key, &mut values);
+  }
+  values.dedup();
+  values.into_iter().take(max_items).collect()
+}
+
+fn collect_strings_for_key(value: &serde_json::Value, key: &str, out: &mut Vec<String>) {
+  match value {
+    serde_json::Value::Object(map) => {
+      if let Some(found) = map.get(key) {
+        match found {
+          serde_json::Value::String(item) => {
+            let trimmed = item.trim();
+            if !trimmed.is_empty() {
+              out.push(trimmed.to_string());
+            }
+          }
+          serde_json::Value::Array(items) => {
+            for item in items {
+              if let Some(text) = item.as_str() {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                  out.push(trimmed.to_string());
+                }
+              }
+            }
+          }
+          _ => {}
+        }
+      }
+      for item in map.values() {
+        collect_strings_for_key(item, key, out);
+      }
+    }
+    serde_json::Value::Array(items) => {
+      for item in items {
+        collect_strings_for_key(item, key, out);
+      }
+    }
+    _ => {}
+  }
+}
+
+fn json_find_first_image_url(value: &serde_json::Value) -> Option<String> {
+  let images = value.get("images").and_then(|entry| entry.as_array())?;
+  for image in images {
+    if let Some(url) = image.get("url").and_then(|entry| entry.as_str()) {
+      if !url.trim().is_empty() {
+        return Some(url.to_string());
+      }
+    }
+    if let Some(url) = image.get("s").and_then(|entry| entry.as_str()) {
+      if !url.trim().is_empty() {
+        return Some(url.to_string());
+      }
+    }
+  }
+  None
+}
+
+fn isbn_to_ean13(value: &str) -> Option<String> {
+  let normalized = normalize_isbn(value)?;
+  if normalized.len() == 13 {
+    return Some(normalized);
+  }
+  if normalized.len() != 10 {
+    return None;
+  }
+
+  let base = format!("978{}", &normalized[..9]);
+  let mut sum = 0u32;
+  for (index, ch) in base.chars().enumerate() {
+    let digit = ch.to_digit(10)?;
+    let weight = if index % 2 == 0 { 1 } else { 3 };
+    sum += digit * weight;
+  }
+  let check = (10 - (sum % 10)) % 10;
+  Some(format!("{}{}", base, check))
 }
 
 fn fetch_openlibrary_search(title: &str, author: Option<&str>) -> Vec<EnrichmentCandidate> {
@@ -4783,15 +5178,6 @@ fn queue_epub_changes(
   candidate: &EnrichmentCandidate,
   now: i64,
 ) -> Result<i64, String> {
-  let mut stmt = conn
-    .prepare(
-      "SELECT id, path FROM files WHERE item_id = ?1 AND status = 'active' AND LOWER(extension) IN ('epub', '.epub')",
-    )
-    .map_err(|err| err.to_string())?;
-  let rows = stmt
-    .query_map(params![item_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
-    .map_err(|err| err.to_string())?;
-
   let isbn = candidate
     .identifiers
     .iter()
@@ -4802,8 +5188,35 @@ fn queue_epub_changes(
     title: candidate.title.clone(),
     author: candidate.authors.first().cloned(),
     isbn,
+    description: None,
   };
-  let changes_json = serde_json::to_string(&changes).map_err(|err| err.to_string())?;
+  queue_epub_changes_for_item(conn, item_id, &changes, now)
+}
+
+fn queue_epub_changes_for_item(
+  conn: &Connection,
+  item_id: &str,
+  changes: &EpubChangeSet,
+  now: i64,
+) -> Result<i64, String> {
+  let has_changes = changes.title.is_some()
+    || changes.author.is_some()
+    || changes.isbn.is_some()
+    || changes.description.is_some();
+  if !has_changes {
+    return Ok(0);
+  }
+
+  let mut stmt = conn
+    .prepare(
+      "SELECT id, path FROM files WHERE item_id = ?1 AND status = 'active' AND LOWER(extension) IN ('epub', '.epub')",
+    )
+    .map_err(|err| err.to_string())?;
+  let rows = stmt
+    .query_map(params![item_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+    .map_err(|err| err.to_string())?;
+
+  let changes_json = serde_json::to_string(changes).map_err(|err| err.to_string())?;
 
   let mut created = 0i64;
   for row in rows {
@@ -5626,6 +6039,7 @@ pub fn run() {
       plan_organize,
       apply_organize,
       clear_library,
+      normalize_item_descriptions,
       scan_folder,
       scanner::scan_library,
       add_ereader_device,

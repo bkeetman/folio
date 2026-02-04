@@ -281,6 +281,7 @@ function App() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [normalizingDescriptions, setNormalizingDescriptions] = useState(false);
   const [tags, setTags] = useState<Tag[]>([]);
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0].value);
@@ -1208,6 +1209,30 @@ function App() {
     }
   };
 
+  const handleNormalizeDescriptions = useCallback(async () => {
+    if (!isTauri() || normalizingDescriptions) return;
+    setNormalizingDescriptions(true);
+    try {
+      const result = await invoke<{ itemsUpdated: number; filesQueued: number }>(
+        "normalize_item_descriptions"
+      );
+      await refreshLibrary();
+      if (result.itemsUpdated > 0) {
+        setScanStatus(
+          `Cleaned descriptions for ${result.itemsUpdated} items and queued ${result.filesQueued} EPUB file updates.`
+        );
+      } else {
+        setScanStatus("Descriptions were already clean.");
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error ?? "Description cleanup failed.");
+      setScanStatus(`Could not clean descriptions: ${message}`);
+    } finally {
+      setNormalizingDescriptions(false);
+    }
+  }, [normalizingDescriptions, refreshLibrary]);
+
   useEffect(() => {
     if (!scanning) return;
     const interval = setInterval(() => {
@@ -2127,6 +2152,8 @@ function App() {
                   if (typeof selection !== "string") return;
                   setOrganizeRoot(selection);
                 }}
+                onNormalizeDescriptions={handleNormalizeDescriptions}
+                normalizingDescriptions={normalizingDescriptions}
               />
             ) : null}
 
