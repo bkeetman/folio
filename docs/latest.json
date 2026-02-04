@@ -1,22 +1,22 @@
 {
-  "version": "0.1.29",
-  "notes": "Release 0.1.29",
-  "pub_date": "2026-02-03T14:06:38.951Z",
+  "version": "0.1.32",
+  "notes": "Release 0.1.32",
+  "pub_date": "2026-02-04T16:46:26.668Z",
   "platforms": {
     "darwin-aarch64": {
-      "url": "https://github.com/bkeetman/folio/releases/download/v0.1.29/Folio_aarch64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTTnVFRUU5eldVYTd5SURvaFdnNWtFN2tnS1JmbkhBWmNFS3dJQ1JhL0NpSmlHY01sWmRFcEJUNGU5VjUxeUNrakloSEU4MjhpY2tpQm1ZQm1jNncrdjFwdW9SVTU1TUFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcwMTI3NTkyCWZpbGU6Rm9saW8uYXBwLnRhci5negpJemRjdnhCYzJVUk5XTWtXMTJ2Qkp5cVN6UVI5bWVxMzdyWHd3VEsvaEdRTVJ4eDV2cWR4bXdZbTA2eHJmYWNzU3hHTTNDWjlpUzFDODk5NTYwYXJCQT09Cg=="
+      "url": "https://github.com/bkeetman/folio/releases/download/v0.1.32/Folio_aarch64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTTnVFRUU5eldVYXlkUi9lcW4rWG1RN3krU0QyaFNvZkhzck5JOEVhMmUzVTdGTzFublB2UmV4Rm96a0Q2czVoZzFVSTBiWlVOVlBWMVBiTXhBbXZ1Tk9ocTVsS1JTNmcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcwMjIzNTgwCWZpbGU6Rm9saW8uYXBwLnRhci5negpsckZ2MTlsYUtOYWtqZ1U3MCt5eEp4by8vWVNIRkU4cldPbWE2ZHZGVHBvWjFiRnlaWlRPY1FJYzRTRkY0enluK28wWmF2Z2ozUE9EUUtKbnJKalhDUT09Cg=="
     }
   },
   "downloads": {
     "macos": {
-      "arm64": "https://github.com/bkeetman/folio/releases/download/v0.1.29/Folio_0.1.29_aarch64.dmg",
-      "dmg": "https://github.com/bkeetman/folio/releases/download/v0.1.29/Folio_0.1.29_aarch64.dmg"
+      "arm64": "https://github.com/bkeetman/folio/releases/download/v0.1.32/Folio_0.1.32_aarch64.dmg",
+      "dmg": "https://github.com/bkeetman/folio/releases/download/v0.1.32/Folio_0.1.32_aarch64.dmg"
     },
     "linux": {
-      "appimage": "https://github.com/bkeetman/folio/releases/download/v0.1.29/Folio_0.1.29_amd64.AppImage",
-      "deb": "https://github.com/bkeetman/folio/releases/download/v0.1.29/Folio_0.1.29_amd64.deb",
-      "rpm": "https://github.com/bkeetman/folio/releases/download/v0.1.29/Folio-0.1.29-1.x86_64.rpm"
+      "appimage": "https://github.com/bkeetman/folio/releases/download/v0.1.32/Folio_0.1.32_amd64.AppImage",
+      "deb": "https://github.com/bkeetman/folio/releases/download/v0.1.32/Folio_0.1.32_amd64.deb",
+      "rpm": "https://github.com/bkeetman/folio/releases/download/v0.1.32/Folio-0.1.32-1.x86_64.rpm"
     }
   }
 }
