@@ -17,7 +17,9 @@ import { FixView } from "./sections/FixView";
 import { InboxView } from "./sections/InboxView";
 import { Inspector } from "./sections/Inspector";
 import { LibraryView } from "./sections/LibraryView";
+import { MissingFilesView } from "./sections/MissingFilesView";
 import { OrganizerView } from "./sections/OrganizerView"; // Re-adding import
+import { SettingsView } from "./sections/SettingsView";
 import { SeriesView } from "./sections/SeriesView";
 import { Sidebar } from "./sections/Sidebar";
 import { StatusBar } from "./sections/StatusBar";
@@ -37,8 +39,11 @@ import type {
   LibraryHealth,
   LibraryItem,
   LibrarySort,
+  MissingFileItem,
   OperationProgress,
   OperationStats,
+  OrganizerSettings,
+  OrganizerLog,
   OrganizePlan,
   PendingChange,
   ScanProgress,
@@ -203,14 +208,20 @@ function App() {
   const [libraryReady, setLibraryReady] = useState(false);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [duplicates, setDuplicates] = useState<DuplicateGroup[]>([]);
+  const [missingFiles, setMissingFiles] = useState<MissingFileItem[]>([]);
   const [fixCandidates, setFixCandidates] = useState<EnrichmentCandidate[]>([]);
   const [fixLoading, setFixLoading] = useState(false);
   const [organizePlan, setOrganizePlan] = useState<OrganizePlan | null>(null);
   const [organizeStatus, setOrganizeStatus] = useState<string | null>(null);
+  const [organizeProgress, setOrganizeProgress] = useState<OperationProgress | null>(null);
+  const [organizing, setOrganizing] = useState(false);
+  const [organizeLog, setOrganizeLog] = useState<OrganizerLog | null>(null);
   const [organizeMode, setOrganizeMode] = useState("copy");
+  const [organizeRoot, setOrganizeRoot] = useState<string | null>(null);
   const [organizeTemplate, setOrganizeTemplate] = useState(
     "{Author}/{Title} ({Year}) [{ISBN13}].{ext}"
   );
+  const organizerSettingsLoaded = useRef(false);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [matchOpen, setMatchOpen] = useState(false);
   const [matchCandidates, setMatchCandidates] = useState<EnrichmentCandidate[]>([]);
@@ -248,6 +259,7 @@ function App() {
   const [duplicateKeepSelection, setDuplicateKeepSelection] = useState<
     Record<string, string>
   >({});
+  const [duplicateApplyNow, setDuplicateApplyNow] = useState(false);
   const [pendingChanges, setPendingChanges] = useState<PendingChange[]>([]);
   const [pendingChangesLoading, setPendingChangesLoading] = useState(false);
   const [pendingChangesApplying, setPendingChangesApplying] = useState(false);
@@ -381,15 +393,18 @@ function App() {
   // Books needing metadata fixes based on filter
   const booksNeedingFix = useMemo(() => {
     return libraryItems.filter((item) => {
+      const hasCover = Boolean(item.cover_path) || typeof coverOverrides[item.id] === "string";
+      const hasIsbn = Boolean(item.isbn && item.isbn.trim().length > 0);
       if (fixFilter.missingAuthor && item.authors.length === 0) return true;
       if (fixFilter.missingTitle && !item.title) return true;
-      if (fixFilter.missingCover && !item.cover_path) return true;
+      if (fixFilter.missingCover && !hasCover) return true;
+      if (fixFilter.missingIsbn && !hasIsbn) return true;
       if (fixFilter.missingYear && !item.published_year) return true;
       if (fixFilter.missingLanguage && !item.language) return true;
       if (fixFilter.missingSeries && !item.series) return true;
       return false;
     });
-  }, [libraryItems, fixFilter]);
+  }, [libraryItems, fixFilter, coverOverrides]);
 
   const enrichableCount = useMemo(() => {
     return libraryItems.reduce((count, item) => {
@@ -424,6 +439,73 @@ function App() {
       .then((version) => setAppVersion(version))
       .catch(() => {
         setAppVersion(null);
+      });
+  }, [isDesktop]);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlistenProgress: (() => void) | undefined;
+    let unlistenComplete: (() => void) | undefined;
+
+    listen<OperationProgress>("organize-progress", (event) => {
+      setOrganizeProgress(event.payload);
+      setOrganizing(true);
+    }).then((stop) => {
+      unlistenProgress = stop;
+    });
+
+    listen<OperationStats>("organize-complete", (event) => {
+      setOrganizeProgress(null);
+      setOrganizing(false);
+      setOrganizeStatus(
+        `Organizer complete: ${event.payload.processed} applied, ${event.payload.errors} errors.`
+      );
+    }).then((stop) => {
+      unlistenComplete = stop;
+    });
+
+    return () => {
+      if (unlistenProgress) unlistenProgress();
+      if (unlistenComplete) unlistenComplete();
+    };
+  }, [isDesktop]);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    invoke<OrganizerSettings>("get_organizer_settings")
+      .then((settings) => {
+        setOrganizeMode(settings.mode);
+        setOrganizeTemplate(settings.template);
+        setOrganizeRoot(settings.libraryRoot || null);
+      })
+      .catch(() => {
+        // ignore
+      })
+      .finally(() => {
+        organizerSettingsLoaded.current = true;
+      });
+  }, [isDesktop]);
+
+  useEffect(() => {
+    if (!isDesktop || !organizerSettingsLoaded.current) return;
+    const timeout = window.setTimeout(() => {
+      void invoke("set_organizer_settings", {
+        settings: {
+          libraryRoot: organizeRoot,
+          mode: organizeMode,
+          template: organizeTemplate,
+        },
+      });
+    }, 400);
+    return () => window.clearTimeout(timeout);
+  }, [isDesktop, organizeRoot, organizeMode, organizeTemplate]);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    invoke<OrganizerLog | null>("get_latest_organizer_log")
+      .then((log) => setOrganizeLog(log))
+      .catch(() => {
+        // ignore
       });
   }, [isDesktop]);
 
@@ -935,6 +1017,8 @@ function App() {
           "get_duplicate_groups"
         );
         setDuplicates(duplicateGroups);
+        const missing = await invoke<MissingFileItem[]>("get_missing_files");
+        setMissingFiles(missing);
         const health = await invoke<LibraryHealth>("get_library_health");
         setLibraryHealth(health);
         setCoverRefreshToken((value) => value + 1);
@@ -964,6 +1048,8 @@ function App() {
         "get_duplicate_groups"
       );
       setDuplicates(duplicateGroups);
+      const missing = await invoke<MissingFileItem[]>("get_missing_files");
+      setMissingFiles(missing);
       const health = await invoke<LibraryHealth>("get_library_health");
       setLibraryHealth(health);
       setCoverRefreshToken((value) => value + 1);
@@ -1474,16 +1560,26 @@ function App() {
       return;
     }
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const selection = await open({ directory: true, multiple: false });
-      if (typeof selection !== "string") return;
+      let selection = organizeRoot;
+      if (!selection) {
+        const { open } = await import("@tauri-apps/plugin-dialog");
+        const picked = await open({ directory: true, multiple: false });
+        if (typeof picked !== "string") return;
+        selection = picked;
+        setOrganizeRoot(picked);
+      }
       const plan = await invoke<OrganizePlan>("plan_organize", {
         mode: organizeMode,
         libraryRoot: selection,
         template: organizeTemplate,
       });
       setOrganizePlan(plan);
-      setOrganizeStatus(`Prepared ${plan.entries.length} actions.`);
+      const actionable = plan.entries.filter((entry) => entry.action !== "skip").length;
+      setOrganizeStatus(
+        actionable > 0
+          ? `Prepared ${actionable} actions.`
+          : "No changes needed based on current settings."
+      );
     } catch {
       setOrganizeStatus("Could not prepare organize plan.");
     }
@@ -1492,10 +1588,15 @@ function App() {
   const handleApplyOrganize = async () => {
     if (!organizePlan || !isTauri()) return;
     try {
-      const logPath = await invoke<string>("apply_organize", {
+      setOrganizeStatus("Organizing files...");
+      setOrganizing(true);
+      await invoke<string>("apply_organize", {
         plan: organizePlan,
       });
-      setOrganizeStatus(`Organized files. Log saved to ${logPath}`);
+      setOrganizeStatus("Organized files. Review details below.");
+      const log = await invoke<OrganizerLog | null>("get_latest_organizer_log");
+      setOrganizeLog(log);
+      await refreshLibrary();
       setActivityLog((prev) => [
         {
           id: `organize-${Date.now()}`,
@@ -1525,10 +1626,41 @@ function App() {
     }
   };
 
+  const pickBestDuplicate = useCallback((group: DuplicateGroup) => {
+    const scoreFile = (fileName: string, filePath: string) => {
+      const lowerPath = filePath.toLowerCase();
+      let score = 0;
+      if (lowerPath.endsWith(".epub")) score += 50;
+      if (lowerPath.endsWith(".pdf")) score += 10;
+      if (!/(\s\[\d+\]|\s\(\d+\)|\s-\s?copy| copy)/i.test(fileName)) score += 20;
+      if (!lowerPath.includes(".trash")) score += 5;
+      return score;
+    };
+
+    let bestId = group.file_ids[0];
+    let bestScore = -Infinity;
+    group.files.forEach((file, index) => {
+      const fileId = group.file_ids[index] ?? file;
+      const filePath = group.file_paths[index] ?? file;
+      const score = scoreFile(file, filePath);
+      if (score > bestScore) {
+        bestScore = score;
+        bestId = fileId;
+      }
+    });
+    return bestId;
+  }, []);
+
   const handleResolveDuplicate = async (groupId: string, keepFileId: string) => {
     if (!isTauri()) return;
     try {
-      await invoke("resolve_duplicate_group", { groupId, keepFileId });
+      const group = duplicates.find((entry) => entry.id === groupId);
+      const keepId = keepFileId || (group ? pickBestDuplicate(group) : "");
+      if (!keepId) {
+        setScanStatus("Pick a file to keep first.");
+        return;
+      }
+      await invoke("resolve_duplicate_group", { groupId, keepFileId: keepId });
       setScanStatus("Duplicate resolved.");
       await refreshLibrary();
       setDuplicateKeepSelection((prev) => {
@@ -1540,6 +1672,38 @@ function App() {
       setScanStatus("Could not resolve duplicate.");
     }
   };
+
+  const handleAutoSelectDuplicates = useCallback(() => {
+    const next: Record<string, string> = {};
+    duplicates.forEach((group) => {
+      next[group.id] = pickBestDuplicate(group);
+    });
+    setDuplicateKeepSelection(next);
+  }, [duplicates, pickBestDuplicate]);
+
+  const handleResolveAllDuplicates = useCallback(
+    async (applyNow: boolean) => {
+      if (!isTauri()) return;
+      try {
+        let resolved = 0;
+        for (const group of duplicates) {
+          const keepId = duplicateKeepSelection[group.id] || pickBestDuplicate(group);
+          if (!keepId) continue;
+          await invoke("resolve_duplicate_group", { groupId: group.id, keepFileId: keepId });
+          resolved += 1;
+        }
+        if (applyNow) {
+          await invoke("apply_pending_changes", { ids: [] });
+          setView("changes");
+        }
+        setScanStatus(`Resolved ${resolved} duplicate groups.`);
+        await refreshLibrary();
+      } catch {
+        setScanStatus("Could not resolve duplicates.");
+      }
+    },
+    [duplicates, duplicateKeepSelection, pickBestDuplicate, refreshLibrary]
+  );
 
   // eReader handlers
   const handleAddEreaderDevice = async (name: string, mountPath: string) => {
@@ -1786,6 +1950,10 @@ function App() {
                 duplicateKeepSelection={duplicateKeepSelection}
                 setDuplicateKeepSelection={setDuplicateKeepSelection}
                 handleResolveDuplicate={handleResolveDuplicate}
+                handleAutoSelectAll={handleAutoSelectDuplicates}
+                handleResolveAll={handleResolveAllDuplicates}
+                applyNow={duplicateApplyNow}
+                setApplyNow={setDuplicateApplyNow}
               />
             ) : null}
 
@@ -1803,6 +1971,8 @@ function App() {
                 setSearchQuery={setFixSearchQuery}
                 searchLoading={fixLoading}
                 searchCandidates={fixCandidates}
+                coverUrl={selectedFixItemId ? coverOverrides[selectedFixItemId] : null}
+                onFetchCover={fetchCoverOverride}
                 onSearch={() => {
                   if (!selectedFixItemId) return;
                   handleFetchCandidatesForItem(selectedFixItemId);
@@ -1837,6 +2007,8 @@ function App() {
                         : "Metadata updated."
                     );
                     await refreshLibrary();
+                    clearCoverOverride(selectedFixItemId);
+                    await fetchCoverOverride(selectedFixItemId, true);
                     setFixCandidates([]);
                   } catch {
                     setScanStatus("Could not apply metadata.");
@@ -1849,6 +2021,8 @@ function App() {
                     await invoke("save_item_metadata", { itemId: id, metadata: data });
                     setScanStatus("Metadata saved.");
                     await refreshLibrary();
+                    clearCoverOverride(id);
+                    await fetchCoverOverride(id, true);
                   } catch (e) {
                     console.error("Failed to save metadata", e);
                     setScanStatus("Could not save metadata.");
@@ -1891,6 +2065,7 @@ function App() {
               <OrganizerView
                 organizeMode={organizeMode}
                 setOrganizeMode={setOrganizeMode}
+                organizeRoot={organizeRoot}
                 organizeTemplate={organizeTemplate}
                 setOrganizeTemplate={setOrganizeTemplate}
                 organizePlan={organizePlan}
@@ -1898,6 +2073,80 @@ function App() {
                 handleApplyOrganize={handleApplyOrganize}
                 handleQueueOrganize={handleQueueOrganize}
                 organizeStatus={organizeStatus}
+                organizeProgress={organizeProgress}
+                organizing={organizing}
+                organizeLog={organizeLog}
+              />
+            ) : null}
+
+            {view === "settings" ? (
+              <SettingsView
+                libraryRoot={organizeRoot}
+                onChooseRoot={async () => {
+                  if (!isTauri()) return;
+                  const { open } = await import("@tauri-apps/plugin-dialog");
+                  const selection: string | string[] | null = await open({
+                    directory: true,
+                    multiple: false,
+                  });
+                  if (typeof selection !== "string") return;
+                  setOrganizeRoot(selection);
+                }}
+              />
+            ) : null}
+
+            {view === "missing-files" ? (
+              <MissingFilesView
+                items={missingFiles}
+                libraryRoot={organizeRoot}
+                onRelink={async (fileId) => {
+                  if (!isTauri()) return;
+                  try {
+                    const { open } = await import("@tauri-apps/plugin-dialog");
+                    const selection = await open({ multiple: false });
+                    if (typeof selection !== "string") return;
+                    await invoke("relink_missing_file", { fileId, newPath: selection });
+                    await refreshLibrary();
+                    setScanStatus("File relinked.");
+                  } catch (err) {
+                    console.error("Failed to relink file", err);
+                    setScanStatus("Could not relink file.");
+                  }
+                }}
+                onRemove={async (fileId) => {
+                  if (!isTauri()) return;
+                  try {
+                    await invoke("remove_missing_file", { fileId });
+                    await refreshLibrary();
+                    setScanStatus("Missing file removed.");
+                  } catch (err) {
+                    console.error("Failed to remove missing file", err);
+                    setScanStatus("Could not remove missing file.");
+                  }
+                }}
+                onRescan={async () => {
+                  if (!isTauri()) return;
+                  try {
+                    let selection = organizeRoot;
+                    if (!selection) {
+                      const { open } = await import("@tauri-apps/plugin-dialog");
+                      const picked: string | string[] | null = await open({
+                        directory: true,
+                        multiple: false,
+                      });
+                      if (typeof picked !== "string") return;
+                      selection = picked;
+                      setOrganizeRoot(picked);
+                    }
+                    setScanStatus("Scanning for missing files...");
+                    await invoke("scan_folder", { root: selection });
+                    await refreshLibrary();
+                    setScanStatus("Missing files refreshed.");
+                  } catch (err) {
+                    console.error("Failed to rescan", err);
+                    setScanStatus("Could not rescan folder.");
+                  }
+                }}
               />
             ) : null}
 
