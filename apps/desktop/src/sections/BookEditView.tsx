@@ -7,6 +7,13 @@ import { cleanupMetadataTitle } from "../lib/metadataCleanup";
 import { LANGUAGE_OPTIONS } from "../lib/languageFlags";
 import type { ItemMetadata, LibraryItem, View } from "../types/library";
 
+type EmbeddedCoverCandidate = {
+    path: string;
+    mime: string;
+    bytes: number[];
+    score: number;
+};
+
 type BookEditViewProps = {
     selectedItemId: string | null;
     libraryItems: LibraryItem[];
@@ -34,6 +41,11 @@ export function BookEditView({
     const [error, setError] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const [isUploadingCover, setIsUploadingCover] = useState(false);
+    const [isApplyingEmbeddedCover, setIsApplyingEmbeddedCover] = useState(false);
+    const [isLoadingEmbeddedPreview, setIsLoadingEmbeddedPreview] = useState(false);
+    const [embeddedPreviewUrl, setEmbeddedPreviewUrl] = useState<string | null>(null);
+    const [embeddedCandidates, setEmbeddedCandidates] = useState<EmbeddedCoverCandidate[]>([]);
+    const [selectedEmbeddedIndex, setSelectedEmbeddedIndex] = useState(0);
     const [formData, setFormData] = useState<ItemMetadata>({
         title: "",
         authors: [],
@@ -68,6 +80,14 @@ export function BookEditView({
             }
         }
     }, [selectedItemId, isDesktop, coverUrl, onFetchCover]);
+
+    useEffect(() => {
+        return () => {
+            if (embeddedPreviewUrl) {
+                URL.revokeObjectURL(embeddedPreviewUrl);
+            }
+        };
+    }, [embeddedPreviewUrl]);
 
     const handleSave = async () => {
         if (!selectedItemId) return;
@@ -123,6 +143,73 @@ export function BookEditView({
             setError("Failed to upload cover image.");
             setIsUploadingCover(false);
         }
+    };
+
+    const handleUseEmbeddedCover = async () => {
+        if (!selectedItemId) return;
+        setIsApplyingEmbeddedCover(true);
+        setError(null);
+        try {
+            const selected = embeddedCandidates[selectedEmbeddedIndex];
+            if (!selected) {
+                await invoke("use_embedded_cover", { itemId: selectedItemId });
+            } else {
+                await invoke("use_embedded_cover_from_bytes", {
+                    itemId: selectedItemId,
+                    bytes: selected.bytes,
+                    mime: selected.mime,
+                });
+            }
+            onClearCover(selectedItemId);
+            await onFetchCover(selectedItemId, true);
+            await onItemUpdate();
+        } catch (err) {
+            console.error("Failed to use embedded cover", err);
+            setError(err instanceof Error ? err.message : "Failed to use embedded cover.");
+        } finally {
+            setIsApplyingEmbeddedCover(false);
+        }
+    };
+
+    const handlePreviewEmbeddedCover = async () => {
+        if (!selectedItemId) return;
+        setIsLoadingEmbeddedPreview(true);
+        setError(null);
+        try {
+            const result = await invoke<EmbeddedCoverCandidate[]>(
+                "list_embedded_cover_candidates",
+                { itemId: selectedItemId }
+            );
+            if (!result.length) {
+                setError("No embedded cover found in EPUB.");
+                return;
+            }
+            setEmbeddedCandidates(result);
+            setSelectedEmbeddedIndex(0);
+            const blob = new Blob([new Uint8Array(result[0].bytes)], { type: result[0].mime });
+            const url = URL.createObjectURL(blob);
+            setEmbeddedPreviewUrl((previous) => {
+                if (previous) URL.revokeObjectURL(previous);
+                return url;
+            });
+        } catch (err) {
+            console.error("Failed to load embedded cover preview", err);
+            setError(err instanceof Error ? err.message : "Failed to load embedded cover preview.");
+        } finally {
+            setIsLoadingEmbeddedPreview(false);
+        }
+    };
+
+    const handleSelectEmbeddedCandidate = (index: number) => {
+        const candidate = embeddedCandidates[index];
+        if (!candidate) return;
+        const blob = new Blob([new Uint8Array(candidate.bytes)], { type: candidate.mime });
+        const url = URL.createObjectURL(blob);
+        setEmbeddedPreviewUrl((previous) => {
+            if (previous) URL.revokeObjectURL(previous);
+            return url;
+        });
+        setSelectedEmbeddedIndex(index);
     };
 
     if (!selectedItemId || !selectedItem) {
@@ -216,11 +303,63 @@ export function BookEditView({
                                 variant="outline"
                                 className="w-full"
                                 onClick={handleChangeCover}
-                                disabled={isUploadingCover || isSaving}
+                                disabled={isUploadingCover || isApplyingEmbeddedCover || isSaving}
                             >
                                 <ImageIcon size={14} className="mr-2" />
                                 {coverUrl ? "Change Cover" : "Add Cover"}
                             </Button>
+                            <Button
+                                variant="ghost"
+                                className="w-full"
+                                onClick={handleUseEmbeddedCover}
+                                disabled={isUploadingCover || isApplyingEmbeddedCover || isSaving}
+                            >
+                                {isApplyingEmbeddedCover ? (
+                                    <Loader2 size={14} className="mr-2 animate-spin" />
+                                ) : (
+                                    <ImageIcon size={14} className="mr-2" />
+                                )}
+                                Use Embedded Cover
+                            </Button>
+                            <div className="rounded-md border border-app-border bg-white p-3">
+                                <div className="mb-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-app-ink-muted">
+                                    Embedded Cover
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={handlePreviewEmbeddedCover}
+                                        disabled={isLoadingEmbeddedPreview || isApplyingEmbeddedCover || isSaving}
+                                    >
+                                        {isLoadingEmbeddedPreview ? "Loading..." : "Preview"}
+                                    </Button>
+                                </div>
+                                {embeddedPreviewUrl ? (
+                                    <div className="space-y-2">
+                                        <img
+                                            src={embeddedPreviewUrl}
+                                            alt=""
+                                            className="h-28 w-20 rounded border border-app-border object-cover"
+                                        />
+                                        {embeddedCandidates.length > 1 ? (
+                                            <select
+                                                className="h-8 w-full rounded-md border border-app-border bg-white px-2 text-[10px]"
+                                                value={String(selectedEmbeddedIndex)}
+                                                onChange={(event) =>
+                                                    handleSelectEmbeddedCandidate(parseInt(event.target.value, 10))
+                                                }
+                                            >
+                                                {embeddedCandidates.map((candidate, index) => (
+                                                    <option key={`${candidate.path}-${index}`} value={index}>
+                                                        {candidate.path}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        ) : null}
+                                    </div>
+                                ) : (
+                                    <div className="text-[10px] text-app-ink-muted">No preview loaded.</div>
+                                )}
+                            </div>
                             <p className="text-[10px] text-center text-app-ink-muted">
                                 Recommended: 800x1200px (JPG, PNG, WebP)
                             </p>

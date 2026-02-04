@@ -262,6 +262,15 @@ struct CoverBlob {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct EmbeddedCoverCandidate {
+  path: String,
+  mime: String,
+  bytes: Vec<u8>,
+  score: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DescriptionCleanupResult {
   items_updated: i64,
   files_queued: i64,
@@ -3554,6 +3563,130 @@ fn upload_cover(
   Ok(())
 }
 
+fn extract_embedded_cover_for_item(
+  conn: &Connection,
+  item_id: &str,
+) -> Result<Option<(Vec<u8>, String)>, String> {
+  let mut stmt = conn
+    .prepare(
+      "SELECT path FROM files WHERE item_id = ?1 AND status = 'active' AND LOWER(extension) IN ('.epub', 'epub') ORDER BY id",
+    )
+    .map_err(|err| err.to_string())?;
+
+  let rows = stmt
+    .query_map(params![item_id], |row| row.get::<_, String>(0))
+    .map_err(|err| err.to_string())?;
+
+  let mut found_epub = false;
+  for row in rows {
+    let path = row.map_err(|err| err.to_string())?;
+    found_epub = true;
+    let candidates = extract_epub_cover_candidates(std::path::Path::new(&path))?;
+    if let Some(candidate) = candidates.first() {
+      let extension = std::path::Path::new(&candidate.path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("jpg")
+        .to_string();
+      return Ok(Some((candidate.bytes.clone(), extension)));
+    }
+  }
+
+  if !found_epub {
+    return Err("No EPUB file found for this item.".to_string());
+  }
+  Ok(None)
+}
+
+#[tauri::command]
+fn use_embedded_cover(app: tauri::AppHandle, item_id: String) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+  let Some((bytes, extension)) = extract_embedded_cover_for_item(&conn, &item_id)? else {
+    return Err("No embedded cover found in EPUB files.".to_string());
+  };
+
+  save_cover(&app, &conn, &item_id, bytes, &extension, now, "embedded", None)?;
+  if let Err(err) = embed_latest_cover_into_epub(&conn, &item_id) {
+    log::warn!("failed to re-embed embedded cover into epub {}: {}", item_id, err);
+  }
+
+  Ok(())
+}
+
+#[tauri::command]
+fn use_embedded_cover_from_bytes(
+  app: tauri::AppHandle,
+  item_id: String,
+  bytes: Vec<u8>,
+  mime: String,
+) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+  let extension = match mime.to_lowercase().as_str() {
+    "image/png" => "png",
+    "image/webp" => "webp",
+    "image/gif" => "gif",
+    _ => "jpg",
+  };
+  save_cover(&app, &conn, &item_id, bytes, extension, now, "embedded", None)?;
+  if let Err(err) = embed_latest_cover_into_epub(&conn, &item_id) {
+    log::warn!("failed to embed selected cover into epub {}: {}", item_id, err);
+  }
+  Ok(())
+}
+
+#[tauri::command]
+fn get_embedded_cover_preview(
+  app: tauri::AppHandle,
+  item_id: String,
+) -> Result<Option<CoverBlob>, String> {
+  let conn = open_db(&app)?;
+  let Some((bytes, extension)) = extract_embedded_cover_for_item(&conn, &item_id)? else {
+    return Ok(None);
+  };
+  let mime = match extension.to_lowercase().as_str() {
+    "png" => "image/png",
+    "webp" => "image/webp",
+    "gif" => "image/gif",
+    _ => "image/jpeg",
+  };
+  Ok(Some(CoverBlob {
+    mime: mime.to_string(),
+    bytes,
+  }))
+}
+
+#[tauri::command]
+fn list_embedded_cover_candidates(
+  app: tauri::AppHandle,
+  item_id: String,
+) -> Result<Vec<EmbeddedCoverCandidate>, String> {
+  let conn = open_db(&app)?;
+  let mut stmt = conn
+    .prepare(
+      "SELECT path FROM files WHERE item_id = ?1 AND status = 'active' AND LOWER(extension) IN ('.epub', 'epub') ORDER BY id",
+    )
+    .map_err(|err| err.to_string())?;
+  let rows = stmt
+    .query_map(params![item_id], |row| row.get::<_, String>(0))
+    .map_err(|err| err.to_string())?;
+
+  let mut found_epub = false;
+  let mut candidates = Vec::new();
+  for row in rows {
+    let path = row.map_err(|err| err.to_string())?;
+    found_epub = true;
+    let mut file_candidates = extract_epub_cover_candidates(std::path::Path::new(&path))?;
+    candidates.append(&mut file_candidates);
+  }
+  if !found_epub {
+    return Err("No EPUB file found for this item.".to_string());
+  }
+  candidates.sort_by(|a, b| b.score.cmp(&a.score));
+  Ok(candidates)
+}
+
 #[tauri::command]
 fn get_organizer_settings(app: tauri::AppHandle) -> Result<OrganizerSettings, String> {
   let conn = open_db(&app)?;
@@ -3735,9 +3868,9 @@ fn extract_epub_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, St
   Ok(metadata)
 }
 
-fn extract_epub_cover(
+fn extract_epub_cover_candidates(
   path: &std::path::Path,
-) -> Result<Option<(Vec<u8>, String)>, String> {
+) -> Result<Vec<EmbeddedCoverCandidate>, String> {
   log::info!("epub cover check: {}", path.display());
   let file = std::fs::File::open(path).map_err(|err| err.to_string())?;
   let mut archive = ZipArchive::new(file).map_err(|err| err.to_string())?;
@@ -3757,62 +3890,134 @@ fn extract_epub_cover(
     .map_err(|err| err.to_string())?;
 
   let cover = crate::parse_opf_cover(&opf);
-  let cover = match cover {
-    Some(value) => value,
-    None => return Ok(None),
-  };
-
   let opf_dir = std::path::Path::new(&rootfile)
     .parent()
     .map(|value| value.to_string_lossy().to_string())
     .unwrap_or_default();
-  let cover_path = if opf_dir.is_empty() {
-    cover.href.clone()
-  } else {
-    format!("{}/{}", opf_dir, cover.href)
-  };
+  let cover_path = cover.as_ref().map(|value| {
+    if opf_dir.is_empty() {
+      value.href.clone()
+    } else {
+      format!("{}/{}", opf_dir, value.href)
+    }
+  });
 
-  let mut bytes = Vec::new();
-  let mut found = false;
-  let candidates = vec![
-    cover_path.clone(),
-    cover_path.replace("\\", "/"),
-    cover.href.clone(),
-    cover.href.trim_start_matches("./").to_string(),
-  ];
-  for candidate in candidates {
-    let normalized = candidate.replace("\\", "/");
+  let mut candidates: Vec<EmbeddedCoverCandidate> = Vec::new();
+  let mut cover_candidates: Vec<String> = Vec::new();
+  let mut image_candidates: Vec<String> = Vec::new();
+
+  for index in 0..archive.len() {
+    let name = {
+      let file = archive.by_index(index).map_err(|err| err.to_string())?;
+      file.name().to_string()
+    };
+    let lower = name.to_lowercase();
+    let is_image = lower.ends_with(".jpg")
+      || lower.ends_with(".jpeg")
+      || lower.ends_with(".png")
+      || lower.ends_with(".webp");
+    if !is_image {
+      continue;
+    }
+    if lower.contains("cover") {
+      cover_candidates.push(name);
+    } else {
+      image_candidates.push(name);
+    }
+  }
+
+  let mut prioritized_paths: Vec<String> = Vec::new();
+  if let Some(cover) = cover.as_ref() {
+    let normalized = cover.href.replace("\\", "/");
+    prioritized_paths.push(normalized.clone());
+    prioritized_paths.push(cover.href.trim_start_matches("./").to_string());
+    if let Some(explicit) = cover_path.as_ref() {
+      prioritized_paths.push(explicit.replace("\\", "/"));
+    }
+  }
+  for entry in cover_candidates {
+    if !prioritized_paths.contains(&entry) {
+      prioritized_paths.push(entry);
+    }
+  }
+  for entry in image_candidates {
+    if !prioritized_paths.contains(&entry) {
+      prioritized_paths.push(entry);
+    }
+  }
+
+  for path_entry in prioritized_paths {
+    let normalized = path_entry.replace("\\", "/");
+    let mut bytes = Vec::new();
     if let Ok(mut entry) = archive.by_name(&normalized) {
-      if entry.read_to_end(&mut bytes).is_ok() {
-        found = true;
-        break;
+      if entry.read_to_end(&mut bytes).is_ok() && !bytes.is_empty() {
+        let lower = normalized.to_lowercase();
+        let mut score = bytes.len() as i64;
+        if lower.contains("cover") {
+          score += 10_000_000;
+        }
+        if let Some(cover) = cover.as_ref() {
+          if normalized.ends_with(&cover.href) {
+            score += 15_000_000;
+          }
+        }
+        let mime = match std::path::Path::new(&normalized)
+          .extension()
+          .and_then(|ext| ext.to_str())
+          .unwrap_or("jpg")
+          .to_lowercase()
+          .as_str()
+        {
+          "png" => "image/png",
+          "webp" => "image/webp",
+          _ => "image/jpeg",
+        };
+        candidates.push(EmbeddedCoverCandidate {
+          path: normalized.clone(),
+          mime: mime.to_string(),
+          bytes,
+          score,
+        });
       }
     }
   }
 
-  if !found {
+  if candidates.is_empty() {
     if let Ok(meta) = crate::parser::epub::parse_epub(path) {
       if let Some(cover_image) = meta.cover_image {
-        let extension = if meta.cover_mime.unwrap_or_default().contains("png") {
-          "png".to_string()
+        let mime = if meta.cover_mime.unwrap_or_default().contains("png") {
+          "image/png"
         } else {
-          cover
-            .extension
-            .or_else(|| cover.href.split('.').last().map(|value| value.to_string()))
-            .unwrap_or_else(|| "jpg".to_string())
+          "image/jpeg"
         };
-        return Ok(Some((cover_image, extension)));
+        candidates.push(EmbeddedCoverCandidate {
+          path: "opf:cover".to_string(),
+          mime: mime.to_string(),
+          bytes: cover_image,
+          score: 1,
+        });
       }
     }
-    return Ok(None);
   }
 
-  let extension = cover
-    .extension
-    .or_else(|| cover.href.split('.').last().map(|value: &str| value.to_string()))
-    .unwrap_or_else(|| "jpg".to_string());
+  candidates.sort_by(|a, b| b.score.cmp(&a.score));
+  Ok(candidates)
+}
 
-  Ok(Some((bytes, extension)))
+fn extract_epub_cover(
+  path: &std::path::Path,
+) -> Result<Option<(Vec<u8>, String)>, String> {
+  let candidates = extract_epub_cover_candidates(path)?;
+  if candidates.is_empty() {
+    return Ok(None);
+  }
+  let best = &candidates[0];
+  let extension = std::path::Path::new(&best.path)
+    .extension()
+    .and_then(|ext| ext.to_str())
+    .unwrap_or("jpg")
+    .to_string();
+  Ok(Some((best.bytes.clone(), extension)))
 }
 
 fn extract_pdf_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, String> {
@@ -6256,6 +6461,10 @@ pub fn run() {
       relink_missing_file,
       remove_missing_file,
       upload_cover,
+      get_embedded_cover_preview,
+      list_embedded_cover_candidates,
+      use_embedded_cover_from_bytes,
+      use_embedded_cover,
       get_organizer_settings,
       set_organizer_settings,
       get_latest_organizer_log,
