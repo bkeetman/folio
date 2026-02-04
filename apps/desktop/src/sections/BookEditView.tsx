@@ -3,6 +3,7 @@ import { ArrowLeft, Check, Image as ImageIcon, Loader2, X } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useState } from "react";
 import { Button, Input } from "../components/ui";
+import { cleanupMetadataTitle } from "../lib/metadataCleanup";
 import { LANGUAGE_OPTIONS } from "../lib/languageFlags";
 import type { ItemMetadata, LibraryItem, View } from "../types/library";
 
@@ -88,6 +89,8 @@ export function BookEditView({
     const handleCancel = () => {
         setView(previousView === "edit" ? "library-books" : previousView);
     };
+
+    const titleCleanupPreview = cleanupMetadataTitle(formData);
 
     const handleChangeCover = async () => {
         if (!selectedItemId) return;
@@ -232,7 +235,24 @@ export function BookEditView({
                             <div className="space-y-5">
                                 {/* Title */}
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-app-ink">Title</label>
+                                    <div className="mb-1.5 flex items-center justify-between">
+                                        <label className="block text-sm font-medium text-app-ink">Title</label>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() =>
+                                                setFormData((current) => {
+                                                    const cleaned = cleanupMetadataTitle(current);
+                                                    return cleaned.changed
+                                                        ? { ...current, title: cleaned.title, publishedYear: cleaned.publishedYear }
+                                                        : current;
+                                                })
+                                            }
+                                            disabled={!titleCleanupPreview.changed}
+                                        >
+                                            Auto-clean
+                                        </Button>
+                                    </div>
                                     <Input
                                         value={formData.title || ""}
                                         onChange={(e) => setFormData({ ...formData, title: e.target.value })}

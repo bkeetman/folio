@@ -2,6 +2,7 @@ import { BookOpen, Image, User, AlertTriangle, ChevronDown, Search, Save, Loader
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect } from "react";
 import { Button, Input } from "../components/ui";
+import { cleanupMetadataTitle } from "../lib/metadataCleanup";
 import { LANGUAGE_OPTIONS } from "../lib/languageFlags";
 import type { EnrichmentCandidate, FixFilter, InboxItem, ItemMetadata, LibraryItem } from "../types/library";
 
@@ -22,6 +23,8 @@ type FixViewProps = {
   onSearchWithQuery: (query: string) => Promise<void>;
   onApplyCandidate: (candidate: EnrichmentCandidate) => void;
   onSaveMetadata: (itemId: string, metadata: ItemMetadata) => Promise<void>;
+  onMarkTitleCorrect: (itemId: string, title: string) => Promise<void>;
+  markingTitleCorrectId: string | null;
   saving: boolean;
   getCandidateCoverUrl: (candidate: EnrichmentCandidate) => string | null;
   coverUrl: string | null;
@@ -60,6 +63,8 @@ export function FixView({
   onSearchWithQuery,
   onApplyCandidate,
   onSaveMetadata,
+  onMarkTitleCorrect,
+  markingTitleCorrectId,
   saving,
   getCandidateCoverUrl,
   coverUrl,
@@ -108,16 +113,53 @@ export function FixView({
   }, [selectedItemId, items, setSelectedItemId]);
 
   if (items.length === 0) {
+    const hasActiveFilters = Object.values(fixFilter).some(Boolean);
     return (
       <section className="flex flex-col items-center justify-center gap-4 py-16">
         <div className="text-4xl">🎉</div>
         <div className="text-lg font-medium text-[var(--app-ink)]">All books have complete metadata!</div>
         <div className="text-sm text-[var(--app-ink-muted)]">Nothing needs fixing based on your current filter.</div>
+        <div className="flex items-center gap-2">
+          {!fixFilter.includeIssues ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFixFilter((current) => ({ ...current, includeIssues: true }))}
+            >
+              Show Items With Issues
+            </Button>
+          ) : null}
+          {hasActiveFilters ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                setFixFilter({
+                  missingAuthor: true,
+                  missingTitle: true,
+                  missingCover: true,
+                  missingIsbn: false,
+                  missingYear: false,
+                  missingDescription: false,
+                  missingLanguage: false,
+                  missingSeries: false,
+                  includeIssues: true,
+                })
+              }
+            >
+              Reset Filters
+            </Button>
+          ) : null}
+        </div>
       </section>
     );
   }
 
   const selectedItem = items.find((i) => i.id === selectedItemId);
+  const selectedIssueReason = selectedItem ? getIssueReason(selectedItem, inboxItems) : null;
+  const canMarkTitleCorrect =
+    Boolean(selectedItem?.title) &&
+    Boolean(selectedIssueReason?.toLowerCase().includes("possible incorrect title"));
 
   return (
     <section className="flex gap-4 h-[calc(100vh-200px)]">
@@ -178,9 +220,43 @@ export function FixView({
               </div>
               <div className="flex-1 space-y-4">
               <div>
-                <label className="block text-[10px] uppercase tracking-wider text-[var(--app-ink-muted)] mb-1">
-                  Title
-                </label>
+                <div className="mb-1 flex items-center justify-between">
+                  <label className="block text-[10px] uppercase tracking-wider text-[var(--app-ink-muted)]">
+                    Title
+                  </label>
+                  <div className="flex items-center gap-1">
+                    {canMarkTitleCorrect ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          const currentTitle = formData.title ?? selectedItem?.title;
+                          if (!selectedItem || !currentTitle) return;
+                          void onMarkTitleCorrect(selectedItem.id, currentTitle);
+                        }}
+                        disabled={markingTitleCorrectId === selectedItem?.id}
+                      >
+                        {markingTitleCorrectId === selectedItem?.id ? "Saving..." : "Mark Correct"}
+                      </Button>
+                    ) : null}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        setFormData((current) => {
+                          if (!current) return current;
+                          const cleaned = cleanupMetadataTitle(current);
+                          return cleaned.changed
+                            ? { ...current, title: cleaned.title, publishedYear: cleaned.publishedYear }
+                            : current;
+                        })
+                      }
+                      disabled={!cleanupMetadataTitle(formData).changed}
+                    >
+                      Auto-clean
+                    </Button>
+                  </div>
+                </div>
                 <Input
                   value={formData.title ?? ""}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value || null })}

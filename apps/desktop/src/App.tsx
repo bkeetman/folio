@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MatchModal } from "./components/MatchModal";
 import { ScanProgressBar } from "./components/ProgressBar";
 import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
+import { cleanupMetadataTitle, normalizeTitleSnapshot } from "./lib/metadataCleanup";
 import { TAG_COLORS } from "./lib/tagColors";
 import { AuthorsView } from "./sections/AuthorsView";
 import { BookEditView } from "./sections/BookEditView";
@@ -53,6 +54,11 @@ import type {
   Tag,
   View
 } from "./types/library";
+
+type TitleCleanupIgnore = {
+  itemId: string;
+  titleSnapshot: string;
+};
 
 const sampleBooks = [
   {
@@ -261,6 +267,8 @@ function App() {
   const [fixFormData, setFixFormData] = useState<ItemMetadata | null>(null);
   const [fixSearchQuery, setFixSearchQuery] = useState("");
   const [fixSaving, setFixSaving] = useState(false);
+  const [markingTitleCorrectId, setMarkingTitleCorrectId] = useState<string | null>(null);
+  const [titleCleanupIgnoreMap, setTitleCleanupIgnoreMap] = useState<Record<string, string>>({});
   const [coverOverrides, setCoverOverrides] = useState<Record<string, string | null>>({});
   const coverOverrideRef = useRef<Record<string, string | null>>({});
   const [libraryHealth, setLibraryHealth] = useState<LibraryHealth | null>(null);
@@ -323,6 +331,20 @@ function App() {
       return 0;
     }
   }, [pendingChangesStatus]);
+
+  const refreshTitleCleanupIgnores = useCallback(async () => {
+    if (!isTauri()) return;
+    try {
+      const rows = await invoke<TitleCleanupIgnore[]>("get_title_cleanup_ignores");
+      const nextMap: Record<string, string> = {};
+      rows.forEach((row) => {
+        nextMap[row.itemId] = row.titleSnapshot;
+      });
+      setTitleCleanupIgnoreMap(nextMap);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const checkForUpdates = useCallback(async (silent = false) => {
     if (!isTauri()) return;
@@ -429,15 +451,64 @@ function App() {
     }, 0);
   }, [libraryItems]);
 
-  // Combine with inbox items if includeIssues is true
+  const titleIssueItems = useMemo<InboxItem[]>(() => {
+    return libraryItems
+      .map((item) => {
+        const metadata: ItemMetadata = {
+          title: item.title,
+          authors: item.authors,
+          publishedYear: item.published_year,
+          language: item.language ?? null,
+          isbn: item.isbn ?? null,
+          series: item.series ?? null,
+          seriesIndex: item.series_index ?? null,
+          description: null,
+        };
+        const cleaned = cleanupMetadataTitle(metadata);
+        if (!cleaned.changed || !item.title) return null;
+        const ignoredSnapshot = titleCleanupIgnoreMap[item.id];
+        if (ignoredSnapshot && ignoredSnapshot === normalizeTitleSnapshot(item.title)) {
+          return null;
+        }
+        return {
+          id: item.id,
+          title: item.title,
+          reason: "Possible incorrect title",
+        } satisfies InboxItem;
+      })
+      .filter((item): item is InboxItem => Boolean(item));
+  }, [libraryItems, titleCleanupIgnoreMap]);
+
+  const fixIssues = useMemo<InboxItem[]>(() => {
+    const byId = new Map<string, InboxItem>();
+    for (const issue of inbox) {
+      byId.set(issue.id, issue);
+    }
+    for (const titleIssue of titleIssueItems) {
+      const existing = byId.get(titleIssue.id);
+      if (!existing) {
+        byId.set(titleIssue.id, titleIssue);
+        continue;
+      }
+      if (!existing.reason.toLowerCase().includes("possible incorrect title")) {
+        byId.set(titleIssue.id, {
+          ...existing,
+          reason: `${existing.reason} · Possible incorrect title`,
+        });
+      }
+    }
+    return Array.from(byId.values());
+  }, [inbox, titleIssueItems]);
+
+  // Combine with issue items if includeIssues is true
   const allFixItems = useMemo(() => {
     const fixItemIds = new Set(booksNeedingFix.map((item) => item.id));
 
     const result = [...booksNeedingFix];
     if (fixFilter.includeIssues) {
-      inbox.forEach((inboxItem) => {
-        if (!fixItemIds.has(inboxItem.id)) {
-          const libraryItem = libraryItems.find((li) => li.id === inboxItem.id);
+      fixIssues.forEach((issue) => {
+        if (!fixItemIds.has(issue.id)) {
+          const libraryItem = libraryItems.find((li) => li.id === issue.id);
           if (libraryItem) {
             result.push(libraryItem);
           }
@@ -445,7 +516,7 @@ function App() {
       });
     }
     return result;
-  }, [booksNeedingFix, inbox, fixFilter.includeIssues, libraryItems]);
+  }, [booksNeedingFix, fixIssues, fixFilter.includeIssues, libraryItems]);
 
   useEffect(() => {
     if (!isDesktop) return;
@@ -1037,6 +1108,7 @@ function App() {
         setMissingFiles(missing);
         const health = await invoke<LibraryHealth>("get_library_health");
         setLibraryHealth(health);
+        await refreshTitleCleanupIgnores();
         setCoverRefreshToken((value) => value + 1);
       } catch {
         setScanStatus("Could not load library data.");
@@ -1051,7 +1123,7 @@ function App() {
       }
     };
     load();
-  }, []);
+  }, [refreshTitleCleanupIgnores]);
 
   const refreshLibrary = useCallback(async () => {
     if (!isTauri()) return;
@@ -1070,11 +1142,12 @@ function App() {
       setMissingFiles(missing);
       const health = await invoke<LibraryHealth>("get_library_health");
       setLibraryHealth(health);
+      await refreshTitleCleanupIgnores();
       setCoverRefreshToken((value) => value + 1);
     } catch {
       setScanStatus("Could not refresh library data.");
     }
-  }, []);
+  }, [refreshTitleCleanupIgnores]);
 
   const handleAddTag = useCallback(
     async (tagId: string) => {
@@ -1596,6 +1669,27 @@ function App() {
     }
   };
 
+  const handleMarkTitleCorrect = async (itemId: string, title: string) => {
+    if (!isTauri()) return;
+    const snapshot = normalizeTitleSnapshot(title);
+    if (!snapshot) return;
+
+    setMarkingTitleCorrectId(itemId);
+    try {
+      await invoke("set_title_cleanup_ignored", {
+        itemId,
+        titleSnapshot: snapshot,
+        ignored: true,
+      });
+      await refreshTitleCleanupIgnores();
+      setScanStatus("Marked title as correct.");
+    } catch {
+      setScanStatus("Could not mark title as correct.");
+    } finally {
+      setMarkingTitleCorrectId(null);
+    }
+  };
+
   const handlePlanOrganize = async () => {
     if (!isTauri()) {
       setOrganizeStatus("Organizer requires the Tauri desktop runtime.");
@@ -2020,7 +2114,7 @@ function App() {
             {view === "fix" ? (
               <FixView
                 items={allFixItems}
-                inboxItems={isDesktop ? inbox : []}
+                inboxItems={isDesktop ? fixIssues : []}
                 selectedItemId={selectedFixItemId}
                 setSelectedItemId={setSelectedFixItemId}
                 fixFilter={fixFilter}
@@ -2090,6 +2184,8 @@ function App() {
                     setFixSaving(false);
                   }
                 }}
+                onMarkTitleCorrect={handleMarkTitleCorrect}
+                markingTitleCorrectId={markingTitleCorrectId}
                 saving={fixSaving}
                 getCandidateCoverUrl={getCandidateCoverUrl}
                 isDesktop={isDesktop}

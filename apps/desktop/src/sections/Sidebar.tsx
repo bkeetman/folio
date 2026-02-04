@@ -119,10 +119,6 @@ export function Sidebar({
             <HardDrive size={16} />
             Missing Files
           </SidebarItem>
-          <SidebarItem active={view === "settings"} onClick={() => setView("settings")}>
-            <Wrench size={16} />
-            Settings
-          </SidebarItem>
           <SidebarItem active={view === "fix"} onClick={() => setView("fix")}>
             <Sparkles size={16} />
             Fix Metadata
@@ -134,6 +130,10 @@ export function Sidebar({
           <SidebarItem active={view === "organize"} onClick={() => setView("organize")}>
             <FolderInput size={16} />
             Organizer
+          </SidebarItem>
+          <SidebarItem active={view === "settings"} onClick={() => setView("settings")}>
+            <Wrench size={16} />
+            Settings
           </SidebarItem>
           <SidebarItem
             onClick={handleClearLibrary}

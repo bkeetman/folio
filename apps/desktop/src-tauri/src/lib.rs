@@ -47,6 +47,9 @@ const MIGRATION_ORGANIZER_SETTINGS_SQL: &str = include_str!(
 const MIGRATION_ORGANIZER_LOGS_SQL: &str = include_str!(
   "../../../../packages/core/drizzle/0006_organizer_logs.sql"
 );
+const MIGRATION_TITLE_CLEANUP_IGNORES_SQL: &str = include_str!(
+  "../../../../packages/core/drizzle/0007_title_cleanup_ignores.sql"
+);
 
 #[derive(Serialize, Clone)]
 struct Tag {
@@ -144,6 +147,13 @@ struct InboxItem {
   id: String,
   title: String,
   reason: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TitleCleanupIgnore {
+  item_id: String,
+  title_snapshot: String,
 }
 
 #[derive(Serialize)]
@@ -2412,6 +2422,70 @@ fn save_item_metadata(
   Ok(())
 }
 
+fn normalize_title_snapshot(value: &str) -> String {
+  value
+    .split_whitespace()
+    .collect::<Vec<_>>()
+    .join(" ")
+    .trim()
+    .to_lowercase()
+}
+
+#[tauri::command]
+fn get_title_cleanup_ignores(app: tauri::AppHandle) -> Result<Vec<TitleCleanupIgnore>, String> {
+  let conn = open_db(&app)?;
+  let mut stmt = conn
+    .prepare("SELECT item_id, title_snapshot FROM title_cleanup_ignores")
+    .map_err(|err| err.to_string())?;
+
+  let rows = stmt
+    .query_map([], |row| {
+      Ok(TitleCleanupIgnore {
+        item_id: row.get(0)?,
+        title_snapshot: row.get(1)?,
+      })
+    })
+    .map_err(|err| err.to_string())?;
+
+  let mut ignores = Vec::new();
+  for row in rows {
+    ignores.push(row.map_err(|err| err.to_string())?);
+  }
+  Ok(ignores)
+}
+
+#[tauri::command]
+fn set_title_cleanup_ignored(
+  app: tauri::AppHandle,
+  item_id: String,
+  title_snapshot: String,
+  ignored: bool,
+) -> Result<(), String> {
+  let conn = open_db(&app)?;
+  if ignored {
+    let snapshot = normalize_title_snapshot(&title_snapshot);
+    if snapshot.is_empty() {
+      return Err("Title snapshot is empty".to_string());
+    }
+    conn
+      .execute(
+        "INSERT INTO title_cleanup_ignores (item_id, title_snapshot, created_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(item_id) DO UPDATE SET title_snapshot = excluded.title_snapshot, created_at = excluded.created_at",
+        params![item_id, snapshot, chrono::Utc::now().timestamp_millis()],
+      )
+      .map_err(|err| err.to_string())?;
+    return Ok(());
+  }
+
+  conn
+    .execute(
+      "DELETE FROM title_cleanup_ignores WHERE item_id = ?1",
+      params![item_id],
+    )
+    .map_err(|err| err.to_string())?;
+  Ok(())
+}
+
 #[tauri::command]
 fn plan_organize(
   app: tauri::AppHandle,
@@ -3445,6 +3519,7 @@ fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
   apply_migration(&conn, "0004_ereader", MIGRATION_EREADER_SQL)?;
   apply_migration(&conn, "0005_organizer_settings", MIGRATION_ORGANIZER_SETTINGS_SQL)?;
   apply_migration(&conn, "0006_organizer_logs", MIGRATION_ORGANIZER_LOGS_SQL)?;
+  apply_migration(&conn, "0007_title_cleanup_ignores", MIGRATION_TITLE_CLEANUP_IGNORES_SQL)?;
   conn.execute_batch("PRAGMA foreign_keys = ON;")
     .map_err(|err| err.to_string())?;
   Ok(conn)
@@ -6034,6 +6109,8 @@ pub fn run() {
       search_candidates,
       apply_fix_candidate,
       save_item_metadata,
+      get_title_cleanup_ignores,
+      set_title_cleanup_ignored,
       enrich_all,
       cancel_enrich,
       plan_organize,
