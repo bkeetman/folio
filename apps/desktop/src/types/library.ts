@@ -295,3 +295,30 @@ export type FileItem = {
   filename: string;
   format: string;
 };
+
+export type ImportCandidate = {
+  id: string;
+  filePath: string;
+  filename: string;
+  title: string | null;
+  authors: string[];
+  publishedYear: number | null;
+  language: string | null;
+  identifiers: string[];
+  hash: string;
+  sizeBytes: number;
+  extension: string;
+  hasCover: boolean;
+};
+
+export type ImportDuplicate = ImportCandidate & {
+  matchedItemId: string;
+  matchedItemTitle: string;
+  matchType: "hash" | "metadata";
+  existingFormats: string[];
+};
+
+export type ImportScanResult = {
+  newBooks: ImportCandidate[];
+  duplicates: ImportDuplicate[];
+};
