@@ -34,7 +34,15 @@ type DuplicateAction = "skip" | "replace" | "add-format";
 export function ImportView({ onCancel, onImportComplete, libraryRoot }: ImportViewProps) {
   // UI state
   const [state, setState] = useState<ImportState>("selecting");
-  const [importMode, setImportMode] = useState<ImportMode>("copy");
+  const [importMode, setImportMode] = useState<ImportMode>(() => {
+    const saved = localStorage.getItem("importMode");
+    return (saved === "copy" || saved === "move") ? saved : "move";
+  });
+
+  const updateImportMode = (newMode: ImportMode) => {
+    setImportMode(newMode);
+    localStorage.setItem("importMode", newMode);
+  };
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Scan results
@@ -455,7 +463,7 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot }: ImportVi
               type="radio"
               name="import-mode"
               checked={importMode === "copy"}
-              onChange={() => setImportMode("copy")}
+              onChange={() => updateImportMode("copy")}
               className="text-app-accent focus:ring-app-accent"
             />
             <span className="text-app-ink">Copy files</span>
@@ -465,7 +473,7 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot }: ImportVi
               type="radio"
               name="import-mode"
               checked={importMode === "move"}
-              onChange={() => setImportMode("move")}
+              onChange={() => updateImportMode("move")}
               className="text-app-accent focus:ring-app-accent"
             />
             <span className="text-app-ink">Move files</span>
