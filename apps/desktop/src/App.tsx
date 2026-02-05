@@ -15,6 +15,7 @@ import { ChangesView } from "./sections/ChangesView";
 import { DuplicatesView } from "./sections/DuplicatesView";
 import { EReaderView } from "./sections/EReaderView";
 import { FixView } from "./sections/FixView";
+import { ImportView } from "./sections/ImportView";
 import { InboxView } from "./sections/InboxView";
 import { Inspector } from "./sections/Inspector";
 import { LibraryView } from "./sections/LibraryView";
@@ -2024,7 +2025,7 @@ function App() {
           view={view}
           setView={setView}
           scanning={scanning}
-          handleScan={handleScan}
+          handleScan={() => setView("import")}
           libraryHealth={libraryHealth}
           pendingChangesCount={pendingChangesStatus === "pending" ? pendingChanges.length : 0}
           duplicateCount={duplicates.length}
@@ -2259,6 +2260,19 @@ function App() {
                 organizeProgress={organizeProgress}
                 organizing={organizing}
                 organizeLog={organizeLog}
+              />
+            ) : null}
+
+            {view === "import" ? (
+              <ImportView
+                onCancel={() => {
+                  setView("library-books");
+                }}
+                onImportComplete={() => {
+                  setView("library-books");
+                  refreshLibrary();
+                }}
+                libraryRoot={organizeRoot}
               />
             ) : null}
 
