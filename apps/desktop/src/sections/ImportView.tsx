@@ -1,6 +1,8 @@
 import { useState, useMemo } from "react";
 import { ArrowLeft, FileUp, FolderUp, Loader2, Check, AlertCircle } from "lucide-react";
 import { Button } from "../components/ui";
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { ImportCandidate, ImportDuplicate, ImportScanResult } from "../types/library";
 
 type ImportViewProps = {
@@ -73,31 +75,67 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot }: ImportVi
     return count;
   }, [selectedNewBooks, duplicateActions]);
 
+  // Helper to scan paths and populate results
+  const scanPaths = async (paths: string[]) => {
+    setState("scanning");
+    try {
+      const result = await invoke<ImportScanResult>("scan_for_import", { paths });
+      setScanResult(result);
+
+      // Pre-select all new books
+      setSelectedNewBooks(new Set(result.newBooks.map((book) => book.id)));
+
+      // Set smart defaults for duplicate actions
+      const defaultActions = new Map<string, DuplicateAction>();
+      for (const dup of result.duplicates) {
+        if (dup.matchType === "hash") {
+          // Exact hash match - skip by default
+          defaultActions.set(dup.id, "skip");
+        } else if (dup.existingFormats.includes(dup.extension)) {
+          // Same format exists - replace by default
+          defaultActions.set(dup.id, "replace");
+        } else {
+          // Different format - add as new format
+          defaultActions.set(dup.id, "add-format");
+        }
+      }
+      setDuplicateActions(defaultActions);
+
+      setState("reviewing");
+    } catch (err) {
+      setErrorMessage(String(err));
+      setState("selecting");
+    }
+  };
+
   // Handlers
   const handleSelectFiles = async () => {
-    // TODO: Task 6 - Wire up file selection via Tauri dialog
-    // For now, simulate scanning
-    setState("scanning");
+    try {
+      const selected = await open({
+        multiple: true,
+        filters: [{ name: "Books", extensions: ["epub", "pdf"] }],
+      });
+      if (!selected || (Array.isArray(selected) && selected.length === 0)) return;
 
-    // Simulate scan delay for UI testing
-    setTimeout(() => {
-      // TODO: Replace with actual scan results from Tauri command
-      setScanResult({ newBooks: [], duplicates: [] });
-      setState("reviewing");
-    }, 1000);
+      const paths = Array.isArray(selected) ? selected : [selected];
+      await scanPaths(paths);
+    } catch (err) {
+      setErrorMessage(String(err));
+    }
   };
 
   const handleSelectFolder = async () => {
-    // TODO: Task 6 - Wire up folder selection via Tauri dialog
-    // For now, simulate scanning
-    setState("scanning");
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+      });
+      if (!selected) return;
 
-    // Simulate scan delay for UI testing
-    setTimeout(() => {
-      // TODO: Replace with actual scan results from Tauri command
-      setScanResult({ newBooks: [], duplicates: [] });
-      setState("reviewing");
-    }, 1000);
+      await scanPaths([selected]);
+    } catch (err) {
+      setErrorMessage(String(err));
+    }
   };
 
   const handleToggleNewBook = (bookId: string) => {
