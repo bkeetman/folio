@@ -2,8 +2,15 @@ import { useState, useMemo } from "react";
 import { ArrowLeft, FileUp, FolderUp, Loader2, Check, AlertCircle } from "lucide-react";
 import { Button } from "../components/ui";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { ImportCandidate, ImportDuplicate, ImportScanResult } from "../types/library";
+import type {
+  ImportCandidate,
+  ImportDuplicate,
+  ImportScanResult,
+  OperationProgress,
+  OperationStats,
+} from "../types/library";
 
 type ImportViewProps = {
   onCancel: () => void;
@@ -49,11 +56,7 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot }: ImportVi
   } | null>(null);
 
   // Import stats
-  const [importStats, setImportStats] = useState<{
-    imported: number;
-    skipped: number;
-    errors: number;
-  } | null>(null);
+  const [importStats, setImportStats] = useState<OperationStats | null>(null);
 
   // Derived state - memoize to avoid recreating on every render
   const newBooks = useMemo(() => scanResult?.newBooks ?? [], [scanResult]);
@@ -173,26 +176,73 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot }: ImportVi
   };
 
   const handleConfirmImport = async () => {
+    if (!libraryRoot) {
+      setErrorMessage("Library root not configured. Please set it in Settings.");
+      setState("error");
+      return;
+    }
+
+    if (!scanResult) {
+      setErrorMessage("No scan results available.");
+      setState("error");
+      return;
+    }
+
     setState("importing");
+    setErrorMessage(null);
     setImportProgress({ current: 0, total: importCount, currentFile: "" });
 
-    // TODO: Task 7 - Wire up actual import execution via Tauri command
-    // For now, simulate import progress
-    let current = 0;
-    const interval = setInterval(() => {
-      current += 1;
-      if (current >= importCount) {
-        clearInterval(interval);
-        setImportStats({ imported: importCount, skipped: 0, errors: 0 });
-        setState("done");
-      } else {
-        setImportProgress({ current, total: importCount, currentFile: "simulated-file.epub" });
+    // Set up progress listener
+    const unlisten = await listen<OperationProgress>("import-progress", (event) => {
+      setImportProgress({
+        current: event.payload.current,
+        total: event.payload.total,
+        currentFile: event.payload.message || "",
+      });
+    });
+
+    try {
+      // Build candidates list from scanResult
+      const allCandidates = [
+        ...scanResult.newBooks.map((b) => ({ ...b, matchedItemId: null, matchType: null })),
+        ...scanResult.duplicates.map((d) => ({ ...d })),
+      ];
+
+      // Convert duplicateActions Map to object for serialization
+      const duplicateActionsObj: Record<string, string> = {};
+      for (const [id, action] of duplicateActions) {
+        duplicateActionsObj[id] = action;
       }
-    }, 500);
+
+      const result = await invoke<OperationStats>("import_books", {
+        request: {
+          mode: importMode,
+          libraryRoot,
+          template: "{Author}/{Title}.{ext}", // Hardcoded for now, Task 10 adds prop
+          newBookIds: Array.from(selectedNewBooks),
+          duplicateActions: duplicateActionsObj,
+          candidates: allCandidates,
+        },
+      });
+
+      setImportStats(result);
+      setState("done");
+      setImportProgress(null);
+
+      // Call completion callback after brief delay
+      setTimeout(() => {
+        onImportComplete();
+      }, 2000);
+    } catch (err) {
+      setErrorMessage(String(err));
+      setState("error");
+    } finally {
+      unlisten();
+    }
   };
 
   const handleBack = () => {
-    if (state === "reviewing" || state === "error") {
+    if (state === "reviewing") {
       setState("selecting");
       setScanResult(null);
       setSelectedNewBooks(new Set());
@@ -200,6 +250,16 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot }: ImportVi
       setErrorMessage(null);
     } else if (state === "confirming") {
       setState("reviewing");
+    } else if (state === "error") {
+      // If we have scan results, go back to reviewing to retry
+      // Otherwise go back to selecting
+      if (scanResult) {
+        setState("reviewing");
+        setErrorMessage(null);
+      } else {
+        setState("selecting");
+        setErrorMessage(null);
+      }
     }
   };
 
@@ -558,7 +618,7 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot }: ImportVi
         <h2 className="text-xl font-semibold text-app-ink">Import Complete</h2>
         {importStats && (
           <div className="mt-2 text-sm text-app-ink-muted">
-            <span className="font-medium text-app-ink">{importStats.imported}</span> books
+            <span className="font-medium text-app-ink">{importStats.processed}</span> books
             imported
             {importStats.skipped > 0 && (
               <span>
