@@ -12,7 +12,8 @@ export type View =
   | "organize"
   | "missing-files"
   | "settings"
-  | "edit";
+  | "edit"
+  | "import";
 export type LibraryFilter = "all" | "epub" | "pdf" | "needs-metadata" | "tagged";
 
 export type LibrarySort =
