@@ -137,6 +137,7 @@ const duplicateGroups: DuplicateGroup[] = [
     file_ids: ["d1-file-1", "d1-file-2"],
     file_paths: ["/samples/The Shallows.epub", "/samples/The Shallows (1).epub"],
     file_titles: ["The Shallows", "The Shallows"],
+    file_authors: ["Nicholas Carr", "Nicholas Carr"],
     file_sizes: [1_048_576, 1_048_576],
   },
   {
@@ -147,6 +148,7 @@ const duplicateGroups: DuplicateGroup[] = [
     file_ids: ["d2-file-1", "d2-file-2"],
     file_paths: ["/samples/Silent Spring.pdf", "/samples/Silent Spring - copy.pdf"],
     file_titles: ["Silent Spring", "Silent Spring"],
+    file_authors: ["Rachel Carson", "Rachel Carson"],
     file_sizes: [2_097_152, 2_097_152],
   },
 ];
