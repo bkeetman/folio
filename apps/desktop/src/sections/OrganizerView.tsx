@@ -1,5 +1,5 @@
 
-import { ArrowRight, FolderInput } from "lucide-react";
+import { ArrowRight, FolderInput, Loader2 } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { Button, Input } from "../components/ui";
 import type { OperationProgress, OrganizePlan, OrganizerLog } from "../types/library";
@@ -117,7 +117,14 @@ export function OrganizerView({
                         </div>
                     )}
                     <Button variant="outline" onClick={handlePlanOrganize} disabled={organizing}>
-                        Generate Preview
+                        {organizing ? (
+                            <span className="flex items-center gap-2">
+                                <Loader2 size={14} className="animate-spin" />
+                                Working...
+                            </span>
+                        ) : (
+                            "Generate Preview"
+                        )}
                     </Button>
                     <Button
                         variant="outline"
@@ -130,8 +137,16 @@ export function OrganizerView({
                         variant="primary"
                         onClick={handleApplyOrganize}
                         disabled={actionableEntries.length === 0 || organizing}
+                        className="min-w-[140px]"
                     >
-                        Apply Changes
+                        {organizing ? (
+                            <span className="flex items-center gap-2">
+                                <Loader2 size={14} className="animate-spin" />
+                                Applying...
+                            </span>
+                        ) : (
+                            "Apply Changes"
+                        )}
                     </Button>
                 </div>
             </div>

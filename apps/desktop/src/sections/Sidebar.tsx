@@ -25,6 +25,9 @@ type SidebarProps = {
   scanning: boolean;
   handleScan: () => void;
   libraryHealth: LibraryHealth | null;
+  pendingChangesCount: number;
+  duplicateCount: number;
+  missingFilesCount: number;
   handleClearLibrary: () => void;
   appVersion: string | null;
   ereaderConnected: boolean;
@@ -36,6 +39,9 @@ export function Sidebar({
   scanning,
   handleScan,
   libraryHealth,
+  pendingChangesCount,
+  duplicateCount,
+  missingFilesCount,
   handleClearLibrary,
   appVersion,
   ereaderConnected,
@@ -113,11 +119,25 @@ export function Sidebar({
           </SidebarItem>
           <SidebarItem active={view === "duplicates"} onClick={() => setView("duplicates")}>
             <Copy size={16} />
-            Duplicates
+            <span className="flex flex-1 items-center justify-between gap-2">
+              <span>Duplicates</span>
+              {duplicateCount > 0 ? (
+                <span className="min-w-[20px] rounded-full bg-app-accent/10 px-2 py-0.5 text-[10px] font-semibold text-app-accent">
+                  {duplicateCount}
+                </span>
+              ) : null}
+            </span>
           </SidebarItem>
           <SidebarItem active={view === "missing-files"} onClick={() => setView("missing-files")}>
             <HardDrive size={16} />
-            Missing Files
+            <span className="flex flex-1 items-center justify-between gap-2">
+              <span>Missing Files</span>
+              {missingFilesCount > 0 ? (
+                <span className="min-w-[20px] rounded-full bg-app-accent/10 px-2 py-0.5 text-[10px] font-semibold text-app-accent">
+                  {missingFilesCount}
+                </span>
+              ) : null}
+            </span>
           </SidebarItem>
           <SidebarItem active={view === "fix"} onClick={() => setView("fix")}>
             <Sparkles size={16} />
@@ -125,7 +145,14 @@ export function Sidebar({
           </SidebarItem>
           <SidebarItem active={view === "changes"} onClick={() => setView("changes")}>
             <FileClock size={16} />
-            Changes
+            <span className="flex flex-1 items-center justify-between gap-2">
+              <span>Changes</span>
+              {pendingChangesCount > 0 ? (
+                <span className="min-w-[20px] rounded-full bg-app-accent/10 px-2 py-0.5 text-[10px] font-semibold text-app-accent">
+                  {pendingChangesCount}
+                </span>
+              ) : null}
+            </span>
           </SidebarItem>
           <SidebarItem active={view === "organize"} onClick={() => setView("organize")}>
             <FolderInput size={16} />

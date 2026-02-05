@@ -539,12 +539,36 @@ function App() {
       unlistenProgress = stop;
     });
 
-    listen<OperationStats>("organize-complete", (event) => {
+    listen<OperationStats>("organize-complete", async (event) => {
       setOrganizeProgress(null);
       setOrganizing(false);
       setOrganizeStatus(
         `Organizer complete: ${event.payload.processed} applied, ${event.payload.errors} errors.`
       );
+      try {
+        const log = await invoke<OrganizerLog | null>("get_latest_organizer_log");
+        setOrganizeLog(log);
+      } catch {
+        // ignore
+      }
+      if (organizeRoot) {
+        try {
+          const plan = await invoke<OrganizePlan>("plan_organize", {
+            mode: organizeMode,
+            libraryRoot: organizeRoot,
+            template: organizeTemplate,
+          });
+          setOrganizePlan(plan);
+          const actionable = plan.entries.filter((entry) => entry.action !== "skip").length;
+          setOrganizeStatus(
+            actionable > 0
+              ? `Prepared ${actionable} actions.`
+              : "No changes needed based on current settings."
+          );
+        } catch {
+          // ignore
+        }
+      }
     }).then((stop) => {
       unlistenComplete = stop;
     });
@@ -553,7 +577,7 @@ function App() {
       if (unlistenProgress) unlistenProgress();
       if (unlistenComplete) unlistenComplete();
     };
-  }, [isDesktop]);
+  }, [isDesktop, organizeMode, organizeRoot, organizeTemplate]);
 
   useEffect(() => {
     if (!isDesktop) return;
@@ -2001,8 +2025,10 @@ function App() {
           setView={setView}
           scanning={scanning}
           handleScan={handleScan}
-
           libraryHealth={libraryHealth}
+          pendingChangesCount={pendingChangesStatus === "pending" ? pendingChanges.length : 0}
+          duplicateCount={duplicates.length}
+          missingFilesCount={missingFiles.length}
           handleClearLibrary={handleClearLibrary}
           appVersion={appVersion}
           ereaderConnected={ereaderDevices.some((d) => d.isConnected)}
