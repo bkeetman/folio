@@ -16,6 +16,7 @@ type ImportViewProps = {
   onCancel: () => void;
   onImportComplete: () => void;
   libraryRoot: string | null;
+  template: string;
 };
 
 type ImportState =
@@ -31,7 +32,7 @@ type ImportMode = "move" | "copy";
 
 type DuplicateAction = "skip" | "replace" | "add-format";
 
-export function ImportView({ onCancel, onImportComplete, libraryRoot }: ImportViewProps) {
+export function ImportView({ onCancel, onImportComplete, libraryRoot, template }: ImportViewProps) {
   // UI state
   const [state, setState] = useState<ImportState>("selecting");
   const [importMode, setImportMode] = useState<ImportMode>(() => {
@@ -226,7 +227,7 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot }: ImportVi
         request: {
           mode: importMode,
           libraryRoot,
-          template: "{Author}/{Title}.{ext}", // Hardcoded for now, Task 10 adds prop
+          template,
           newBookIds: Array.from(selectedNewBooks),
           duplicateActions: duplicateActionsObj,
           candidates: allCandidates,

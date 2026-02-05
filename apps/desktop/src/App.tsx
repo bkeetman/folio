@@ -2273,6 +2273,7 @@ function App() {
                   refreshLibrary();
                 }}
                 libraryRoot={organizeRoot}
+                template={organizeTemplate}
               />
             ) : null}
 
