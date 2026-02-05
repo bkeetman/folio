@@ -207,6 +207,51 @@ struct EReaderBook {
   match_confidence: Option<String>,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ImportCandidate {
+  id: String,
+  file_path: String,
+  filename: String,
+  title: Option<String>,
+  authors: Vec<String>,
+  published_year: Option<i64>,
+  language: Option<String>,
+  identifiers: Vec<String>,
+  hash: String,
+  size_bytes: i64,
+  extension: String,
+  has_cover: bool,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ImportDuplicate {
+  id: String,
+  file_path: String,
+  filename: String,
+  title: Option<String>,
+  authors: Vec<String>,
+  published_year: Option<i64>,
+  language: Option<String>,
+  identifiers: Vec<String>,
+  hash: String,
+  size_bytes: i64,
+  extension: String,
+  has_cover: bool,
+  matched_item_id: String,
+  matched_item_title: String,
+  match_type: String,
+  existing_formats: Vec<String>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ImportScanResult {
+  new_books: Vec<ImportCandidate>,
+  duplicates: Vec<ImportDuplicate>,
+}
+
 #[derive(Serialize, serde::Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct SyncQueueItem {
@@ -3524,6 +3569,292 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
   Ok(stats)
 }
 
+// Import scanning functions
+
+#[tauri::command]
+async fn scan_for_import(app: tauri::AppHandle, paths: Vec<String>) -> Result<ImportScanResult, String> {
+  let app_handle = app.clone();
+  tauri::async_runtime::spawn_blocking(move || scan_for_import_sync(app_handle, paths))
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+fn scan_for_import_sync(app: tauri::AppHandle, paths: Vec<String>) -> Result<ImportScanResult, String> {
+  let conn = open_db(&app)?;
+
+  // Collect all epub/pdf files from paths
+  let mut files_to_scan: Vec<std::path::PathBuf> = Vec::new();
+  for path_str in &paths {
+    let path = std::path::Path::new(path_str);
+    if path.is_file() {
+      let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+      if ext == "epub" || ext == "pdf" {
+        files_to_scan.push(path.to_path_buf());
+      }
+    } else if path.is_dir() {
+      for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+        if entry.file_type().is_file() {
+          let ext = entry
+            .path()
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+          if ext == "epub" || ext == "pdf" {
+            files_to_scan.push(entry.path().to_path_buf());
+          }
+        }
+      }
+    }
+  }
+
+  // Query existing file hashes for duplicate detection
+  let mut existing_hashes: std::collections::HashMap<String, (String, String)> =
+    std::collections::HashMap::new();
+  {
+    let mut stmt = conn
+      .prepare(
+        "SELECT f.sha256, i.id, COALESCE(i.title, '') FROM files f \
+         JOIN items i ON f.item_id = i.id \
+         WHERE f.sha256 IS NOT NULL AND f.status = 'active'",
+      )
+      .map_err(|err| err.to_string())?;
+    let rows = stmt
+      .query_map(params![], |row| {
+        Ok((
+          row.get::<_, String>(0)?,
+          row.get::<_, String>(1)?,
+          row.get::<_, String>(2)?,
+        ))
+      })
+      .map_err(|err| err.to_string())?;
+    for row in rows {
+      let (hash, item_id, title) = row.map_err(|err| err.to_string())?;
+      existing_hashes.insert(hash, (item_id, title));
+    }
+  }
+
+  // Query existing title+author combos for metadata matching
+  let mut existing_title_authors: std::collections::HashMap<String, (String, String)> =
+    std::collections::HashMap::new();
+  {
+    let mut stmt = conn
+      .prepare(
+        "SELECT i.id, COALESCE(LOWER(i.title), ''), \
+         COALESCE(GROUP_CONCAT(LOWER(a.name), '|'), '') \
+         FROM items i \
+         LEFT JOIN item_authors ia ON ia.item_id = i.id \
+         LEFT JOIN authors a ON a.id = ia.author_id \
+         GROUP BY i.id",
+      )
+      .map_err(|err| err.to_string())?;
+    let rows = stmt
+      .query_map(params![], |row| {
+        Ok((
+          row.get::<_, String>(0)?,
+          row.get::<_, String>(1)?,
+          row.get::<_, String>(2)?,
+        ))
+      })
+      .map_err(|err| err.to_string())?;
+    for row in rows {
+      let (item_id, title, authors) = row.map_err(|err| err.to_string())?;
+      let title_clean = title.trim().to_lowercase();
+      if !title_clean.is_empty() {
+        // Key is "title||authors_sorted"
+        let mut author_list: Vec<&str> = authors.split('|').filter(|s| !s.is_empty()).collect();
+        author_list.sort();
+        let key = format!("{}||{}", title_clean, author_list.join("|"));
+        // Get item title for display
+        let display_title: String = conn
+          .query_row("SELECT COALESCE(title, '') FROM items WHERE id = ?1", params![item_id], |row| row.get(0))
+          .unwrap_or_default();
+        existing_title_authors.insert(key, (item_id, display_title));
+      }
+    }
+  }
+
+  let mut new_books: Vec<ImportCandidate> = Vec::new();
+  let mut duplicates: Vec<ImportDuplicate> = Vec::new();
+
+  for file_path in files_to_scan {
+    let path_str = file_path.to_string_lossy().to_string();
+    let filename = file_path
+      .file_name()
+      .and_then(|n| n.to_str())
+      .unwrap_or("")
+      .to_string();
+    let extension = file_path
+      .extension()
+      .and_then(|e| e.to_str())
+      .unwrap_or("")
+      .to_lowercase();
+
+    // Get file size
+    let size_bytes = std::fs::metadata(&file_path)
+      .map(|m| m.len() as i64)
+      .unwrap_or(0);
+
+    // Compute SHA256 hash
+    let hash = match hash_file(&file_path) {
+      Ok(h) => h,
+      Err(err) => {
+        log::warn!("Failed to hash file {}: {}", path_str, err);
+        continue;
+      }
+    };
+
+    // Extract metadata
+    let metadata = extract_metadata_for_import(&file_path, &extension);
+
+    // Check if has cover
+    let has_cover = check_has_embedded_cover(&file_path, &extension);
+
+    let id = Uuid::new_v4().to_string();
+
+    // Check for hash duplicate first
+    if let Some((matched_item_id, matched_title)) = existing_hashes.get(&hash) {
+      let existing_formats = get_item_formats(&conn, matched_item_id)?;
+      duplicates.push(ImportDuplicate {
+        id,
+        file_path: path_str,
+        filename,
+        title: metadata.title,
+        authors: metadata.authors,
+        published_year: metadata.published_year,
+        language: metadata.language,
+        identifiers: metadata.identifiers,
+        hash,
+        size_bytes,
+        extension,
+        has_cover,
+        matched_item_id: matched_item_id.clone(),
+        matched_item_title: matched_title.clone(),
+        match_type: "hash".to_string(),
+        existing_formats,
+      });
+      continue;
+    }
+
+    // Check for title+author duplicate
+    let title_clean = metadata.title.as_ref().map(|t| t.trim().to_lowercase()).unwrap_or_default();
+    if !title_clean.is_empty() {
+      let mut author_list: Vec<String> = metadata.authors.iter().map(|a| a.trim().to_lowercase()).collect();
+      author_list.sort();
+      let key = format!("{}||{}", title_clean, author_list.join("|"));
+
+      if let Some((matched_item_id, matched_title)) = existing_title_authors.get(&key) {
+        let existing_formats = get_item_formats(&conn, matched_item_id)?;
+        duplicates.push(ImportDuplicate {
+          id,
+          file_path: path_str,
+          filename,
+          title: metadata.title,
+          authors: metadata.authors,
+          published_year: metadata.published_year,
+          language: metadata.language,
+          identifiers: metadata.identifiers,
+          hash,
+          size_bytes,
+          extension,
+          has_cover,
+          matched_item_id: matched_item_id.clone(),
+          matched_item_title: matched_title.clone(),
+          match_type: "title_author".to_string(),
+          existing_formats,
+        });
+        continue;
+      }
+    }
+
+    // It's a new book
+    new_books.push(ImportCandidate {
+      id,
+      file_path: path_str,
+      filename,
+      title: metadata.title,
+      authors: metadata.authors,
+      published_year: metadata.published_year,
+      language: metadata.language,
+      identifiers: metadata.identifiers,
+      hash,
+      size_bytes,
+      extension,
+      has_cover,
+    });
+  }
+
+  Ok(ImportScanResult {
+    new_books,
+    duplicates,
+  })
+}
+
+fn get_item_formats(conn: &Connection, item_id: &str) -> Result<Vec<String>, String> {
+  let mut stmt = conn
+    .prepare("SELECT DISTINCT UPPER(extension) FROM files WHERE item_id = ?1 AND status = 'active'")
+    .map_err(|err| err.to_string())?;
+  let rows = stmt
+    .query_map(params![item_id], |row| row.get::<_, String>(0))
+    .map_err(|err| err.to_string())?;
+
+  let mut formats = Vec::new();
+  for row in rows {
+    formats.push(row.map_err(|err| err.to_string())?);
+  }
+  Ok(formats)
+}
+
+struct ImportMetadata {
+  title: Option<String>,
+  authors: Vec<String>,
+  published_year: Option<i64>,
+  language: Option<String>,
+  identifiers: Vec<String>,
+}
+
+fn extract_metadata_for_import(path: &std::path::Path, extension: &str) -> ImportMetadata {
+  match extract_metadata(path) {
+    Ok(meta) => ImportMetadata {
+      title: meta.title,
+      authors: meta.authors,
+      published_year: meta.published_year,
+      language: meta.language,
+      identifiers: meta.identifiers,
+    },
+    Err(_) => {
+      // Fallback: use filename as title
+      let filename = path
+        .file_stem()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+      ImportMetadata {
+        title: if filename.is_empty() { None } else { Some(filename) },
+        authors: vec![],
+        published_year: None,
+        language: None,
+        identifiers: vec![],
+      }
+    }
+  }
+}
+
+fn check_has_embedded_cover(path: &std::path::Path, extension: &str) -> bool {
+  if extension == "epub" {
+    // Try to detect cover by parsing OPF
+    if let Ok(meta) = crate::parser::epub::parse_epub(path) {
+      return meta.cover_image.is_some();
+    }
+  }
+  // PDFs don't typically have embedded covers we can easily detect
+  false
+}
+
 #[tauri::command]
 fn close_splashscreen(app: tauri::AppHandle) -> Result<(), String> {
   // Close the splash screen
@@ -6437,6 +6768,7 @@ pub fn run() {
       clear_library,
       normalize_item_descriptions,
       scan_folder,
+      scan_for_import,
       scanner::scan_library,
       add_ereader_device,
       list_ereader_devices,
