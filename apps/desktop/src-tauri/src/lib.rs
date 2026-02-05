@@ -252,6 +252,36 @@ struct ImportScanResult {
   duplicates: Vec<ImportDuplicate>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportRequest {
+  mode: String,
+  library_root: String,
+  template: String,
+  new_book_ids: Vec<String>,
+  duplicate_actions: std::collections::HashMap<String, String>,
+  candidates: Vec<ImportCandidateInput>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportCandidateInput {
+  id: String,
+  file_path: String,
+  filename: String,
+  title: Option<String>,
+  authors: Vec<String>,
+  published_year: Option<i64>,
+  language: Option<String>,
+  identifiers: Vec<String>,
+  hash: String,
+  size_bytes: i64,
+  extension: String,
+  has_cover: bool,
+  matched_item_id: Option<String>,
+  match_type: Option<String>,
+}
+
 #[derive(Serialize, serde::Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct SyncQueueItem {
@@ -3856,6 +3886,639 @@ fn check_has_embedded_cover(path: &std::path::Path, extension: &str) -> bool {
 }
 
 #[tauri::command]
+async fn import_books(app: tauri::AppHandle, request: ImportRequest) -> Result<OperationStats, String> {
+  let app_handle = app.clone();
+  tauri::async_runtime::spawn_blocking(move || import_books_sync(app_handle, request))
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+fn import_books_sync(app: tauri::AppHandle, request: ImportRequest) -> Result<OperationStats, String> {
+  let conn = open_db(&app)?;
+
+  // Build lookup of candidates by ID
+  let candidates_by_id: std::collections::HashMap<String, &ImportCandidateInput> = request
+    .candidates
+    .iter()
+    .map(|c| (c.id.clone(), c))
+    .collect();
+
+  let total = request.new_book_ids.len() + request.duplicate_actions.len();
+  let mut stats = OperationStats {
+    total,
+    processed: 0,
+    skipped: 0,
+    errors: 0,
+  };
+
+  let mut current = 0;
+
+  // Process new books
+  for book_id in &request.new_book_ids {
+    current += 1;
+    if let Some(candidate) = candidates_by_id.get(book_id) {
+      let _ = app.emit(
+        "import-progress",
+        OperationProgress {
+          item_id: book_id.clone(),
+          status: "processing".to_string(),
+          message: Some(candidate.filename.clone()),
+          current,
+          total,
+        },
+      );
+
+      match import_new_book(&conn, &app, candidate, &request) {
+        Ok(_) => {
+          stats.processed += 1;
+          let _ = app.emit(
+            "import-progress",
+            OperationProgress {
+              item_id: book_id.clone(),
+              status: "done".to_string(),
+              message: None,
+              current,
+              total,
+            },
+          );
+        }
+        Err(err) => {
+          stats.errors += 1;
+          log::error!("Failed to import {}: {}", candidate.filename, err);
+          let _ = app.emit(
+            "import-progress",
+            OperationProgress {
+              item_id: book_id.clone(),
+              status: "error".to_string(),
+              message: Some(err),
+              current,
+              total,
+            },
+          );
+        }
+      }
+    } else {
+      stats.skipped += 1;
+      let _ = app.emit(
+        "import-progress",
+        OperationProgress {
+          item_id: book_id.clone(),
+          status: "skipped".to_string(),
+          message: Some("Candidate not found".to_string()),
+          current,
+          total,
+        },
+      );
+    }
+  }
+
+  // Process duplicates based on action
+  for (dup_id, action) in &request.duplicate_actions {
+    current += 1;
+    if let Some(candidate) = candidates_by_id.get(dup_id) {
+      let item_id = match &candidate.matched_item_id {
+        Some(id) => id.clone(),
+        None => {
+          stats.skipped += 1;
+          let _ = app.emit(
+            "import-progress",
+            OperationProgress {
+              item_id: dup_id.clone(),
+              status: "skipped".to_string(),
+              message: Some("No matched item ID".to_string()),
+              current,
+              total,
+            },
+          );
+          continue;
+        }
+      };
+
+      let _ = app.emit(
+        "import-progress",
+        OperationProgress {
+          item_id: dup_id.clone(),
+          status: "processing".to_string(),
+          message: Some(format!("{}: {}", action, candidate.filename)),
+          current,
+          total,
+        },
+      );
+
+      let result = match action.as_str() {
+        "skip" => {
+          stats.skipped += 1;
+          let _ = app.emit(
+            "import-progress",
+            OperationProgress {
+              item_id: dup_id.clone(),
+              status: "skipped".to_string(),
+              message: None,
+              current,
+              total,
+            },
+          );
+          continue;
+        }
+        "replace" => replace_file_for_item(&conn, &app, &item_id, candidate, &request),
+        "add" => add_file_to_item(&conn, &app, &item_id, candidate, &request),
+        _ => {
+          stats.skipped += 1;
+          let _ = app.emit(
+            "import-progress",
+            OperationProgress {
+              item_id: dup_id.clone(),
+              status: "skipped".to_string(),
+              message: Some(format!("Unknown action: {}", action)),
+              current,
+              total,
+            },
+          );
+          continue;
+        }
+      };
+
+      match result {
+        Ok(_) => {
+          stats.processed += 1;
+          let _ = app.emit(
+            "import-progress",
+            OperationProgress {
+              item_id: dup_id.clone(),
+              status: "done".to_string(),
+              message: None,
+              current,
+              total,
+            },
+          );
+        }
+        Err(err) => {
+          stats.errors += 1;
+          log::error!("Failed to process duplicate {}: {}", candidate.filename, err);
+          let _ = app.emit(
+            "import-progress",
+            OperationProgress {
+              item_id: dup_id.clone(),
+              status: "error".to_string(),
+              message: Some(err),
+              current,
+              total,
+            },
+          );
+        }
+      }
+    } else {
+      stats.skipped += 1;
+      let _ = app.emit(
+        "import-progress",
+        OperationProgress {
+          item_id: dup_id.clone(),
+          status: "skipped".to_string(),
+          message: Some("Candidate not found".to_string()),
+          current,
+          total,
+        },
+      );
+    }
+  }
+
+  let _ = app.emit("import-complete", stats.clone());
+  Ok(stats)
+}
+
+fn import_new_book(
+  conn: &Connection,
+  app: &tauri::AppHandle,
+  candidate: &ImportCandidateInput,
+  request: &ImportRequest,
+) -> Result<(), String> {
+  let now = chrono::Utc::now().timestamp_millis();
+  let item_id = Uuid::new_v4().to_string();
+  let file_id = Uuid::new_v4().to_string();
+
+  // Compute target path
+  let target_path = compute_import_target_path(&request.library_root, &request.template, candidate)?;
+  let target_dir = std::path::Path::new(&target_path)
+    .parent()
+    .ok_or_else(|| "Invalid target path".to_string())?;
+  std::fs::create_dir_all(target_dir).map_err(|err| err.to_string())?;
+
+  // Copy or move file
+  if request.mode == "move" {
+    // Try rename first, fallback to copy+delete for cross-filesystem moves
+    if std::fs::rename(&candidate.file_path, &target_path).is_err() {
+      std::fs::copy(&candidate.file_path, &target_path).map_err(|err| err.to_string())?;
+      std::fs::remove_file(&candidate.file_path).map_err(|err| err.to_string())?;
+    }
+  } else {
+    std::fs::copy(&candidate.file_path, &target_path).map_err(|err| err.to_string())?;
+  }
+
+  // Create item record
+  let title = candidate.title.clone().unwrap_or_else(|| {
+    std::path::Path::new(&candidate.file_path)
+      .file_stem()
+      .and_then(|s| s.to_str())
+      .map(|s| s.replace('_', " "))
+      .unwrap_or_else(|| "Unknown".to_string())
+  });
+
+  conn.execute(
+    "INSERT INTO items (id, title, published_year, language, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+    params![item_id, title, candidate.published_year, candidate.language, now],
+  )
+  .map_err(|err| err.to_string())?;
+
+  // Get file metadata for the new file
+  let file_metadata = std::fs::metadata(&target_path).map_err(|err| err.to_string())?;
+  let size_bytes = file_metadata.len() as i64;
+  let modified_at = file_metadata
+    .modified()
+    .ok()
+    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+    .map(|d| d.as_millis() as i64)
+    .unwrap_or(now);
+
+  let filename = std::path::Path::new(&target_path)
+    .file_name()
+    .and_then(|n| n.to_str())
+    .unwrap_or("file")
+    .to_string();
+
+  // Create file record
+  conn.execute(
+    "INSERT INTO files (id, item_id, path, filename, extension, size_bytes, sha256, hash_algo, modified_at, created_at, updated_at, status) \
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'sha256', ?8, ?9, ?9, 'active')",
+    params![file_id, item_id, target_path, filename, candidate.extension, size_bytes, candidate.hash, modified_at, now],
+  )
+  .map_err(|err| err.to_string())?;
+
+  // Create author records
+  for author_name in &candidate.authors {
+    let author_id = get_or_create_author(conn, author_name, now)?;
+    conn.execute(
+      "INSERT OR IGNORE INTO item_authors (item_id, author_id) VALUES (?1, ?2)",
+      params![item_id, author_id],
+    )
+    .map_err(|err| err.to_string())?;
+  }
+
+  // Create identifier records
+  for identifier in &candidate.identifiers {
+    let (id_type, id_value) = parse_identifier(identifier);
+    let identifier_id = Uuid::new_v4().to_string();
+    conn.execute(
+      "INSERT INTO identifiers (id, item_id, type, value, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+      params![identifier_id, item_id, id_type, id_value, now],
+    )
+    .map_err(|err| err.to_string())?;
+  }
+
+  // Extract and save embedded cover if available
+  if candidate.has_cover && candidate.extension == "epub" {
+    if let Ok(Some((cover_bytes, cover_ext))) = extract_embedded_cover_for_item(conn, &item_id) {
+      let _ = save_cover(app, conn, &item_id, cover_bytes, &cover_ext, now, "embedded", None);
+    }
+  }
+
+  Ok(())
+}
+
+fn replace_file_for_item(
+  conn: &Connection,
+  _app: &tauri::AppHandle,
+  item_id: &str,
+  candidate: &ImportCandidateInput,
+  request: &ImportRequest,
+) -> Result<(), String> {
+  let now = chrono::Utc::now().timestamp_millis();
+
+  // Compute target path using existing item metadata
+  let target_path = compute_import_target_path_for_existing(conn, &request.library_root, &request.template, item_id, candidate)?;
+  let target_dir = std::path::Path::new(&target_path)
+    .parent()
+    .ok_or_else(|| "Invalid target path".to_string())?;
+  std::fs::create_dir_all(target_dir).map_err(|err| err.to_string())?;
+
+  // Find existing file with same extension to replace
+  let existing_file: Option<(String, String)> = conn
+    .query_row(
+      "SELECT id, path FROM files WHERE item_id = ?1 AND LOWER(extension) = ?2 AND status = 'active' LIMIT 1",
+      params![item_id, candidate.extension.to_lowercase()],
+      |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+    .map_err(|err| err.to_string())?;
+
+  // Copy or move new file to target
+  if request.mode == "move" {
+    if std::fs::rename(&candidate.file_path, &target_path).is_err() {
+      std::fs::copy(&candidate.file_path, &target_path).map_err(|err| err.to_string())?;
+      std::fs::remove_file(&candidate.file_path).map_err(|err| err.to_string())?;
+    }
+  } else {
+    std::fs::copy(&candidate.file_path, &target_path).map_err(|err| err.to_string())?;
+  }
+
+  // Get file metadata
+  let file_metadata = std::fs::metadata(&target_path).map_err(|err| err.to_string())?;
+  let size_bytes = file_metadata.len() as i64;
+  let modified_at = file_metadata
+    .modified()
+    .ok()
+    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+    .map(|d| d.as_millis() as i64)
+    .unwrap_or(now);
+
+  let filename = std::path::Path::new(&target_path)
+    .file_name()
+    .and_then(|n| n.to_str())
+    .unwrap_or("file")
+    .to_string();
+
+  if let Some((existing_file_id, existing_path)) = existing_file {
+    // Mark old file as removed and delete it
+    conn.execute(
+      "UPDATE files SET status = 'removed', updated_at = ?1 WHERE id = ?2",
+      params![now, existing_file_id],
+    )
+    .map_err(|err| err.to_string())?;
+
+    // Try to delete old file (ignore errors - file might be missing)
+    let _ = std::fs::remove_file(&existing_path);
+
+    // Create new file record
+    let file_id = Uuid::new_v4().to_string();
+    conn.execute(
+      "INSERT INTO files (id, item_id, path, filename, extension, size_bytes, sha256, hash_algo, modified_at, created_at, updated_at, status) \
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'sha256', ?8, ?9, ?9, 'active')",
+      params![file_id, item_id, target_path, filename, candidate.extension, size_bytes, candidate.hash, modified_at, now],
+    )
+    .map_err(|err| err.to_string())?;
+  } else {
+    // No existing file with this extension, just add as new file
+    let file_id = Uuid::new_v4().to_string();
+    conn.execute(
+      "INSERT INTO files (id, item_id, path, filename, extension, size_bytes, sha256, hash_algo, modified_at, created_at, updated_at, status) \
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'sha256', ?8, ?9, ?9, 'active')",
+      params![file_id, item_id, target_path, filename, candidate.extension, size_bytes, candidate.hash, modified_at, now],
+    )
+    .map_err(|err| err.to_string())?;
+  }
+
+  Ok(())
+}
+
+fn add_file_to_item(
+  conn: &Connection,
+  _app: &tauri::AppHandle,
+  item_id: &str,
+  candidate: &ImportCandidateInput,
+  request: &ImportRequest,
+) -> Result<(), String> {
+  let now = chrono::Utc::now().timestamp_millis();
+
+  // Compute target path using existing item metadata
+  let target_path = compute_import_target_path_for_existing(conn, &request.library_root, &request.template, item_id, candidate)?;
+  let target_dir = std::path::Path::new(&target_path)
+    .parent()
+    .ok_or_else(|| "Invalid target path".to_string())?;
+  std::fs::create_dir_all(target_dir).map_err(|err| err.to_string())?;
+
+  // Copy or move file
+  if request.mode == "move" {
+    if std::fs::rename(&candidate.file_path, &target_path).is_err() {
+      std::fs::copy(&candidate.file_path, &target_path).map_err(|err| err.to_string())?;
+      std::fs::remove_file(&candidate.file_path).map_err(|err| err.to_string())?;
+    }
+  } else {
+    std::fs::copy(&candidate.file_path, &target_path).map_err(|err| err.to_string())?;
+  }
+
+  // Get file metadata
+  let file_metadata = std::fs::metadata(&target_path).map_err(|err| err.to_string())?;
+  let size_bytes = file_metadata.len() as i64;
+  let modified_at = file_metadata
+    .modified()
+    .ok()
+    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+    .map(|d| d.as_millis() as i64)
+    .unwrap_or(now);
+
+  let filename = std::path::Path::new(&target_path)
+    .file_name()
+    .and_then(|n| n.to_str())
+    .unwrap_or("file")
+    .to_string();
+
+  // Create file record
+  let file_id = Uuid::new_v4().to_string();
+  conn.execute(
+    "INSERT INTO files (id, item_id, path, filename, extension, size_bytes, sha256, hash_algo, modified_at, created_at, updated_at, status) \
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'sha256', ?8, ?9, ?9, 'active')",
+    params![file_id, item_id, target_path, filename, candidate.extension, size_bytes, candidate.hash, modified_at, now],
+  )
+  .map_err(|err| err.to_string())?;
+
+  Ok(())
+}
+
+fn compute_import_target_path(
+  library_root: &str,
+  template: &str,
+  candidate: &ImportCandidateInput,
+) -> Result<String, String> {
+  let author = candidate
+    .authors
+    .first()
+    .map(|a| sanitize_path_component(a))
+    .unwrap_or_else(|| "Unknown Author".to_string());
+
+  let title = candidate
+    .title
+    .as_ref()
+    .map(|t| sanitize_path_component(t))
+    .unwrap_or_else(|| "Unknown Title".to_string());
+
+  let year = candidate
+    .published_year
+    .map(|y| y.to_string())
+    .unwrap_or_else(|| "Unknown".to_string());
+
+  let isbn = candidate
+    .identifiers
+    .iter()
+    .find(|id| id.starts_with("ISBN") || id.chars().all(|c| c.is_ascii_digit() || c == '-' || c == 'X'))
+    .map(|id| sanitize_path_component(id))
+    .unwrap_or_else(|| "".to_string());
+
+  let ext = &candidate.extension;
+
+  // Replace template placeholders
+  let relative_path = template
+    .replace("{Author}", &author)
+    .replace("{Title}", &title)
+    .replace("{Year}", &year)
+    .replace("{ISBN}", &isbn)
+    .replace("{ext}", ext);
+
+  let full_path = std::path::Path::new(library_root).join(&relative_path);
+  Ok(full_path.to_string_lossy().to_string())
+}
+
+fn compute_import_target_path_for_existing(
+  conn: &Connection,
+  library_root: &str,
+  template: &str,
+  item_id: &str,
+  candidate: &ImportCandidateInput,
+) -> Result<String, String> {
+  // Get existing item metadata
+  let (title, published_year): (Option<String>, Option<i64>) = conn
+    .query_row(
+      "SELECT title, published_year FROM items WHERE id = ?1",
+      params![item_id],
+      |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .map_err(|err| err.to_string())?;
+
+  // Get existing authors
+  let mut stmt = conn
+    .prepare(
+      "SELECT a.name FROM authors a \
+       JOIN item_authors ia ON ia.author_id = a.id \
+       WHERE ia.item_id = ?1",
+    )
+    .map_err(|err| err.to_string())?;
+  let authors: Vec<String> = stmt
+    .query_map(params![item_id], |row| row.get(0))
+    .map_err(|err| err.to_string())?
+    .filter_map(|r| r.ok())
+    .collect();
+
+  // Get existing identifiers
+  let mut stmt = conn
+    .prepare("SELECT type, value FROM identifiers WHERE item_id = ?1")
+    .map_err(|err| err.to_string())?;
+  let identifiers: Vec<String> = stmt
+    .query_map(params![item_id], |row| {
+      let id_type: String = row.get(0)?;
+      let id_value: String = row.get(1)?;
+      Ok(format!("{}:{}", id_type, id_value))
+    })
+    .map_err(|err| err.to_string())?
+    .filter_map(|r| r.ok())
+    .collect();
+
+  let author = authors
+    .first()
+    .map(|a| sanitize_path_component(a))
+    .unwrap_or_else(|| "Unknown Author".to_string());
+
+  let title_str = title
+    .as_ref()
+    .map(|t| sanitize_path_component(t))
+    .unwrap_or_else(|| "Unknown Title".to_string());
+
+  let year = published_year
+    .map(|y| y.to_string())
+    .unwrap_or_else(|| "Unknown".to_string());
+
+  let isbn = identifiers
+    .iter()
+    .find(|id| id.starts_with("ISBN"))
+    .and_then(|id| id.split(':').nth(1))
+    .map(|v| sanitize_path_component(v))
+    .unwrap_or_else(|| "".to_string());
+
+  let ext = &candidate.extension;
+
+  // Replace template placeholders
+  let relative_path = template
+    .replace("{Author}", &author)
+    .replace("{Title}", &title_str)
+    .replace("{Year}", &year)
+    .replace("{ISBN}", &isbn)
+    .replace("{ext}", ext);
+
+  let full_path = std::path::Path::new(library_root).join(&relative_path);
+  Ok(full_path.to_string_lossy().to_string())
+}
+
+fn sanitize_path_component(s: &str) -> String {
+  s.chars()
+    .map(|c| {
+      if c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' {
+        '_'
+      } else {
+        c
+      }
+    })
+    .collect::<String>()
+    .trim()
+    .to_string()
+}
+
+fn get_or_create_author(conn: &Connection, name: &str, now: i64) -> Result<String, String> {
+  let existing_id: Option<String> = conn
+    .query_row(
+      "SELECT id FROM authors WHERE name = ?1",
+      params![name],
+      |row| row.get(0),
+    )
+    .optional()
+    .map_err(|err| err.to_string())?;
+
+  match existing_id {
+    Some(id) => Ok(id),
+    None => {
+      let new_id = Uuid::new_v4().to_string();
+      conn.execute(
+        "INSERT INTO authors (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+        params![new_id, name, now, now],
+      )
+      .map_err(|err| err.to_string())?;
+      Ok(new_id)
+    }
+  }
+}
+
+fn parse_identifier(identifier: &str) -> (String, String) {
+  // Check for common identifier formats
+  let normalized = normalize_isbn(identifier);
+
+  if let Some(ref value) = normalized {
+    if value.len() == 13 {
+      return ("ISBN13".to_string(), value.clone());
+    } else if value.len() == 10 {
+      return ("ISBN10".to_string(), value.clone());
+    }
+  }
+
+  // Check for URN format (urn:isbn:... or similar)
+  if identifier.to_lowercase().starts_with("urn:isbn:") {
+    let value = identifier[9..].to_string();
+    return if value.len() == 13 {
+      ("ISBN13".to_string(), value)
+    } else if value.len() == 10 {
+      ("ISBN10".to_string(), value)
+    } else {
+      ("OTHER".to_string(), value)
+    };
+  }
+
+  // Check for colon-separated format (TYPE:value)
+  if let Some(idx) = identifier.find(':') {
+    let id_type = identifier[..idx].to_uppercase();
+    let value = identifier[idx + 1..].to_string();
+    return (id_type, value);
+  }
+
+  // Default: store as OTHER
+  ("OTHER".to_string(), identifier.to_string())
+}
+
+#[tauri::command]
 fn close_splashscreen(app: tauri::AppHandle) -> Result<(), String> {
   // Close the splash screen
   if let Some(splash) = app.get_webview_window("splashscreen") {
@@ -6769,6 +7432,7 @@ pub fn run() {
       normalize_item_descriptions,
       scan_folder,
       scan_for_import,
+      import_books,
       scanner::scan_library,
       add_ereader_device,
       list_ereader_devices,
