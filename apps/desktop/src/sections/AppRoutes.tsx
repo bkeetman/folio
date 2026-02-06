@@ -44,7 +44,7 @@ type AppRoutesProps = {
   libraryReady: boolean;
   libraryItemsLength: number;
   sortedBooks: FilteredBook[];
-  filteredBooks: FilteredBook[];
+  allBooks: FilteredBook[];
   selectedItemId: string | null;
   setSelectedItemId: Dispatch<SetStateAction<string | null>>;
   libraryFilter: LibraryFilter;
@@ -188,7 +188,7 @@ export function AppRoutes(props: AppRoutesProps) {
     libraryReady,
     libraryItemsLength,
     sortedBooks,
-    filteredBooks,
+    allBooks,
     selectedItemId,
     setSelectedItemId,
     libraryFilter,
@@ -370,7 +370,7 @@ export function AppRoutes(props: AppRoutesProps) {
       {view === "library-series" ? (
         <SeriesView
           series={uniqueSeries}
-          books={filteredBooks}
+          books={allBooks}
           setSelectedSeries={setSelectedSeries}
           setView={setView}
           onSelectBook={(bookId) => {

@@ -1,4 +1,5 @@
 import { Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { ItemSpinner, ProgressBar } from "../components/ProgressBar";
 import type { OperationProgress, PendingChange } from "../types/library";
 import { Button } from "../components/ui";
@@ -48,6 +49,7 @@ export function ChangesView({
   applyingChangeIds,
   changeProgress,
 }: ChangesViewProps) {
+  const { t } = useTranslation();
   return (
     <section className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2 rounded-md border border-[var(--app-border)] bg-white/70 p-2">
@@ -58,7 +60,7 @@ export function ChangesView({
             onClick={() => setPendingChangesStatus("pending")}
             disabled={pendingChangesStatus === "pending"}
           >
-            Pending
+            {t("changes.pending")}
           </Button>
           <Button
             variant="ghost"
@@ -66,7 +68,7 @@ export function ChangesView({
             onClick={() => setPendingChangesStatus("applied")}
             disabled={pendingChangesStatus === "applied"}
           >
-            Applied
+            {t("changes.applied")}
           </Button>
           <Button
             variant="ghost"
@@ -74,7 +76,7 @@ export function ChangesView({
             onClick={() => setPendingChangesStatus("error")}
             disabled={pendingChangesStatus === "error"}
           >
-            Errors
+            {t("changes.errors")}
           </Button>
         </div>
         <Button
@@ -83,7 +85,7 @@ export function ChangesView({
           onClick={handleApplyAllChanges}
           disabled={pendingChangesApplying || !pendingChanges.length}
         >
-          Apply All
+          {t("changes.applyAll")}
         </Button>
         <Button
           variant="ghost"
@@ -91,7 +93,7 @@ export function ChangesView({
           onClick={handleApplySelectedChanges}
           disabled={!selectedChangeIds.size || pendingChangesApplying}
         >
-          Apply Selected
+          {t("changes.applySelected")}
         </Button>
         <div className="h-4 w-px bg-[var(--app-border)]" />
         <Button
@@ -100,7 +102,7 @@ export function ChangesView({
           onClick={handleRemoveSelectedChanges}
           disabled={!selectedChangeIds.size || pendingChangesApplying}
         >
-          Remove Selected
+          {t("changes.removeSelected")}
         </Button>
         <Button
           variant="ghost"
@@ -108,14 +110,14 @@ export function ChangesView({
           onClick={handleRemoveAllChanges}
           disabled={pendingChangesApplying || !pendingChanges.length}
         >
-          Remove All
+          {t("changes.removeAll")}
         </Button>
       </div>
 
       {/* Progress bar when applying changes */}
       <ProgressBar
         progress={changeProgress}
-        label="Applying"
+        label={t("changes.applying")}
         variant="accent"
         show={pendingChangesApplying && changeProgress !== null}
       />
@@ -148,19 +150,19 @@ export function ChangesView({
                 <div className="flex flex-1 flex-col gap-1">
                   <div className="text-[13px] font-semibold">
                     {change.change_type === "rename"
-                      ? "Rename File"
+                      ? t("changes.renameFile")
                       : change.change_type === "delete"
-                        ? "Delete File"
-                        : "Update EPUB Metadata"}
+                        ? t("changes.deleteFile")
+                        : t("changes.updateEpubMetadata")}
                   </div>
                   <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
                     {isApplying
-                      ? "Applying..."
+                      ? t("changes.applying")
                       : change.status === "error"
-                        ? "Error"
+                        ? t("changes.error")
                         : change.status === "applied"
-                          ? "Applied"
-                          : "Pending"}
+                          ? t("changes.applied")
+                          : t("changes.pending")}
                   </div>
                   <div className="text-xs text-[var(--app-ink-muted)]">
                     {change.from_path ?? ""}
@@ -172,7 +174,7 @@ export function ChangesView({
                     <div className="text-xs text-[var(--app-ink-muted)]">{change.changes_json}</div>
                   ) : null}
                   {change.error ? (
-                    <div className="text-xs text-[var(--app-ink-muted)]">Error: {change.error}</div>
+                    <div className="text-xs text-[var(--app-ink-muted)]">{t("changes.errorLabel")}: {change.error}</div>
                   ) : null}
                 </div>
                 <div className="flex gap-1">
@@ -182,7 +184,7 @@ export function ChangesView({
                     onClick={() => handleApplyChange(change.id)}
                     disabled={pendingChangesApplying || change.status !== "pending"}
                   >
-                    {isApplying ? <Loader2 size={14} className="animate-spin" /> : "Apply"}
+                    {isApplying ? <Loader2 size={14} className="animate-spin" /> : t("changes.apply")}
                   </Button>
                   <Button
                     variant="ghost"
@@ -190,7 +192,7 @@ export function ChangesView({
                     onClick={() => handleRemoveChange(change.id)}
                     disabled={pendingChangesApplying || change.status !== "pending"}
                   >
-                    Remove
+                    {t("changes.remove")}
                   </Button>
                 </div>
               </div>
@@ -198,7 +200,7 @@ export function ChangesView({
           })
         ) : (
           <div className="text-xs text-[var(--app-ink-muted)]">
-            {pendingChangesLoading ? "Loading changes…" : "No pending changes."}
+            {pendingChangesLoading ? t("changes.loading") : t("changes.noPending")}
           </div>
         )}
       </div>
@@ -206,9 +208,9 @@ export function ChangesView({
       {confirmDeleteOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
           <div className="w-full max-w-sm rounded-md border border-[var(--app-border)] bg-white p-4 shadow-panel">
-            <div className="text-[13px] font-semibold">Delete files?</div>
+            <div className="text-[13px] font-semibold">{t("changes.deleteFilesQuestion")}</div>
             <div className="text-xs text-[var(--app-ink-muted)]">
-              You are about to delete {confirmDeleteIds.length} file(s).
+              {t("changes.deleteFilesCount", { count: confirmDeleteIds.length })}
             </div>
             <div className="mt-3 flex justify-end gap-2">
               <Button
@@ -218,10 +220,10 @@ export function ChangesView({
                   setConfirmDeleteIds([]);
                 }}
               >
-                Cancel
+                {t("changes.cancel")}
               </Button>
               <Button variant="danger" onClick={handleConfirmDelete}>
-                Delete
+                {t("changes.delete")}
               </Button>
             </div>
           </div>

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../components/ui";
 import type { DuplicateGroup } from "../types/library";
 
@@ -52,6 +53,7 @@ export function DuplicatesView({
   applyNow,
   setApplyNow,
 }: DuplicatesViewProps) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<"hash" | "title" | "fuzzy">("hash");
   const [hideTitleMismatches, setHideTitleMismatches] = useState(true);
   const [ignoredGroupIds, setIgnoredGroupIds] = useState<Set<string>>(new Set());
@@ -73,7 +75,7 @@ export function DuplicatesView({
   const openActionCount = hashReviewableGroups.length + titleGroups.length + fuzzyGroups.length;
 
   const formatBytes = (value: number) => {
-    if (!value) return "—";
+    if (!value) return t("duplicates.unknownSize");
     if (value < 1024) return `${value} B`;
     const kb = value / 1024;
     if (kb < 1024) return `${kb.toFixed(1)} KB`;
@@ -84,23 +86,23 @@ export function DuplicatesView({
   const hashSuffix = (hash: string) => (hash.length > 8 ? hash.slice(-8) : hash);
   const helperText =
     mode === "hash"
-      ? "Duplicates are detected by file content (hash), not by title."
+      ? t("duplicates.helper.hash")
       : mode === "title"
-        ? "Title + Author groups are matched by normalized title, author and year."
-        : "Fuzzy groups are matched by normalized title + author (year ignored).";
+        ? t("duplicates.helper.title")
+        : t("duplicates.helper.fuzzy");
   return (
     <section className="flex flex-col gap-4">
       <div className="text-xs text-[var(--app-ink-muted)]">{helperText}</div>
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--app-ink-muted)]">
         <CounterPill
-          label="Hash"
+          label={t("duplicates.hash")}
           value={hashReviewableGroups.length}
           tone="high"
           suffix={hashGroups.length > hashReviewableGroups.length ? `/${hashGroups.length}` : undefined}
         />
-        <CounterPill label="Title + Author" value={titleGroups.length} tone="medium" />
-        <CounterPill label="Fuzzy" value={fuzzyGroups.length} tone="low" />
-        <span className="ml-1">Open actions: {openActionCount}</span>
+        <CounterPill label={t("duplicates.titleAuthor")} value={titleGroups.length} tone="medium" />
+        <CounterPill label={t("duplicates.fuzzy")} value={fuzzyGroups.length} tone="low" />
+        <span className="ml-1">{t("duplicates.openActions", { count: openActionCount })}</span>
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] p-1">
@@ -111,7 +113,7 @@ export function DuplicatesView({
             className={mode === "hash" ? "bg-white shadow-soft" : "hover:bg-white/80"}
             onClick={() => setMode("hash")}
           >
-            Hash
+            {t("duplicates.hash")}
           </Button>
           <Button
             variant="toolbar"
@@ -120,7 +122,7 @@ export function DuplicatesView({
             className={mode === "title" ? "bg-white shadow-soft" : "hover:bg-white/80"}
             onClick={() => setMode("title")}
           >
-            Title + Author
+            {t("duplicates.titleAuthor")}
           </Button>
           <Button
             variant="toolbar"
@@ -129,14 +131,14 @@ export function DuplicatesView({
             className={mode === "fuzzy" ? "bg-white shadow-soft" : "hover:bg-white/80"}
             onClick={() => setMode("fuzzy")}
           >
-            Fuzzy
+            {t("duplicates.fuzzy")}
           </Button>
         </div>
         <Button variant="outline" onClick={() => handleAutoSelectAll(visibleGroups)}>
-          Auto-select best
+          {t("duplicates.autoSelectBest")}
         </Button>
         <Button variant="primary" onClick={() => handleResolveAll(visibleGroups, applyNow)}>
-          Resolve all
+          {t("duplicates.resolveAll")}
         </Button>
         <label className="flex items-center gap-2 text-xs text-[var(--app-ink-muted)]">
           <input
@@ -144,7 +146,7 @@ export function DuplicatesView({
             checked={applyNow}
             onChange={(event) => setApplyNow(event.target.checked)}
           />
-          Apply changes now
+          {t("duplicates.applyNow")}
         </label>
         {mode === "hash" ? (
           <label className="flex items-center gap-2 text-xs text-[var(--app-ink-muted)]">
@@ -153,16 +155,16 @@ export function DuplicatesView({
               checked={hideTitleMismatches}
               onChange={(event) => setHideTitleMismatches(event.target.checked)}
             />
-            Hide title mismatches
+            {t("duplicates.hideTitleMismatches")}
           </label>
         ) : null}
         {mode === "hash" && hideTitleMismatches && hashGroups.length > hashReviewableGroups.length ? (
           <span className="text-xs text-[var(--app-ink-muted)]">
-            Showing {hashReviewableGroups.length} of {hashGroups.length} hash groups
+            {t("duplicates.showingHashGroups", { shown: hashReviewableGroups.length, total: hashGroups.length })}
           </span>
         ) : null}
         <span className="text-xs text-[var(--app-ink-muted)]">
-          Selected {selectedCount}/{visibleGroups.length}
+          {t("duplicates.selectedCount", { selected: selectedCount, total: visibleGroups.length })}
         </span>
         {ignoredInModeCount > 0 ? (
           <Button
@@ -174,7 +176,7 @@ export function DuplicatesView({
               return next;
             })}
           >
-            Restore ignored ({ignoredInModeCount})
+            {t("duplicates.restoreIgnored", { count: ignoredInModeCount })}
           </Button>
         ) : null}
       </div>
@@ -190,7 +192,7 @@ export function DuplicatesView({
               <div className="min-w-0">
                 <div className="text-[13px] font-semibold">{group.title}</div>
                 <div className="text-xs text-[var(--app-ink-muted)]">
-                  {group.files.length} matching files
+                  {t("duplicates.matchingFiles", { count: group.files.length })}
                 </div>
                 <ul>
                   {group.files.map((file, index) => {
@@ -253,7 +255,7 @@ export function DuplicatesView({
                     });
                   }}
                 >
-                  Not duplicate
+                  {t("duplicates.notDuplicate")}
                 </Button>
                 <Button
                   variant="primary"
@@ -262,7 +264,7 @@ export function DuplicatesView({
                   }
                   disabled={!duplicateKeepSelection[group.id]}
                 >
-                  Resolve
+                  {t("duplicates.resolve")}
                 </Button>
               </div>
             </div>
@@ -270,7 +272,7 @@ export function DuplicatesView({
         })}
         {visibleGroups.length === 0 ? (
           <div className="rounded-md border border-dashed border-[var(--app-border)] bg-white/50 p-4 text-sm text-[var(--app-ink-muted)]">
-            No duplicate groups to review in this mode.
+            {t("duplicates.noneInMode")}
           </div>
         ) : null}
       </div>

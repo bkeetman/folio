@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { BookOpen, FileText, FolderOpen, Globe, HardDrive, PencilLine } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, Separator } from "../components/ui";
 import { getLanguageFlag, getLanguageName } from "../lib/languageFlags";
 import { getTagColorClass } from "../lib/tagColors";
@@ -63,6 +64,7 @@ export function Inspector({
   onQueueEreaderAdd,
   onNavigateToEdit,
 }: InspectorProps) {
+  const { t } = useTranslation();
   const [fileState, setFileState] = useState<{ itemId: string | null; files: FileItem[] }>({
     itemId: null,
     files: [],
@@ -104,10 +106,10 @@ export function Inspector({
     <aside className="flex h-screen flex-col gap-3 overflow-hidden border-l border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-4">
       <div className="flex items-center justify-between">
         <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--app-ink-muted)]">
-          Details
+          {t("inspector.details")}
         </div>
         <div className="rounded-full border border-[var(--app-border)] bg-white/70 px-2 py-0.5 text-[10px] text-[var(--app-ink-muted)]">
-          Inspector
+          {t("inspector.inspector")}
         </div>
       </div>
       <Separator />
@@ -183,7 +185,7 @@ export function Inspector({
             {files.length > 0 && (
               <div className="mt-3">
                 <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)] mb-1">
-                  Files
+                  {t("inspector.files")}
                 </div>
                 <div className="flex flex-col gap-1">
                   {files.map((file) => (
@@ -202,7 +204,7 @@ export function Inspector({
                       <button
                         onClick={() => handleReveal(file.path)}
                         className="hidden opacity-0 group-hover:block group-hover:opacity-100 p-1 hover:bg-app-bg rounded transition-all"
-                        title="Reveal in Finder"
+                        title={t("inspector.revealInFinder")}
                       >
                         <FolderOpen size={12} className="text-app-ink-muted" />
                       </button>
@@ -214,7 +216,7 @@ export function Inspector({
 
             <div className="mt-3">
               <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
-                Tags
+                {t("inspector.tags")}
               </div>
               <div className="mt-2 flex flex-wrap gap-2">
                 {selectedTags.length ? (
@@ -229,13 +231,13 @@ export function Inspector({
                     </button>
                   ))
                 ) : (
-                  <span className="text-xs text-[var(--app-ink-muted)]">No tags yet.</span>
+                  <span className="text-xs text-[var(--app-ink-muted)]">{t("inspector.noTagsYet")}</span>
                 )}
               </div>
 
               <div className="mt-3">
                 <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
-                  Add tag
+                  {t("inspector.addTag")}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {availableTags.length ? (
@@ -249,7 +251,7 @@ export function Inspector({
                       </button>
                     ))
                   ) : (
-                    <span className="text-xs text-[var(--app-ink-muted)]">No tags available.</span>
+                    <span className="text-xs text-[var(--app-ink-muted)]">{t("inspector.noTagsAvailable")}</span>
                   )}
                 </div>
               </div>
@@ -260,7 +262,7 @@ export function Inspector({
               <div className="mt-3">
                 <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
                   <Globe size={12} />
-                  Beschikbare talen
+                  {t("inspector.availableLanguages")}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {availableLanguages.map((lang) => {
@@ -294,7 +296,7 @@ export function Inspector({
                 disabled={files.length === 0}
               >
                 <FolderOpen size={14} />
-                Reveal
+                {t("inspector.reveal")}
               </Button>
               <Button
                 variant="toolbar"
@@ -303,7 +305,7 @@ export function Inspector({
                 onClick={onNavigateToEdit}
               >
                 <PencilLine size={14} />
-                Edit
+                {t("inspector.edit")}
               </Button>
             </div>
 
@@ -311,22 +313,22 @@ export function Inspector({
             {ereaderConnected && (
               <div className="mt-3 pt-3 border-t border-[var(--app-border)]">
                 <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)] mb-2">
-                  eReader
+                  {t("inspector.ereader")}
                 </div>
                 {ereaderSyncStatus?.isOnDevice ? (
                   <div className="flex items-center gap-2">
                     <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-emerald-100 text-emerald-700">
                       <HardDrive size={12} />
-                      Synced
+                      {t("inspector.synced")}
                     </span>
                     {ereaderSyncStatus.matchConfidence === "fuzzy" && (
-                      <span className="text-[10px] text-[var(--app-ink-muted)]">(fuzzy match)</span>
+                      <span className="text-[10px] text-[var(--app-ink-muted)]">({t("inspector.fuzzyMatch")})</span>
                     )}
                   </div>
                 ) : ereaderSyncStatus?.isInQueue ? (
                   <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-700">
                     <HardDrive size={12} />
-                    In queue
+                    {t("inspector.inQueue")}
                   </span>
                 ) : (
                   <Button
@@ -336,7 +338,7 @@ export function Inspector({
                     onClick={() => onQueueEreaderAdd(selectedItem.id)}
                   >
                     <HardDrive size={14} />
-                    Send to eReader
+                    {t("inspector.sendToEreader")}
                   </Button>
                 )}
               </div>
@@ -345,7 +347,7 @@ export function Inspector({
         </div>
       ) : (
         <div className="text-xs text-[var(--app-ink-muted)]">
-          Select a book to see details.
+          {t("inspector.selectBook")}
         </div>
       )}
     </aside>

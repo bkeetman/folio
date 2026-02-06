@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { HardDrive, FolderOpen, RefreshCw, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { SyncProgressBar } from "../components/ProgressBar";
 import { Button } from "../components/ui";
 import type { EReaderDevice, EReaderBook, SyncQueueItem, LibraryItem, SyncProgress } from "../types/library";
@@ -57,6 +58,7 @@ export function EReaderView({
   syncing,
   syncProgress,
 }: EReaderViewProps) {
+  const { t } = useTranslation();
   const [filter, setFilter] = useState<EReaderFilter>("all");
 
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId) ?? null;
@@ -125,24 +127,24 @@ export function EReaderView({
     const getOnDeviceBadge = () => {
       switch (confidence) {
         case "exact":
-          return { label: "Synced", className: "bg-emerald-100 text-emerald-700", title: "Exact file match" };
+          return { label: t("ereader.synced"), className: "bg-emerald-100 text-emerald-700", title: t("ereader.exactFileMatch") };
         case "isbn":
-          return { label: "Synced", className: "bg-emerald-100 text-emerald-700", title: "Matched by ISBN" };
+          return { label: t("ereader.synced"), className: "bg-emerald-100 text-emerald-700", title: t("ereader.matchedByIsbn") };
         case "title":
-          return { label: "Synced", className: "bg-blue-100 text-blue-700", title: "Matched by title" };
+          return { label: t("ereader.synced"), className: "bg-blue-100 text-blue-700", title: t("ereader.matchedByTitle") };
         case "fuzzy":
-          return { label: "Synced?", className: "bg-sky-100 text-sky-700", title: "Fuzzy match - verify" };
+          return { label: t("ereader.syncedMaybe"), className: "bg-sky-100 text-sky-700", title: t("ereader.fuzzyMatchVerify") };
         default:
-          return { label: "Synced", className: "bg-blue-100 text-blue-700", title: "On device" };
+          return { label: t("ereader.synced"), className: "bg-blue-100 text-blue-700", title: t("ereader.onDevice") };
       }
     };
 
     const badges: Record<string, { label: string; className: string; title?: string }> = {
       "on-device": getOnDeviceBadge(),
-      "library-only": { label: "Library", className: "bg-gray-100 text-gray-600", title: "Only in library" },
-      "device-only": { label: "Device", className: "bg-amber-100 text-amber-700", title: "Only on device" },
-      "queued-add": { label: "Queue +", className: "bg-purple-100 text-purple-700", title: "Queued to add" },
-      "queued-remove": { label: "Queue −", className: "bg-red-100 text-red-700", title: "Queued to remove" },
+      "library-only": { label: t("ereader.library"), className: "bg-gray-100 text-gray-600", title: t("ereader.onlyInLibrary") },
+      "device-only": { label: t("ereader.device"), className: "bg-amber-100 text-amber-700", title: t("ereader.onlyOnDevice") },
+      "queued-add": { label: t("ereader.queueAdd"), className: "bg-purple-100 text-purple-700", title: t("ereader.queuedToAdd") },
+      "queued-remove": { label: t("ereader.queueRemove"), className: "bg-red-100 text-red-700", title: t("ereader.queuedToRemove") },
     };
     const badge = badges[status];
     return (
@@ -164,7 +166,7 @@ export function EReaderView({
         <button
           onClick={() => onQueueAdd(item.libraryItemId!)}
           className="px-2 py-1 rounded text-sm hover:bg-emerald-100 text-emerald-600 font-medium"
-          title="Add to device"
+          title={t("ereader.addToDevice")}
         >
           +
         </button>
@@ -175,7 +177,7 @@ export function EReaderView({
         <button
           onClick={() => onQueueRemove(item.ereaderPath!)}
           className="px-2 py-1 rounded text-sm hover:bg-red-100 text-red-600 font-medium"
-          title="Remove from device"
+          title={t("ereader.removeFromDevice")}
         >
           −
         </button>
@@ -186,9 +188,9 @@ export function EReaderView({
         <button
           onClick={() => onQueueImport(item.ereaderPath!)}
           className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-700 hover:bg-blue-200"
-          title="Add to library"
+          title={t("ereader.addToLibrary")}
         >
-          Add to Library
+          {t("ereader.addToLibrary")}
         </button>
       );
     }
@@ -202,23 +204,23 @@ export function EReaderView({
         <div className="w-16 h-16 rounded-full bg-[var(--app-accent)]/10 flex items-center justify-center">
           <HardDrive className="w-8 h-8 text-[var(--app-accent)]" />
         </div>
-        <h2 className="text-xl font-semibold">No eReader Connected</h2>
+        <h2 className="text-xl font-semibold">{t("ereader.noConnected")}</h2>
         <p className="text-sm text-[var(--app-text-muted)] max-w-md">
-          Connect your eReader and select its folder to start syncing your library.
+          {t("ereader.connectHint")}
         </p>
         <Button
           onClick={async () => {
             const { open } = await import("@tauri-apps/plugin-dialog");
             const selection = await open({ directory: true, multiple: false });
             if (typeof selection === "string") {
-              const name = selection.split("/").pop() || "eReader";
+              const name = selection.split("/").pop() || t("ereader.deviceDefaultName");
               await onAddDevice(name, selection);
             }
           }}
           className="mt-2"
         >
           <FolderOpen className="w-4 h-4 mr-2" />
-          Select eReader Folder
+          {t("ereader.selectFolder")}
         </Button>
       </div>
     );
@@ -245,21 +247,21 @@ export function EReaderView({
               <button
                 onClick={() => onRefreshDevices()}
                 className={`flex items-center gap-1.5 text-xs hover:underline ${selectedDevice.isConnected ? "text-emerald-600" : "text-amber-600"}`}
-                title="Click to refresh connection status"
+                title={t("ereader.refreshConnectionStatus")}
               >
                 <span
                   className={`w-2 h-2 rounded-full ${selectedDevice.isConnected ? "bg-emerald-500" : "bg-amber-500"}`}
                 />
-                {selectedDevice.isConnected ? "Connected" : "Disconnected"}
+                {selectedDevice.isConnected ? t("ereader.connected") : t("ereader.disconnected")}
               </button>
               <button
                 onClick={() => {
-                  if (confirm(`Remove "${selectedDevice.name}" from Folio?`)) {
+                  if (confirm(t("ereader.removeDeviceConfirm", { name: selectedDevice.name }))) {
                     onRemoveDevice(selectedDevice.id);
                   }
                 }}
                 className="p-1 rounded text-[var(--app-text-muted)] hover:text-red-600 hover:bg-red-50"
-                title="Remove device"
+                title={t("ereader.removeDevice")}
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -274,17 +276,17 @@ export function EReaderView({
             disabled={!selectedDevice?.isConnected || scanning}
           >
             <RefreshCw className={`w-4 h-4 mr-2 ${scanning ? "animate-spin" : ""}`} />
-            {scanning ? "Scanning..." : "Scan Device"}
+            {scanning ? t("ereader.scanning") : t("ereader.scanDevice")}
           </Button>
           {(pendingQueue.length > 0 || syncing) && (
             <Button size="sm" onClick={onExecuteSync} disabled={syncing}>
               {syncing ? (
                 <>
                   <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                  Syncing...
+                  {t("ereader.syncing")}
                 </>
               ) : (
-                `Sync (${pendingQueue.length})`
+                t("ereader.syncCount", { count: pendingQueue.length })
               )}
             </Button>
           )}
@@ -293,7 +295,7 @@ export function EReaderView({
 
       {/* Filters */}
       <div className="flex items-center gap-2 p-4 border-b border-[var(--app-border)]">
-        <span className="text-sm text-[var(--app-text-muted)]">Filter:</span>
+        <span className="text-sm text-[var(--app-text-muted)]">{t("ereader.filter")}</span>
         {(["all", "in-library", "on-device", "not-on-device", "device-only", "queued"] as const).map((f) => (
           <button
             key={f}
@@ -304,12 +306,12 @@ export function EReaderView({
                 : "bg-[var(--app-bg-secondary)] hover:bg-[var(--app-bg-tertiary)]"
             }`}
           >
-            {f === "all" && "All"}
-            {f === "in-library" && "In Library"}
-            {f === "on-device" && "On Device"}
-            {f === "not-on-device" && "Not on Device"}
-            {f === "device-only" && "Device Only"}
-            {f === "queued" && "Queued"}
+            {f === "all" && t("ereader.filters.all")}
+            {f === "in-library" && t("ereader.filters.inLibrary")}
+            {f === "on-device" && t("ereader.filters.onDevice")}
+            {f === "not-on-device" && t("ereader.filters.notOnDevice")}
+            {f === "device-only" && t("ereader.filters.deviceOnly")}
+            {f === "queued" && t("ereader.filters.queued")}
           </button>
         ))}
       </div>
@@ -329,7 +331,7 @@ export function EReaderView({
       {pendingQueue.length > 0 && !syncing && (
         <div className="border-b border-[var(--app-border)] bg-[var(--app-bg-secondary)]">
           <div className="p-3">
-            <h3 className="text-sm font-medium mb-2">Sync Queue ({pendingQueue.length} pending)</h3>
+            <h3 className="text-sm font-medium mb-2">{t("ereader.syncQueue", { count: pendingQueue.length })}</h3>
             <div className="space-y-1">
               {pendingQueue.map((item) => (
                 <div key={item.id} className="flex items-center justify-between text-sm py-1">
@@ -345,18 +347,18 @@ export function EReaderView({
                     >
                       {item.action === "add" ? "+" : item.action === "remove" ? "−" : "↓"}
                     </span>
-                    <span>{item.action === "add" ? "Add" : item.action === "remove" ? "Remove" : "Import"}</span>
+                    <span>{item.action === "add" ? t("ereader.add") : item.action === "remove" ? t("ereader.remove") : t("ereader.import")}</span>
                     <span className="text-[var(--app-text-muted)]">
                       {item.itemId
                         ? libraryItems.find((i) => i.id === item.itemId)?.title
-                        : item.ereaderPath?.split("/").pop()}
+                        : item.ereaderPath?.split("/").pop() ?? t("ereader.unknown")}
                     </span>
                   </span>
                   <button
                     onClick={() => onRemoveFromQueue(item.id)}
                     className="text-xs text-[var(--app-text-muted)] hover:text-red-600"
                   >
-                    Cancel
+                    {t("ereader.cancel")}
                   </button>
                 </div>
               ))}
@@ -369,30 +371,30 @@ export function EReaderView({
       <div className="flex-1 overflow-auto">
         {!selectedDevice?.isConnected ? (
           <div className="text-center text-[var(--app-text-muted)] py-8">
-            Device is disconnected. Please reconnect to scan and sync.
+            {t("ereader.deviceDisconnected")}
           </div>
         ) : ereaderBooks.length === 0 && libraryItems.length === 0 ? (
           <div className="text-center text-[var(--app-text-muted)] py-8">
-            Click "Scan Device" to see books on your eReader.
+            {t("ereader.clickScanHint")}
           </div>
         ) : filteredItems.length === 0 ? (
-          <div className="text-center text-[var(--app-text-muted)] py-8">No books match the current filter.</div>
+          <div className="text-center text-[var(--app-text-muted)] py-8">{t("ereader.noBooksForFilter")}</div>
         ) : (
           <table className="w-full">
             <thead className="sticky top-0 bg-[var(--app-bg)] border-b border-[var(--app-border)]">
               <tr className="text-left text-xs text-[var(--app-text-muted)]">
-                <th className="p-3 font-medium">Title / Author</th>
-                <th className="p-3 font-medium w-32">Status</th>
-                <th className="p-3 font-medium w-24">Action</th>
+                <th className="p-3 font-medium">{t("ereader.table.titleAuthor")}</th>
+                <th className="p-3 font-medium w-32">{t("ereader.table.status")}</th>
+                <th className="p-3 font-medium w-24">{t("ereader.table.action")}</th>
               </tr>
             </thead>
             <tbody>
               {filteredItems.map((item) => (
                 <tr key={item.id} className="border-b border-[var(--app-border)] hover:bg-[var(--app-bg-secondary)]">
                   <td className="p-3">
-                    <div className="font-medium">{item.title || "Unknown Title"}</div>
+                    <div className="font-medium">{item.title || t("ereader.unknownTitle")}</div>
                     <div className="text-sm text-[var(--app-text-muted)]">
-                      {item.authors.length > 0 ? item.authors.join(", ") : "Unknown Author"}
+                      {item.authors.length > 0 ? item.authors.join(", ") : t("ereader.unknownAuthor")}
                     </div>
                   </td>
                   <td className="p-3">

@@ -1,6 +1,7 @@
 import { AlertTriangle, BookOpen, ChevronDown, Image, Sparkles, User, X } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { BookEditView } from "./BookEditView";
 import { ProgressBar } from "../components/ProgressBar";
 import { Button } from "../components/ui";
@@ -83,10 +84,11 @@ export function FixView({
   enriching,
   enrichProgress,
 }: FixViewProps) {
+  const { t } = useTranslation();
   const enrichLabel =
     items.length > 0
-      ? `Needs Fixing list: ${items.length} items`
-      : "Needs Fixing list is empty";
+      ? t("fixView.needsFixingListCount", { count: items.length })
+      : t("fixView.needsFixingListEmpty");
 
   const renderEnrichToolbar = () => {
     if (!isDesktop) return null;
@@ -95,7 +97,7 @@ export function FixView({
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--app-ink)]">
-              Metadata Enrichment
+              {t("fixView.metadataEnrichment")}
             </div>
             <div className="text-[11px] text-[var(--app-ink-muted)]">{enrichLabel}</div>
           </div>
@@ -107,7 +109,7 @@ export function FixView({
               className="gap-2 border-red-300 text-red-600 shadow-sm hover:bg-red-50"
             >
               <X size={14} />
-              Cancel
+              {t("fixView.cancel")}
             </Button>
           ) : (
             <Button
@@ -118,7 +120,7 @@ export function FixView({
               disabled={items.length === 0}
             >
               <Sparkles size={14} />
-              Enrich Needs Fixing
+              {t("fixView.enrichNeedsFixing")}
             </Button>
           )}
         </div>
@@ -162,14 +164,14 @@ export function FixView({
         {renderEnrichToolbar()}
         <ProgressBar
           progress={enrichProgress}
-          label="Enriching Library"
+          label={t("fixView.enrichingLibrary")}
           variant="purple"
           show={enriching && enrichProgress !== null}
         />
         <div className="flex flex-col items-center justify-center gap-4 py-16">
           <div className="text-4xl">🎉</div>
-          <div className="text-lg font-medium text-[var(--app-ink)]">All books have complete metadata!</div>
-          <div className="text-sm text-[var(--app-ink-muted)]">Nothing needs fixing based on your current filter.</div>
+          <div className="text-lg font-medium text-[var(--app-ink)]">{t("fixView.allComplete")}</div>
+          <div className="text-sm text-[var(--app-ink-muted)]">{t("fixView.nothingNeedsFixing")}</div>
           <div className="flex items-center gap-2">
             {!fixFilter.includeIssues ? (
               <Button
@@ -177,7 +179,7 @@ export function FixView({
                 size="sm"
                 onClick={() => setFixFilter((current) => ({ ...current, includeIssues: true }))}
               >
-                Show Items With Issues
+                {t("fixView.showItemsWithIssues")}
               </Button>
             ) : null}
             {hasActiveFilters ? (
@@ -198,7 +200,7 @@ export function FixView({
                   })
                 }
               >
-                Reset Filters
+                {t("fixView.resetFilters")}
               </Button>
             ) : null}
           </div>
@@ -212,7 +214,7 @@ export function FixView({
       {renderEnrichToolbar()}
       <ProgressBar
         progress={enrichProgress}
-        label="Enriching Library"
+        label={t("fixView.enrichingLibrary")}
         variant="purple"
         show={enriching && enrichProgress !== null}
       />
@@ -221,7 +223,7 @@ export function FixView({
         <div className="w-56 flex-shrink-0 flex flex-col rounded-lg border border-[var(--app-border)] bg-white/70 overflow-hidden">
           <div className="flex items-center justify-between border-b border-[var(--app-border)] px-3 py-2">
             <span className="text-xs font-semibold text-[var(--app-ink)]">
-              NEEDS FIXING ({items.length})
+              {t("fixView.needsFixingCount", { count: items.length })}
             </span>
             <FilterDropdown filter={fixFilter} setFilter={setFixFilter} />
           </div>
@@ -238,7 +240,7 @@ export function FixView({
                   {getIssueIcon(item, inboxItems)}
                   <span className="flex flex-col min-w-0">
                     <span className="truncate text-[var(--app-ink)]">
-                      {item.title || "Untitled"}
+                      {item.title || t("fixView.untitled")}
                     </span>
                     {issueReason ? (
                       <span className="truncate text-[10px] text-[var(--app-ink-muted)]">
@@ -292,28 +294,29 @@ function FilterDropdown({
   filter: FixFilter;
   setFilter: Dispatch<SetStateAction<FixFilter>>;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="relative group">
       <button className="flex items-center gap-1 text-[10px] text-[var(--app-ink-muted)] hover:text-[var(--app-ink)]">
-        Filter <ChevronDown size={12} />
+        {t("fixView.filter")} <ChevronDown size={12} />
       </button>
       <div className="absolute right-0 top-full mt-1 w-48 rounded-md border border-[var(--app-border)] bg-white shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
         <div className="p-2 border-b border-[var(--app-border)]">
-          <span className="text-[10px] font-semibold text-[var(--app-ink-muted)]">Show books missing:</span>
+          <span className="text-[10px] font-semibold text-[var(--app-ink-muted)]">{t("fixView.showBooksMissing")}</span>
         </div>
         <div className="p-2 space-y-1">
-          <FilterCheckbox label="Author" checked={filter.missingAuthor} onChange={(v) => setFilter({ ...filter, missingAuthor: v })} />
-          <FilterCheckbox label="Title" checked={filter.missingTitle} onChange={(v) => setFilter({ ...filter, missingTitle: v })} />
-          <FilterCheckbox label="Cover" checked={filter.missingCover} onChange={(v) => setFilter({ ...filter, missingCover: v })} />
-          <FilterCheckbox label="ISBN" checked={filter.missingIsbn} onChange={(v) => setFilter({ ...filter, missingIsbn: v })} />
-          <FilterCheckbox label="Year" checked={filter.missingYear} onChange={(v) => setFilter({ ...filter, missingYear: v })} />
-          <FilterCheckbox label="Language" checked={filter.missingLanguage} onChange={(v) => setFilter({ ...filter, missingLanguage: v })} />
-          <FilterCheckbox label="Series" checked={filter.missingSeries} onChange={(v) => setFilter({ ...filter, missingSeries: v })} />
+          <FilterCheckbox label={t("fixView.author")} checked={filter.missingAuthor} onChange={(v) => setFilter({ ...filter, missingAuthor: v })} />
+          <FilterCheckbox label={t("fixView.title")} checked={filter.missingTitle} onChange={(v) => setFilter({ ...filter, missingTitle: v })} />
+          <FilterCheckbox label={t("fixView.cover")} checked={filter.missingCover} onChange={(v) => setFilter({ ...filter, missingCover: v })} />
+          <FilterCheckbox label={t("fixView.isbn")} checked={filter.missingIsbn} onChange={(v) => setFilter({ ...filter, missingIsbn: v })} />
+          <FilterCheckbox label={t("fixView.year")} checked={filter.missingYear} onChange={(v) => setFilter({ ...filter, missingYear: v })} />
+          <FilterCheckbox label={t("fixView.language")} checked={filter.missingLanguage} onChange={(v) => setFilter({ ...filter, missingLanguage: v })} />
+          <FilterCheckbox label={t("fixView.series")} checked={filter.missingSeries} onChange={(v) => setFilter({ ...filter, missingSeries: v })} />
         </div>
         <div className="p-2 border-t border-[var(--app-border)]">
-          <span className="text-[10px] font-semibold text-[var(--app-ink-muted)]">Also show:</span>
+          <span className="text-[10px] font-semibold text-[var(--app-ink-muted)]">{t("fixView.alsoShow")}</span>
           <div className="mt-1">
-            <FilterCheckbox label="Items with issues" checked={filter.includeIssues} onChange={(v) => setFilter({ ...filter, includeIssues: v })} />
+            <FilterCheckbox label={t("fixView.itemsWithIssues")} checked={filter.includeIssues} onChange={(v) => setFilter({ ...filter, includeIssues: v })} />
           </div>
         </div>
       </div>

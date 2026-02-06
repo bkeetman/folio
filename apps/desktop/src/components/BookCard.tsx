@@ -64,17 +64,17 @@ export function BookCard({
                 </div>
 
                 {/* Title & Tags */}
-                <div className="flex flex-col justify-center gap-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-medium text-app-ink">{book.title}</span>
-                        {book.series && (
-                            <span className="shrink-0 text-xs text-app-ink-muted">
-                                ({book.series}{book.seriesIndex ? ` #${book.seriesIndex}` : ""})
-                            </span>
-                        )}
+                <div className="flex flex-col justify-center gap-0.5 min-w-0">
+                    <div className="truncate text-sm font-medium text-app-ink">
+                        {book.title}
                     </div>
+                    {book.series && (
+                        <div className="truncate text-[10px] text-app-ink-muted leading-tight">
+                            {book.series}{book.seriesIndex ? ` #${book.seriesIndex}` : ""}
+                        </div>
+                    )}
                     {(book.tags ?? []).length > 0 && (
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-wrap gap-1 mt-0.5">
                             {(book.tags ?? []).slice(0, 3).map((tag) => (
                                 <span
                                     key={tag.id}

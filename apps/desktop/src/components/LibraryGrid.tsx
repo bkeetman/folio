@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { BookDisplay } from "../types/library";
 import { BookCard } from "./BookCard";
 
@@ -22,15 +23,16 @@ export function LibraryGrid({
     viewMode,
     enrichingItems,
 }: LibraryGridProps) {
+    const { t } = useTranslation();
     if (viewMode === "list") {
         return (
             <div className="overflow-hidden rounded-lg border border-[var(--app-border)] bg-[#fffdf9]">
                 <div className="grid grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr] gap-3 bg-[#f9f4ee] px-4 py-2 text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
                     <div></div>
-                    <div>Titel</div>
-                    <div>Auteur</div>
-                    <div>Jaar</div>
-                    <div>Formaat</div>
+                    <div>{t("library.columnTitle")}</div>
+                    <div>{t("library.columnAuthor")}</div>
+                    <div>{t("library.columnYear")}</div>
+                    <div>{t("library.columnFormat")}</div>
                 </div>
                 {books.map((book) => (
                     <BookCard

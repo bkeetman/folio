@@ -3,11 +3,36 @@ import type { Dispatch, SetStateAction } from "react";
 import type { BookDisplay, View } from "../types/library";
 import { Search, ChevronDown, ChevronRight } from "lucide-react";
 import { getLanguageFlag } from "../lib/languageFlags";
+import { useTranslation } from "react-i18next";
 
 type Series = {
   name: string;
   bookCount: number;
 };
+
+function summarizeSeriesAuthors(seriesBooks: BookDisplay[]): string {
+  const uniqueByKey = new Map<string, string>();
+  seriesBooks.forEach((book) => {
+    const authors = book.authors.length
+      ? book.authors
+      : book.author.split(",").map((value) => value.trim()).filter(Boolean);
+    authors.forEach((author) => {
+      const normalized = author.trim().toLocaleLowerCase();
+      if (!normalized || uniqueByKey.has(normalized)) return;
+      uniqueByKey.set(normalized, author.trim());
+    });
+  });
+
+  const uniqueAuthors = Array.from(uniqueByKey.values());
+
+  if (uniqueAuthors.length === 0) return "";
+  if (uniqueAuthors.length <= 2) return uniqueAuthors.join(", ");
+  return `${uniqueAuthors[0]}, ${uniqueAuthors[1]} +${uniqueAuthors.length - 2}`;
+}
+
+function normalizeSeriesKey(value: string) {
+  return value.trim().toLocaleLowerCase();
+}
 
 type SeriesViewProps = {
   series: Series[];
@@ -26,6 +51,7 @@ export function SeriesView({
   setView,
   onSelectBook,
 }: SeriesViewProps) {
+  const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState("");
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [expandedSeries, setExpandedSeries] = useState<Set<string>>(new Set());
@@ -35,8 +61,10 @@ export function SeriesView({
     const grouped: Record<string, BookDisplay[]> = {};
     books.forEach((book) => {
       if (book.series) {
-        if (!grouped[book.series]) grouped[book.series] = [];
-        grouped[book.series].push(book);
+        const key = normalizeSeriesKey(book.series);
+        if (!key) return;
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(book);
       }
     });
     // Sort books within each series by seriesIndex
@@ -104,9 +132,9 @@ export function SeriesView({
   if (series.length === 0) {
     return (
       <div className="rounded-lg border border-[var(--app-border)] bg-white/70 p-4">
-        <div className="text-[13px] font-semibold">Geen series gevonden</div>
+        <div className="text-[13px] font-semibold">{t("series.noneTitle")}</div>
         <div className="text-xs text-[var(--app-ink-muted)]">
-          Serie-informatie wordt uit boek-metadata gehaald.
+          {t("series.emptyHint")}
         </div>
       </div>
     );
@@ -124,7 +152,7 @@ export function SeriesView({
           />
           <input
             type="text"
-            placeholder="Zoek serie..."
+            placeholder={t("series.searchPlaceholder")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full rounded-lg border border-[var(--app-border)] bg-white/80 py-2 pl-10 pr-4 text-sm placeholder:text-[var(--app-ink-muted)] focus:border-[rgba(208,138,70,0.6)] focus:outline-none"
@@ -142,16 +170,16 @@ export function SeriesView({
         {/* Stats */}
         <div className="text-sm text-[var(--app-ink-muted)]">
           {filteredSeries.length === series.length
-            ? `${series.length} series`
-            : `${filteredSeries.length} van ${series.length} series`}
+            ? t("series.countAll", { count: series.length })
+            : t("series.countFiltered", { filtered: filteredSeries.length, total: series.length })}
         </div>
 
         {/* Series list grouped by letter */}
         {filteredSeries.length === 0 ? (
           <div className="rounded-lg border border-[var(--app-border)] bg-white/70 p-4">
-            <div className="text-[13px] font-semibold">Geen series gevonden</div>
+            <div className="text-[13px] font-semibold">{t("series.noneTitle")}</div>
             <div className="text-xs text-[var(--app-ink-muted)]">
-              Probeer een andere zoekterm.
+              {t("series.noneHint")}
             </div>
           </div>
         ) : (
@@ -174,7 +202,8 @@ export function SeriesView({
                 <div className="flex flex-col gap-2">
                   {groupedSeries[letter].map((s) => {
                     const isExpanded = expandedSeries.has(s.name);
-                    const seriesBooks = booksBySeries[s.name] ?? [];
+                    const seriesBooks = booksBySeries[normalizeSeriesKey(s.name)] ?? [];
+                    const seriesAuthors = summarizeSeriesAuthors(seriesBooks);
                     return (
                       <div
                         key={s.name}
@@ -191,16 +220,23 @@ export function SeriesView({
                             ) : (
                               <ChevronRight size={16} className="shrink-0 text-[var(--app-ink-muted)]" />
                             )}
-                            <span className="font-medium truncate">{s.name}</span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate font-medium">{s.name}</span>
+                              {seriesAuthors ? (
+                                <span className="block truncate text-xs text-[var(--app-ink-muted)]">
+                                  {seriesAuthors}
+                                </span>
+                              ) : null}
+                            </span>
                             <span className="ml-auto shrink-0 text-xs text-[var(--app-ink-muted)]">
-                              {s.bookCount} {s.bookCount === 1 ? "boek" : "boeken"}
+                              {t("series.booksCount", { count: s.bookCount })}
                             </span>
                           </button>
                           <button
                             className="px-3 py-2 text-xs text-[var(--app-accent-strong)] hover:underline"
                             onClick={() => handleSeriesClick(s.name)}
                           >
-                            Toon alle
+                            {t("series.showAll")}
                           </button>
                         </div>
                         {/* Expanded books list */}

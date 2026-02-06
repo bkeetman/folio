@@ -193,7 +193,7 @@ function App() {
     uniqueSeries,
     fixIssues,
     allFixItems,
-    filteredBooks,
+    allBooks,
     sortedBooks,
     selectedItem,
     selectedTags,
@@ -1426,7 +1426,7 @@ function App() {
             libraryReady={libraryReady}
             libraryItemsLength={libraryItems.length}
             sortedBooks={sortedBooks}
-            filteredBooks={filteredBooks}
+            allBooks={allBooks}
             selectedItemId={selectedItemId}
             setSelectedItemId={setSelectedItemId}
             libraryFilter={libraryFilter}

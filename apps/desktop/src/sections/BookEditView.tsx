@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ArrowLeft, Check, Image as ImageIcon, Loader2, Search, Trash2, X } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, Input } from "../components/ui";
 import { LANGUAGE_OPTIONS } from "../lib/languageFlags";
 import { cleanupMetadataTitle } from "../lib/metadataCleanup";
@@ -61,6 +62,7 @@ export function BookEditView({
     onSaveMetadata,
     embedded = false,
 }: BookEditViewProps) {
+    const { t } = useTranslation();
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState(false);
@@ -142,7 +144,7 @@ export function BookEditView({
                 })
                 .catch((err) => {
                     console.error("Failed to load details", err);
-                    setError("Failed to load book details.");
+                    setError(t("bookEdit.failedLoadDetails"));
                     setIsLoading(false);
                 });
 
@@ -159,6 +161,7 @@ export function BookEditView({
         onFetchCover,
         detailsVersion,
         loadLocalCoverBlob,
+        t,
     ]);
 
     useEffect(() => {
@@ -178,7 +181,7 @@ export function BookEditView({
                 URL.revokeObjectURL(localCoverUrlRef.current);
             }
         };
-    }, []);
+    }, [t]);
 
     const handleSave = async () => {
         if (!selectedItemId) return;
@@ -217,9 +220,9 @@ export function BookEditView({
         if (!selectedItemId || !isDesktop) return;
         const { confirm } = await import("@tauri-apps/plugin-dialog");
         const ok = await confirm(
-            "Dit verwijdert het boek uit je library en voegt delete changes toe in Changes. Bestanden worden pas echt verwijderd na Apply in Changes.",
+            t("bookEdit.removeFromLibraryConfirm"),
             {
-                title: "Verwijder uit library",
+                title: t("bookEdit.removeFromLibraryTitle"),
                 kind: "warning",
             }
         );
@@ -257,19 +260,19 @@ export function BookEditView({
 
             if (selected && typeof selected === "string") {
                 setIsUploadingCover(true);
-                setInfoMessage("Applying cover...");
+                setInfoMessage(t("bookEdit.applyingCover"));
                 await invoke("upload_cover", { itemId: selectedItemId, path: selected });
 
                 // Refresh cover
                 onClearCover(selectedItemId);
                 await onFetchCover(selectedItemId, true);
                 await loadLocalCoverBlob(selectedItemId);
-                setInfoMessage("Cover updated.");
+                setInfoMessage(t("bookEdit.coverUpdated"));
                 setIsUploadingCover(false);
             }
         } catch (err) {
             console.error("Failed to upload cover", err);
-            setError("Failed to upload cover image.");
+            setError(t("bookEdit.failedUploadCover"));
             setIsUploadingCover(false);
         }
     };
@@ -278,7 +281,7 @@ export function BookEditView({
         if (!selectedItemId) return;
         setIsApplyingEmbeddedCover(true);
         setError(null);
-        setInfoMessage("Applying embedded cover...");
+        setInfoMessage(t("bookEdit.applyingEmbeddedCover"));
         try {
             const selected = embeddedCandidates[selectedEmbeddedIndex];
             if (!selected) {
@@ -294,14 +297,14 @@ export function BookEditView({
             await onFetchCover(selectedItemId, true);
             const hasLocalCover = await loadLocalCoverBlob(selectedItemId);
             if (!hasLocalCover) {
-                setError("Embedded cover was selected, but could not be read back from the library database.");
+                setError(t("bookEdit.embeddedCoverReadbackFailed"));
                 setInfoMessage(null);
                 return;
             }
-            setInfoMessage("Embedded cover applied.");
+            setInfoMessage(t("bookEdit.embeddedCoverApplied"));
         } catch (err) {
             console.error("Failed to use embedded cover", err);
-            setError(err instanceof Error ? err.message : "Failed to use embedded cover.");
+            setError(err instanceof Error ? err.message : t("bookEdit.failedUseEmbeddedCover"));
             setInfoMessage(null);
         } finally {
             setIsApplyingEmbeddedCover(false);
@@ -343,14 +346,14 @@ export function BookEditView({
                     if (previous) URL.revokeObjectURL(previous);
                     return null;
                 });
-                setError(err instanceof Error ? err.message : "Failed to load embedded cover preview.");
+                setError(err instanceof Error ? err.message : t("bookEdit.failedLoadEmbeddedPreview"));
             }
         } finally {
             if (activeItemIdRef.current === itemId) {
                 setIsLoadingEmbeddedPreview(false);
             }
         }
-    }, []);
+    }, [t]);
 
     const handleSelectEmbeddedCandidate = (index: number) => {
         const candidate = embeddedCandidates[index];
@@ -372,7 +375,7 @@ export function BookEditView({
     if (!selectedItemId || !selectedItem) {
         return (
             <div className="flex h-full items-center justify-center text-app-ink-muted">
-                No book selected for editing.
+                {t("bookEdit.noBookSelected")}
             </div>
         );
     }
@@ -395,8 +398,8 @@ export function BookEditView({
                         <ArrowLeft size={18} />
                     </Button>
                     <div className="space-y-0.5">
-                        <h1 className="text-lg font-semibold leading-tight">Edit Book</h1>
-                        <p className="text-[11px] text-app-ink-muted">{selectedItem.title || "Untitled"}</p>
+                        <h1 className="text-lg font-semibold leading-tight">{t("bookEdit.editBook")}</h1>
+                        <p className="text-[11px] text-app-ink-muted">{selectedItem.title || t("bookEdit.untitled")}</p>
                     </div>
                 </div>
                 <div className="flex gap-2 items-center">
@@ -408,11 +411,11 @@ export function BookEditView({
                         className="h-9 px-4 border-red-300 text-red-600 hover:bg-red-50"
                     >
                         {isQueueingRemove ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
-                        Remove from Library
+                        {t("bookEdit.removeFromLibrary")}
                     </Button>
                     <Button variant="outline" size="sm" onClick={handleCancel} disabled={isSaving || isUploadingCover || isQueueingRemove} className="h-9 px-4">
                         <X size={14} className="mr-2" />
-                        Cancel
+                        {t("bookEdit.cancel")}
                     </Button>
                     <Button
                         size="sm"
@@ -421,7 +424,7 @@ export function BookEditView({
                         disabled={isSaving || isUploadingCover || isQueueingRemove}
                     >
                         {isSaving ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Check size={14} className="mr-2" />}
-                        Save Changes
+                        {t("bookEdit.saveChanges")}
                     </Button>
                 </div>
             </header>
@@ -450,7 +453,7 @@ export function BookEditView({
                     {/* Left Column: Cover */}
                     <div className="space-y-4">
                         <h2 className="text-sm font-semibold uppercase tracking-wider text-app-ink-muted">
-                            Book Cover
+                            {t("bookEdit.bookCover")}
                         </h2>
                         <div className="group relative aspect-[3/4] w-full overflow-hidden rounded-lg border border-app-border bg-app-surface shadow-sm">
                             {displayCoverUrl ? (
@@ -469,7 +472,7 @@ export function BookEditView({
                             ) : (
                                 <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-app-ink-muted">
                                     <ImageIcon size={48} strokeWidth={1} />
-                                    <span className="text-xs uppercase tracking-widest">{selectedItem.formats?.[0] || "Unknown"}</span>
+                                    <span className="text-xs uppercase tracking-widest">{selectedItem.formats?.[0] || t("bookEdit.unknown")}</span>
                                 </div>
                             )}
 
@@ -486,7 +489,7 @@ export function BookEditView({
                             disabled={isUploadingCover || isApplyingEmbeddedCover || isSaving}
                         >
                             <ImageIcon size={14} className="mr-2" />
-                            {coverUrl ? "Change Cover" : "Add Cover"}
+                            {coverUrl ? t("bookEdit.changeCover") : t("bookEdit.addCover")}
                         </Button>
                         <Button
                             variant="ghost"
@@ -499,13 +502,13 @@ export function BookEditView({
                             ) : (
                                 <ImageIcon size={14} className="mr-2" />
                             )}
-                            Use Embedded Cover
+                            {t("bookEdit.useEmbeddedCover")}
                         </Button>
                         <div className="rounded-md border border-app-border bg-white p-3">
                             <div className="mb-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-app-ink-muted">
-                                Embedded Cover
+                                {t("bookEdit.embeddedCover")}
                                 {isLoadingEmbeddedPreview ? (
-                                    <span className="text-[10px] text-app-ink-muted">Loading...</span>
+                                <span className="text-[10px] text-app-ink-muted">{t("bookEdit.loading")}</span>
                                 ) : null}
                             </div>
                             {embeddedPreviewUrl ? (
@@ -532,11 +535,11 @@ export function BookEditView({
                                     ) : null}
                                 </div>
                             ) : (
-                                <div className="text-[10px] text-app-ink-muted">No preview loaded.</div>
+                                <div className="text-[10px] text-app-ink-muted">{t("bookEdit.noPreviewLoaded")}</div>
                             )}
                         </div>
                         <p className="text-[10px] text-center text-app-ink-muted">
-                            Recommended: 800x1200px (JPG, PNG, WebP)
+                            {t("bookEdit.recommendedCover")}
                         </p>
                     </div>
 
@@ -549,14 +552,14 @@ export function BookEditView({
                         }
                     >
                         <h2 className="mb-6 text-sm font-semibold uppercase tracking-wider text-app-ink-muted">
-                            Metadata details
+                            {t("bookEdit.metadataDetails")}
                         </h2>
 
                         <div className="space-y-5">
                             {/* Title */}
                             <div>
                                 <div className="mb-1.5 flex items-center justify-between">
-                                    <label className="block text-sm font-medium text-app-ink">Title</label>
+                                    <label className="block text-sm font-medium text-app-ink">{t("bookEdit.title")}</label>
                                     <Button
                                         variant="ghost"
                                         size="sm"
@@ -570,20 +573,20 @@ export function BookEditView({
                                         }
                                         disabled={!titleCleanupPreview.changed}
                                     >
-                                        Auto-clean
+                                        {t("bookEdit.autoClean")}
                                     </Button>
                                 </div>
                                 <Input
                                     value={formData.title || ""}
                                     onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                                    placeholder="Book title"
+                                    placeholder={t("bookEdit.bookTitlePlaceholder")}
                                     className="w-full"
                                 />
                             </div>
 
                             {/* Authors */}
                             <div>
-                                <label className="mb-1.5 block text-sm font-medium text-app-ink">Authors</label>
+                                <label className="mb-1.5 block text-sm font-medium text-app-ink">{t("bookEdit.authors")}</label>
                                 <Input
                                     value={formData.authors.join(", ")}
                                     onChange={(e) =>
@@ -595,34 +598,34 @@ export function BookEditView({
                                                 .filter(Boolean),
                                         })
                                     }
-                                    placeholder="Comma separated: Author One, Author Two"
+                                    placeholder={t("bookEdit.authorsPlaceholder")}
                                     className="w-full"
                                 />
-                                <p className="mt-1 text-xs text-app-ink-muted">Separate multiple authors with commas</p>
+                                <p className="mt-1 text-xs text-app-ink-muted">{t("bookEdit.authorsHint")}</p>
                             </div>
 
                             {/* Year and Language */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-app-ink">Publication Year</label>
+                                    <label className="mb-1.5 block text-sm font-medium text-app-ink">{t("bookEdit.publicationYear")}</label>
                                     <Input
                                         type="number"
                                         value={formData.publishedYear || ""}
                                         onChange={(e) =>
                                             setFormData({ ...formData, publishedYear: parseInt(e.target.value) || null })
                                         }
-                                        placeholder="e.g. 2024"
+                                        placeholder={t("bookEdit.yearPlaceholder")}
                                         className="w-full"
                                     />
                                 </div>
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-app-ink">Language</label>
+                                    <label className="mb-1.5 block text-sm font-medium text-app-ink">{t("bookEdit.language")}</label>
                                     <select
                                         value={formData.language ?? ""}
                                         onChange={(e) => setFormData({ ...formData, language: e.target.value || null })}
                                         className="h-10 w-full rounded-md border border-app-border bg-white px-3 text-sm text-app-ink"
                                     >
-                                        <option value="">Select...</option>
+                                        <option value="">{t("bookEdit.select")}</option>
                                         {LANGUAGE_OPTIONS.map((lang) => (
                                             <option key={lang.code} value={lang.code}>
                                                 {lang.flag ? `${lang.flag} ${lang.name}` : lang.name}
@@ -634,11 +637,11 @@ export function BookEditView({
 
                             {/* ISBN */}
                             <div>
-                                <label className="mb-1.5 block text-sm font-medium text-app-ink">ISBN</label>
+                                <label className="mb-1.5 block text-sm font-medium text-app-ink">{t("bookEdit.isbn")}</label>
                                 <Input
                                     value={formData.isbn || ""}
                                     onChange={(e) => setFormData({ ...formData, isbn: e.target.value || null })}
-                                    placeholder="ISBN-10 or ISBN-13"
+                                    placeholder={t("bookEdit.isbnPlaceholder")}
                                     className="w-full"
                                 />
                             </div>
@@ -646,16 +649,16 @@ export function BookEditView({
                             {/* Series */}
                             <div className="grid grid-cols-[1fr_120px] gap-4">
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-app-ink">Series</label>
+                                    <label className="mb-1.5 block text-sm font-medium text-app-ink">{t("bookEdit.series")}</label>
                                     <Input
                                         value={formData.series || ""}
                                         onChange={(e) => setFormData({ ...formData, series: e.target.value || null })}
-                                        placeholder="Series name"
+                                        placeholder={t("bookEdit.seriesPlaceholder")}
                                         className="w-full"
                                     />
                                 </div>
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-app-ink">Series #</label>
+                                    <label className="mb-1.5 block text-sm font-medium text-app-ink">{t("bookEdit.seriesNumber")}</label>
                                     <Input
                                         type="number"
                                         step="0.1"
@@ -663,7 +666,7 @@ export function BookEditView({
                                         onChange={(e) =>
                                             setFormData({ ...formData, seriesIndex: parseFloat(e.target.value) || null })
                                         }
-                                        placeholder="1, 2, 3..."
+                                        placeholder={t("bookEdit.seriesNumberPlaceholder")}
                                         className="w-full"
                                     />
                                 </div>
@@ -671,11 +674,11 @@ export function BookEditView({
 
                             {/* Description */}
                             <div>
-                                <label className="mb-1.5 block text-sm font-medium text-app-ink">Description</label>
+                                <label className="mb-1.5 block text-sm font-medium text-app-ink">{t("bookEdit.description")}</label>
                                 <textarea
                                     value={formData.description || ""}
                                     onChange={(e) => setFormData({ ...formData, description: e.target.value || null })}
-                                    placeholder="Book description or summary..."
+                                    placeholder={t("bookEdit.descriptionPlaceholder")}
                                     className="flex min-h-[160px] w-full rounded-md border border-app-border bg-white px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                 />
                             </div>
@@ -690,7 +693,7 @@ export function BookEditView({
                                         className="border-red-300 text-red-600 hover:bg-red-50"
                                     >
                                         {isQueueingRemove ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
-                                        Remove from Library
+                                        {t("bookEdit.removeFromLibrary")}
                                     </Button>
                                     <Button
                                         variant="primary"
@@ -700,7 +703,7 @@ export function BookEditView({
                                         className="ml-auto"
                                     >
                                         {isSaving ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Check size={14} className="mr-2" />}
-                                        Save Changes
+                                        {t("bookEdit.saveChanges")}
                                     </Button>
                                 </div>
                             ) : null}
@@ -717,14 +720,14 @@ export function BookEditView({
                     >
                         <div className="mb-3 flex items-center justify-between">
                             <h2 className="text-xs font-semibold uppercase tracking-wider text-app-ink-muted">
-                                Match metadata
+                                {t("bookEdit.matchMetadata")}
                             </h2>
                         </div>
                         <div className="flex gap-2">
                             <Input
                                 value={matchQuery}
                                 onChange={(e) => onMatchQueryChange(e.target.value)}
-                                placeholder="Search title or author..."
+                                placeholder={t("bookEdit.searchTitleOrAuthor")}
                                 className="flex-1 text-sm"
                                 onKeyDown={(e) => {
                                     if (e.key === "Enter") {
@@ -746,13 +749,13 @@ export function BookEditView({
                             {matchLoading ? (
                                 <div className="mb-3 flex items-center gap-2 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2.5 py-2 text-xs text-[var(--app-ink-muted)]">
                                     <Loader2 size={14} className="animate-spin" />
-                                    <span>Searching metadata sources...</span>
+                                    <span>{t("bookEdit.searchingSources")}</span>
                                 </div>
                             ) : null}
                             {matchLoading ? (
                                 <div className="flex items-center justify-center gap-2 py-6 text-sm text-[var(--app-ink-muted)]">
                                     <Loader2 size={16} className="animate-spin" />
-                                    Searching...
+                                    {t("bookEdit.searching")}
                                 </div>
                             ) : matchCandidates.length > 0 ? (
                                 <div className="space-y-3">
@@ -776,7 +779,7 @@ export function BookEditView({
                                                             />
                                                         ) : (
                                                             <div className="h-full w-full flex items-center justify-center text-[8px] text-[var(--app-ink-muted)]">
-                                                                No cover
+                                                                {t("bookEdit.noCover")}
                                                             </div>
                                                         )}
                                                     </div>
@@ -794,7 +797,7 @@ export function BookEditView({
                                                             {candidate.authors.join(", ")}
                                                         </div>
                                                         <div className="text-[10px] text-[var(--app-ink-muted)]">
-                                                            {candidate.published_year ?? "—"}
+                                                            {candidate.published_year ?? t("bookEdit.unknownYear")}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -808,10 +811,10 @@ export function BookEditView({
                                                     {matchApplyingId === candidate.id ? (
                                                         <span className="flex items-center gap-2">
                                                             <Loader2 size={12} className="animate-spin" />
-                                                            Applying...
+                                                            {t("bookEdit.applying")}
                                                         </span>
                                                     ) : (
-                                                        "Apply This"
+                                                        t("bookEdit.applyThis")
                                                     )}
                                                 </Button>
                                             </div>
@@ -820,8 +823,8 @@ export function BookEditView({
                                 </div>
                             ) : (
                                 <div className="text-center py-6 text-sm text-[var(--app-ink-muted)]">
-                                    <p>No results found.</p>
-                                    <p className="mt-1 text-xs">Try a different query or edit metadata manually.</p>
+                                    <p>{t("bookEdit.noResultsFound")}</p>
+                                    <p className="mt-1 text-xs">{t("bookEdit.tryDifferentQuery")}</p>
                                 </div>
                             )}
                         </div>

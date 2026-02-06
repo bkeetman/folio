@@ -1,5 +1,6 @@
 import { Filter, X } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
+import { useTranslation } from "react-i18next";
 import { LibraryGrid } from "../components/LibraryGrid";
 import { getTagColorClass } from "../lib/tagColors";
 import { cn } from "../lib/utils";
@@ -53,6 +54,7 @@ export function LibraryView({
   setSelectedSeries,
   enrichingItems,
 }: LibraryViewProps) {
+  const { t } = useTranslation();
   const hasActiveFilter = selectedAuthorNames.length > 0 || selectedSeries.length > 0;
 
   return (
@@ -67,7 +69,7 @@ export function LibraryView({
                 key={name}
                 className="inline-flex items-center gap-1 rounded bg-white px-1.5 py-0.5 shadow-sm border border-app-accent/20 text-app-ink"
               >
-                <span className="text-app-ink-muted">Author:</span> {name}
+                <span className="text-app-ink-muted">{t("library.authorPrefix")}</span> {name}
                 <button
                   className="ml-0.5 text-app-accent hover:text-app-accent-strong"
                   onClick={() => setSelectedAuthorNames((prev) => prev.filter((n) => n !== name))}
@@ -81,7 +83,7 @@ export function LibraryView({
                 key={name}
                 className="inline-flex items-center gap-1 rounded bg-white px-1.5 py-0.5 shadow-sm border border-app-accent/20 text-app-ink"
               >
-                <span className="text-app-ink-muted">Series:</span> {name}
+                <span className="text-app-ink-muted">{t("library.seriesPrefix")}</span> {name}
                 <button
                   className="ml-0.5 text-app-accent hover:text-app-accent-strong"
                   onClick={() => setSelectedSeries((prev) => prev.filter((n) => n !== name))}
@@ -97,7 +99,7 @@ export function LibraryView({
                 setSelectedSeries([]);
               }}
             >
-              Clear all
+              {t("library.clearAll")}
             </button>
           </div>
         </div>
@@ -109,18 +111,18 @@ export function LibraryView({
           <FilterOption
             active={libraryFilter === "all"}
             onClick={() => setLibraryFilter("all")}
-            label="All"
+            label={t("library.all")}
           />
           <div className="mx-1 h-3 w-px bg-app-border/40" />
           <FilterOption
             active={libraryFilter === "epub"}
             onClick={() => setLibraryFilter("epub")}
-            label="EPUB"
+            label={t("library.epub")}
           />
           <FilterOption
             active={libraryFilter === "pdf"}
             onClick={() => setLibraryFilter("pdf")}
-            label="PDF"
+            label={t("library.pdf")}
           />
         </div>
 
@@ -128,40 +130,40 @@ export function LibraryView({
           <FilterOption
             active={libraryFilter === "needs-metadata"}
             onClick={() => setLibraryFilter("needs-metadata")}
-            label="Missing Metadata"
+            label={t("library.missingMetadata")}
             warning
           />
           <div className="mx-1 h-3 w-px bg-app-border/40" />
           <FilterOption
             active={libraryFilter === "tagged"}
             onClick={() => setLibraryFilter("tagged")}
-            label="Tagged"
+            label={t("library.tagged")}
           />
         </div>
 
         <div className="ml-2 flex h-8 items-center gap-2 rounded-lg border border-app-border bg-app-surface px-2 shadow-sm">
           <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-app-ink-muted">
-            Sort
+            {t("library.sort")}
           </span>
           <select
             value={librarySort}
             onChange={(event) => setLibrarySort(event.target.value as LibrarySort)}
             className="h-7 rounded-md border border-[var(--app-border)] bg-white px-2 text-[11px]"
           >
-            <option value="default">Default</option>
-            <option value="title-asc">Title A–Z</option>
-            <option value="title-desc">Title Z–A</option>
-            <option value="author-asc">Author A–Z</option>
-            <option value="year-desc">Year (newest)</option>
-            <option value="year-asc">Year (oldest)</option>
-            <option value="recent">Recently added</option>
+            <option value="default">{t("library.sortDefault")}</option>
+            <option value="title-asc">{t("library.sortTitleAsc")}</option>
+            <option value="title-desc">{t("library.sortTitleDesc")}</option>
+            <option value="author-asc">{t("library.sortAuthorAsc")}</option>
+            <option value="year-desc">{t("library.sortYearDesc")}</option>
+            <option value="year-asc">{t("library.sortYearAsc")}</option>
+            <option value="recent">{t("library.sortRecent")}</option>
           </select>
         </div>
 
         {tags.length > 0 && (
           <div className="flex items-center gap-1.5 ml-2 overflow-x-auto no-scrollbar py-1">
             <span className="text-[10px] uppercase font-bold tracking-wider text-app-ink-muted/50 select-none">
-              Tags
+              {t("sidebar.tags")}
             </span>
             <button
               className={cn(
@@ -172,7 +174,7 @@ export function LibraryView({
               )}
               onClick={() => setSelectedTagIds([])}
             >
-              All
+              {t("library.all")}
             </button>
             {tags.map((tag) => {
               const active = selectedTagIds.includes(tag.id);
@@ -203,8 +205,8 @@ export function LibraryView({
 
       {isDesktop && !libraryItemsLength ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-app-border p-12 text-center">
-          <div className="mb-2 text-sm font-semibold text-app-ink">Empty Library</div>
-          <p className="text-xs text-app-ink-muted">Scan a folder to add books to your collection.</p>
+          <div className="mb-2 text-sm font-semibold text-app-ink">{t("library.empty")}</div>
+          <p className="text-xs text-app-ink-muted">{t("library.emptyHint")}</p>
         </div>
       ) : null}
 

@@ -6,6 +6,7 @@ import {
   FolderInput,
   FolderOpen,
   HardDrive,
+  ImageIcon,
   Library,
   Sparkles,
   Tag,
@@ -13,6 +14,7 @@ import {
   Wrench
 } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
+import { useTranslation } from "react-i18next";
 import { Panel, SidebarItem } from "../components/ui";
 import type {
   LibraryHealth,
@@ -50,6 +52,7 @@ export function Sidebar({
   appVersion,
   ereaderConnected,
 }: SidebarProps) {
+  const { t } = useTranslation();
   return (
     <aside className="flex h-screen flex-col overflow-hidden border-r border-app-border bg-app-surface">
       <div className="flex-none flex items-center gap-3 border-b border-app-border px-4 py-5 bg-app-surface">
@@ -60,7 +63,7 @@ export function Sidebar({
           <span className="text-lg font-bold tracking-tight text-app-ink leading-none">Folio</span>
           <div className="flex items-center gap-1.5 mt-1">
             <span className="text-[10px] font-medium text-app-ink-muted uppercase tracking-wider">
-              Calm Library
+              {t("sidebar.calmLibrary")}
             </span>
             {appVersion && (
               <span className="rounded-full bg-app-border/50 px-1.5 py-0.5 text-[9px] font-medium text-app-ink-muted">
@@ -74,32 +77,32 @@ export function Sidebar({
       <div className="flex-1 overflow-y-auto px-3 py-2 scrollbar-hide">
         <nav className="flex flex-col gap-0.5 mb-6">
           <div className="text-[11px] font-semibold text-app-ink-muted/70 px-2 py-2 mb-1">
-            LIBRARY
+            {t("sidebar.library").toUpperCase()}
           </div>
           <SidebarItem
             active={view === "library" || view === "library-books"}
             onClick={() => setView("library-books")}
           >
             <BookOpen size={16} />
-            Boeken
+            {t("sidebar.books")}
           </SidebarItem>
           <SidebarItem
             active={view === "library-authors"}
             onClick={() => setView("library-authors")}
           >
             <User size={16} />
-            Auteurs
+            {t("sidebar.authors")}
           </SidebarItem>
           <SidebarItem
             active={view === "library-series"}
             onClick={() => setView("library-series")}
           >
             <Library size={16} />
-            Series
+            {t("sidebar.series")}
           </SidebarItem>
           <SidebarItem active={view === "tags"} onClick={() => setView("tags")}>
             <Tag size={16} />
-            Tags
+            {t("sidebar.tags")}
           </SidebarItem>
           <SidebarItem active={view === "ereader"} onClick={() => setView("ereader")}>
             <HardDrive size={16} />
@@ -108,7 +111,7 @@ export function Sidebar({
                 eReader
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${ereaderConnected ? "bg-emerald-500" : "bg-stone-300"}`}
-                  title={ereaderConnected ? "Device connected" : "No device connected"}
+                  title={ereaderConnected ? t("sidebar.deviceConnected") : t("sidebar.noDeviceConnected")}
                 />
               </span>
               {ereaderPendingCount > 0 ? (
@@ -122,16 +125,16 @@ export function Sidebar({
 
         <nav className="flex flex-col gap-0.5 mb-6">
           <div className="text-[11px] font-semibold text-app-ink-muted/70 px-2 py-2 mb-1">
-            MAINTENANCE
+            {t("sidebar.maintenance").toUpperCase()}
           </div>
           <SidebarItem active={scanning} onClick={handleScan}>
             <FolderOpen size={16} />
-            Add Books
+            {t("sidebar.addBooks")}
           </SidebarItem>
           <SidebarItem active={view === "duplicates"} onClick={() => setView("duplicates")}>
             <Copy size={16} />
             <span className="flex flex-1 items-center justify-between gap-2">
-              <span>Duplicates</span>
+              <span>{t("sidebar.duplicates")}</span>
               {duplicateCount > 0 ? (
                 <span className="min-w-[20px] rounded-full bg-app-accent/10 px-2 py-0.5 text-[10px] font-semibold text-app-accent">
                   {duplicateCount}
@@ -142,7 +145,7 @@ export function Sidebar({
           <SidebarItem active={view === "missing-files"} onClick={() => setView("missing-files")}>
             <HardDrive size={16} />
             <span className="flex flex-1 items-center justify-between gap-2">
-              <span>Missing Files</span>
+              <span>{t("sidebar.missingFiles")}</span>
               {missingFilesCount > 0 ? (
                 <span className="min-w-[20px] rounded-full bg-app-accent/10 px-2 py-0.5 text-[10px] font-semibold text-app-accent">
                   {missingFilesCount}
@@ -153,7 +156,7 @@ export function Sidebar({
           <SidebarItem active={view === "fix"} onClick={() => setView("fix")}>
             <Sparkles size={16} />
             <span className="flex flex-1 items-center justify-between gap-2">
-              <span>Fix Metadata</span>
+              <span>{t("sidebar.fixMetadata")}</span>
               {fixActionCount > 0 ? (
                 <span className="min-w-[20px] rounded-full bg-app-accent/10 px-2 py-0.5 text-[10px] font-semibold text-app-accent">
                   {fixActionCount}
@@ -164,7 +167,7 @@ export function Sidebar({
           <SidebarItem active={view === "changes"} onClick={() => setView("changes")}>
             <FileClock size={16} />
             <span className="flex flex-1 items-center justify-between gap-2">
-              <span>Changes</span>
+              <span>{t("sidebar.changes")}</span>
               {pendingChangesCount > 0 ? (
                 <span className="min-w-[20px] rounded-full bg-app-accent/10 px-2 py-0.5 text-[10px] font-semibold text-app-accent">
                   {pendingChangesCount}
@@ -174,11 +177,11 @@ export function Sidebar({
           </SidebarItem>
           <SidebarItem active={view === "organize"} onClick={() => setView("organize")}>
             <FolderInput size={16} />
-            Organizer
+            {t("sidebar.organizer")}
           </SidebarItem>
           <SidebarItem active={view === "settings"} onClick={() => setView("settings")}>
             <Wrench size={16} />
-            Settings
+            {t("sidebar.settings")}
           </SidebarItem>
           <SidebarItem
             onClick={handleClearLibrary}
@@ -186,19 +189,21 @@ export function Sidebar({
           >
             <AlertTriangle size={16} />
             <span className="flex flex-col">
-              <span>Clear Library Data</span>
+              <span>{t("sidebar.clearLibraryData")}</span>
               <span className="text-[10px] font-normal text-red-500/80">
-                Deletes all items
+                {t("sidebar.deletesAllItems")}
               </span>
             </span>
           </SidebarItem>
         </nav>
 
-        <Panel title="Library Health" className="mb-6">
-          <div className="rounded-lg border border-app-border bg-white p-3 shadow-sm">
-            <div className="mb-3 flex items-baseline justify-between border-b border-app-border/40 pb-2">
-              <span className="text-[11px] uppercase tracking-wider font-semibold text-app-ink-muted">Health Score</span>
-              <span className="text-xl font-bold text-app-ink">
+        <Panel title={t("sidebar.libraryHealth")}>
+          <div className="pt-2">
+            <div className="mb-2 flex items-baseline justify-between">
+              <span className="text-[11px] font-medium text-app-ink-muted">
+                {t("sidebar.healthScore")}
+              </span>
+              <span className="text-lg font-bold text-app-ink">
                 {libraryHealth
                   ? `${Math.round(
                     (libraryHealth.complete / Math.max(1, libraryHealth.total)) * 100
@@ -207,24 +212,51 @@ export function Sidebar({
               </span>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div className="flex flex-col gap-0.5">
-                <span className="text-lg font-semibold text-app-ink leading-tight">
+            {/* Progress Bar */}
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-app-border/40 mb-4">
+              <div
+                className="h-full bg-app-accent transition-all duration-500 ease-out"
+                style={{
+                  width: libraryHealth
+                    ? `${(libraryHealth.complete / Math.max(1, libraryHealth.total)) * 100}%`
+                    : "0%",
+                }}
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-1">
+              <div className="flex flex-col items-center justify-center rounded-lg py-2 hover:bg-app-border/30 transition-colors">
+                <span className="text-app-ink-muted mb-1">
+                  <Wrench size={12} strokeWidth={2.5} />
+                </span>
+                <span className="text-sm font-bold text-app-ink leading-none">
                   {libraryHealth ? libraryHealth.missing_isbn : "—"}
                 </span>
-                <span className="text-[9px] font-medium text-app-ink-muted uppercase">No ISBN</span>
+                <span className="mt-1 text-[7px] font-bold text-app-ink-muted/80 uppercase tracking-tight text-center px-1">
+                  {t("sidebar.noIsbn")}
+                </span>
               </div>
-              <div className="flex flex-col gap-0.5 border-l border-app-border/50">
-                <span className="text-lg font-semibold text-app-ink leading-tight">
+              <div className="flex flex-col items-center justify-center rounded-lg py-2 hover:bg-app-border/30 transition-colors border-x border-app-border/20">
+                <span className="text-app-ink-muted mb-1">
+                  <ImageIcon size={12} strokeWidth={2.5} />
+                </span>
+                <span className="text-sm font-bold text-app-ink leading-none">
                   {libraryHealth ? libraryHealth.missing_cover : "—"}
                 </span>
-                <span className="text-[9px] font-medium text-app-ink-muted uppercase">No Cover</span>
+                <span className="mt-1 text-[7px] font-bold text-app-ink-muted/80 uppercase tracking-tight text-center px-1">
+                  {t("sidebar.noCover")}
+                </span>
               </div>
-              <div className="flex flex-col gap-0.5 border-l border-app-border/50">
-                <span className="text-lg font-semibold text-app-ink leading-tight">
+              <div className="flex flex-col items-center justify-center rounded-lg py-2 hover:bg-app-border/30 transition-colors">
+                <span className="text-app-ink-muted mb-1">
+                  <Copy size={12} strokeWidth={2.5} />
+                </span>
+                <span className="text-sm font-bold text-app-ink leading-none">
                   {libraryHealth ? libraryHealth.duplicates : "—"}
                 </span>
-                <span className="text-[9px] font-medium text-app-ink-muted uppercase">Dupes</span>
+                <span className="mt-1 text-[7px] font-bold text-app-ink-muted/80 uppercase tracking-tight text-center px-1">
+                  {t("sidebar.dupes")}
+                </span>
               </div>
             </div>
           </div>

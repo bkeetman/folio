@@ -76,6 +76,10 @@ function formatEta(totalSeconds: number) {
   return `${seconds}s`;
 }
 
+function normalizeSeriesKey(value: string) {
+  return value.trim().toLocaleLowerCase();
+}
+
 export function useLibrarySelectors({
   libraryItems,
   coverOverrides,
@@ -109,14 +113,31 @@ export function useLibrarySelectors({
   }, [libraryItems]);
 
   const uniqueSeries = useMemo((): Array<{ name: string; bookCount: number }> => {
-    const series = new Map<string, number>();
+    const series = new Map<string, { bookCount: number; variants: Map<string, number> }>();
     libraryItems.forEach((item) => {
       if (item.series) {
-        series.set(item.series, (series.get(item.series) || 0) + 1);
+        const normalized = normalizeSeriesKey(item.series);
+        if (!normalized) return;
+        const existing = series.get(normalized);
+        if (!existing) {
+          series.set(normalized, {
+            bookCount: 1,
+            variants: new Map([[item.series, 1]]),
+          });
+          return;
+        }
+        existing.bookCount += 1;
+        existing.variants.set(item.series, (existing.variants.get(item.series) ?? 0) + 1);
       }
     });
-    return Array.from(series.entries())
-      .map(([name, bookCount]) => ({ name, bookCount }))
+    return Array.from(series.values())
+      .map(({ bookCount, variants }) => {
+        const displayName = Array.from(variants.entries()).sort((a, b) => {
+          if (b[1] !== a[1]) return b[1] - a[1];
+          return a[0].localeCompare(b[0], undefined, { sensitivity: "base" });
+        })[0]?.[0] ?? "";
+        return { name: displayName, bookCount };
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [libraryItems]);
 
@@ -210,7 +231,7 @@ export function useLibrarySelectors({
     return result;
   }, [booksNeedingFix, fixIssues, fixFilter.includeIssues, libraryItems]);
 
-  const filteredBooks = useMemo<FilteredBook[]>(() => {
+  const allBooks = useMemo<FilteredBook[]>(() => {
     const base = isDesktop
       ? libraryItems.map((item) => ({
           id: item.id,
@@ -235,6 +256,11 @@ export function useLibrarySelectors({
           seriesIndex: null as number | null,
           createdAt: 1_000_000 - index * 1000,
         }));
+    return base;
+  }, [libraryItems, isDesktop, coverOverrides, sampleBooks]);
+
+  const filteredBooks = useMemo<FilteredBook[]>(() => {
+    const base = allBooks;
 
     const filteredByFormat = base.filter((book) => {
       const normalizedFormat = String(book.format)
@@ -269,9 +295,14 @@ export function useLibrarySelectors({
       : filteredByTags;
 
     const filteredBySeries = selectedSeries.length
-      ? filteredByAuthors.filter(
-          (book) => book.series && selectedSeries.includes(book.series)
-        )
+      ? (() => {
+          const selectedSeriesNormalized = new Set(
+            selectedSeries.map(normalizeSeriesKey).filter(Boolean),
+          );
+          return filteredByAuthors.filter((book) =>
+            book.series ? selectedSeriesNormalized.has(normalizeSeriesKey(book.series)) : false,
+          );
+        })()
       : filteredByAuthors;
 
     if (!query) return filteredBySeries;
@@ -283,14 +314,11 @@ export function useLibrarySelectors({
     );
   }, [
     query,
-    libraryItems,
-    isDesktop,
-    coverOverrides,
+    allBooks,
     libraryFilter,
     selectedTagIds,
     selectedAuthorNames,
     selectedSeries,
-    sampleBooks,
   ]);
 
   const sortedBooks = useMemo(() => {
@@ -403,6 +431,7 @@ export function useLibrarySelectors({
     titleIssueItems,
     fixIssues,
     allFixItems,
+    allBooks,
     filteredBooks,
     sortedBooks,
     selectedItem,

@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { ActivityLogItem, OperationProgress, ScanProgress, View } from "../types/library";
 import { Badge, Button, Input } from "../components/ui";
 import { Download, LayoutGrid, List, Search } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 type TopToolbarProps = {
   view: View;
@@ -36,8 +37,9 @@ export function TopToolbar({
   importProgress,
   activityLog,
 }: TopToolbarProps) {
+  const { t } = useTranslation();
   const latestActivity = activityLog[0];
-  const activityMessage = scanStatus ?? latestActivity?.message ?? "No recent activity";
+  const activityMessage = scanStatus ?? latestActivity?.message ?? t("topbar.noRecentActivity");
   const activityTime = latestActivity
     ? new Date(latestActivity.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : null;
@@ -47,32 +49,29 @@ export function TopToolbar({
     progressCurrent !== null && progressTotal !== null && progressTotal > 0
       ? Math.min(100, Math.round((progressCurrent / progressTotal) * 100))
       : null;
+  const viewCopy = (() => {
+    if (view === "library") return { title: t("topbar.views.library.title"), subtitle: t("topbar.views.library.subtitle") };
+    if (view === "tags") return { title: t("topbar.views.tags.title"), subtitle: t("topbar.views.tags.subtitle") };
+    if (view === "inbox") return { title: t("topbar.views.inbox.title"), subtitle: t("topbar.views.inbox.subtitle") };
+    if (view === "duplicates")
+      return { title: t("topbar.views.duplicates.title"), subtitle: t("topbar.views.duplicates.subtitle") };
+    if (view === "fix") return { title: t("topbar.views.fix.title"), subtitle: t("topbar.views.fix.subtitle") };
+    if (view === "changes")
+      return { title: t("topbar.views.changes.title"), subtitle: t("topbar.views.changes.subtitle") };
+    return { title: "", subtitle: "" };
+  })();
   return (
     <>
       <header className="flex items-center justify-between gap-6 border-b border-[var(--app-border)] pb-3">
         <div className="space-y-1">
-          <div className="text-lg font-semibold">
-            {view === "library" && "Your Library"}
-            {view === "tags" && "Tags"}
-            {view === "inbox" && "Inbox"}
-            {view === "duplicates" && "Duplicates"}
-            {view === "fix" && "Fix Metadata"}
-            {view === "changes" && "File Changes"}
-          </div>
-          <p className="text-[11px] text-[var(--app-ink-muted)]">
-            {view === "library" && "Browse and shape your calm stack."}
-            {view === "tags" && "Create and maintain tags for your library."}
-            {view === "inbox" && "New or incomplete entries waiting on you."}
-            {view === "duplicates" && "Resolve duplicates detected by hash."}
-            {view === "fix" && "Choose the best metadata match."}
-            {view === "changes" && "Review and apply planned file updates."}
-          </p>
+          <div className="text-lg font-semibold">{viewCopy.title}</div>
+          <p className="text-[11px] text-[var(--app-ink-muted)]">{viewCopy.subtitle}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-3 rounded-full border border-[var(--app-border)] bg-white/70 px-4 py-1.5 shadow-soft flex-1 min-w-[320px]">
             <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-app-ink-muted">
-              Activity
+              {t("topbar.activity")}
             </div>
             <div className="flex flex-1 items-center gap-3 min-w-0">
               <span className="truncate text-xs text-app-ink">{activityMessage}</span>
@@ -99,7 +98,7 @@ export function TopToolbar({
             {updateAvailable ? (
               <Button variant="toolbar" size="sm" className="hover:bg-white" onClick={() => checkForUpdates(false)}>
                 <Download size={14} />
-                Update App{updateVersion ? ` v${updateVersion}` : ""}
+                {t("topbar.updateApp")}{updateVersion ? ` v${updateVersion}` : ""}
               </Button>
             ) : null}
           </div>
@@ -107,7 +106,12 @@ export function TopToolbar({
           <div className="flex items-center gap-2">
             <div className="relative w-48">
               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--app-ink-muted)]" />
-              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title or author" className="pl-8" />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t("topbar.searchPlaceholder")}
+                className="pl-8"
+              />
             </div>
             <div className="flex items-center rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] p-1">
             <Button
@@ -139,7 +143,7 @@ export function TopToolbar({
             </div>
           </div>
 
-          {view === "library" && !libraryReady ? <Badge variant="muted">Loading</Badge> : null}
+          {view === "library" && !libraryReady ? <Badge variant="muted">{t("topbar.loading")}</Badge> : null}
         </div>
       </header>
       {updateStatus ? (
