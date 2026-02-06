@@ -1,64 +1,36 @@
-import { getVersion } from "@tauri-apps/api/app";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { check } from "@tauri-apps/plugin-updater";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ScanProgressBar } from "./components/ProgressBar";
 import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
-import { cleanupMetadataTitle, normalizeTitleSnapshot } from "./lib/metadataCleanup";
+import { useEreader } from "./hooks/useEreader";
+import { useLibraryData } from "./hooks/useLibraryData";
+import { useLibrarySelectors } from "./hooks/useLibrarySelectors";
+import { useOrganizer } from "./hooks/useOrganizer";
+import { useUpdater } from "./hooks/useUpdater";
+import { normalizeTitleSnapshot } from "./lib/metadataCleanup";
 import { TAG_COLORS } from "./lib/tagColors";
-import { AuthorsView } from "./sections/AuthorsView";
-import { BookEditView } from "./sections/BookEditView";
-import { ChangesView } from "./sections/ChangesView";
-import { DuplicatesView } from "./sections/DuplicatesView";
-import { EReaderView } from "./sections/EReaderView";
-import { FixView } from "./sections/FixView";
-import { ImportView } from "./sections/ImportView";
-import { InboxView } from "./sections/InboxView";
+import { AppRoutes } from "./sections/AppRoutes";
 import { Inspector } from "./sections/Inspector";
-import { LibraryView } from "./sections/LibraryView";
-import { MissingFilesView } from "./sections/MissingFilesView";
-import { OrganizerView } from "./sections/OrganizerView"; // Re-adding import
-import { SettingsView } from "./sections/SettingsView";
-import { SeriesView } from "./sections/SeriesView";
 import { Sidebar } from "./sections/Sidebar";
 import { StatusBar } from "./sections/StatusBar";
-import { TagsView } from "./sections/TagsView";
 import { TopToolbar } from "./sections/TopToolbar";
 import type {
   ActivityLogItem,
-  Author,
   DuplicateGroup,
   EnrichmentCandidate,
-  EReaderBook,
-  EReaderDevice,
   FixFilter,
-  InboxItem,
   ItemMetadata,
   LibraryFilter,
-  LibraryHealth,
-  LibraryItem,
   LibrarySort,
-  MissingFileItem,
   OperationProgress,
   OperationStats,
-  OrganizerSettings,
-  OrganizerLog,
-  OrganizePlan,
   PendingChange,
   ScanProgress,
   ScanStats,
-  SyncProgress,
-  SyncQueueItem,
   Tag,
-  View
+  View,
 } from "./types/library";
-
-type TitleCleanupIgnore = {
-  itemId: string;
-  titleSnapshot: string;
-};
 
 const sampleBooks = [
   {
@@ -215,31 +187,13 @@ function App() {
   const [scanning, setScanning] = useState(false);
   const [scanStartedAt, setScanStartedAt] = useState<number | null>(null);
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
+  const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
   const [enriching, setEnriching] = useState(false);
   const [enrichingItems, setEnrichingItems] = useState<Set<string>>(new Set());
   const [enrichProgress, setEnrichProgress] = useState<OperationProgress | null>(null);
-  const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([]);
-  const [libraryReady, setLibraryReady] = useState(false);
-  const [inbox, setInbox] = useState<InboxItem[]>([]);
-  const [duplicates, setDuplicates] = useState<DuplicateGroup[]>([]);
-  const [titleDuplicates, setTitleDuplicates] = useState<DuplicateGroup[]>([]);
-  const [fuzzyDuplicates, setFuzzyDuplicates] = useState<DuplicateGroup[]>([]);
-  const [missingFiles, setMissingFiles] = useState<MissingFileItem[]>([]);
   const [fixCandidates, setFixCandidates] = useState<EnrichmentCandidate[]>([]);
   const [fixLoading, setFixLoading] = useState(false);
-  const [organizePlan, setOrganizePlan] = useState<OrganizePlan | null>(null);
-  const [organizeStatus, setOrganizeStatus] = useState<string | null>(null);
-  const [organizeProgress, setOrganizeProgress] = useState<OperationProgress | null>(null);
-  const [organizing, setOrganizing] = useState(false);
-  const [organizeLog, setOrganizeLog] = useState<OrganizerLog | null>(null);
-  const [organizeMode, setOrganizeMode] = useState("copy");
-  const [organizeRoot, setOrganizeRoot] = useState<string | null>(null);
-  const [organizeTemplate, setOrganizeTemplate] = useState(
-    "{Author}/{Title} ({Year}) [{ISBN13}].{ext}"
-  );
-  const organizerSettingsLoaded = useRef(false);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-  const [coverRefreshToken, setCoverRefreshToken] = useState(0);
   const [editMatchQuery, setEditMatchQuery] = useState("");
   const [editMatchLoading, setEditMatchLoading] = useState(false);
   const [editMatchCandidates, setEditMatchCandidates] = useState<EnrichmentCandidate[]>([]);
@@ -264,10 +218,8 @@ function App() {
   const [fixSearchQuery, setFixSearchQuery] = useState("");
   const [fixSaving, setFixSaving] = useState(false);
   const [markingTitleCorrectId, setMarkingTitleCorrectId] = useState<string | null>(null);
-  const [titleCleanupIgnoreMap, setTitleCleanupIgnoreMap] = useState<Record<string, string>>({});
   const [coverOverrides, setCoverOverrides] = useState<Record<string, string | null>>({});
   const coverOverrideRef = useRef<Record<string, string | null>>({});
-  const [libraryHealth, setLibraryHealth] = useState<LibraryHealth | null>(null);
   const [duplicateKeepSelection, setDuplicateKeepSelection] = useState<
     Record<string, string>
   >({});
@@ -281,10 +233,6 @@ function App() {
   const pendingChangesStatusRef = useRef<"pending" | "applied" | "error">("pending");
   const [applyingChangeIds, setApplyingChangeIds] = useState<Set<string>>(new Set());
   const [changeProgress, setChangeProgress] = useState<OperationProgress | null>(null);
-  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
-  const [updateAvailable, setUpdateAvailable] = useState(false);
-  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
-  const [appVersion, setAppVersion] = useState<string | null>(null);
   const [normalizingDescriptions, setNormalizingDescriptions] = useState(false);
   const [tags, setTags] = useState<Tag[]>([]);
   const [newTagName, setNewTagName] = useState("");
@@ -299,15 +247,112 @@ function App() {
   const [selectedAuthorNames, setSelectedAuthorNames] = useState<string[]>([]);
   const [selectedSeries, setSelectedSeries] = useState<string[]>([]);
 
-  // eReader state
-  const [ereaderDevices, setEreaderDevices] = useState<EReaderDevice[]>([]);
-  const [selectedEreaderDeviceId, setSelectedEreaderDeviceId] = useState<string | null>(null);
-  const [ereaderBooks, setEreaderBooks] = useState<EReaderBook[]>([]);
-  const [ereaderSyncQueue, setEreaderSyncQueue] = useState<SyncQueueItem[]>([]);
-  const [ereaderScanning, setEreaderScanning] = useState(false);
-  const [ereaderSyncDialogOpen, setEreaderSyncDialogOpen] = useState(false);
-  const [ereaderSyncing, setEreaderSyncing] = useState(false);
-  const [ereaderSyncProgress, setEreaderSyncProgress] = useState<SyncProgress | null>(null);
+  const isDesktop =
+    isTauri() ||
+    (typeof window !== "undefined" &&
+      Boolean((window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__));
+
+  const {
+    libraryItems,
+    libraryReady,
+    inbox,
+    duplicates,
+    titleDuplicates,
+    fuzzyDuplicates,
+    missingFiles,
+    libraryHealth,
+    titleCleanupIgnoreMap,
+    coverRefreshToken,
+    refreshLibrary,
+    refreshTitleCleanupIgnores,
+    resetLibraryState,
+  } = useLibraryData({ setScanStatus });
+
+  const {
+    appVersion,
+    updateStatus,
+    updateAvailable,
+    updateVersion,
+    checkForUpdates,
+  } = useUpdater({ isDesktop });
+
+  const {
+    organizePlan,
+    organizeStatus,
+    organizeProgress,
+    organizing,
+    organizeLog,
+    organizeMode,
+    setOrganizeMode,
+    organizeRoot,
+    setOrganizeRoot,
+    organizeTemplate,
+    setOrganizeTemplate,
+    handlePlanOrganize,
+    handleApplyOrganize,
+    handleQueueOrganize,
+  } = useOrganizer({ isDesktop, refreshLibrary, setActivityLog });
+
+  const {
+    ereaderDevices,
+    selectedEreaderDeviceId,
+    setSelectedEreaderDeviceId,
+    ereaderBooks,
+    ereaderSyncQueue,
+    ereaderScanning,
+    ereaderSyncDialogOpen,
+    setEreaderSyncDialogOpen,
+    ereaderSyncing,
+    ereaderSyncProgress,
+    refreshDevices: refreshEreaderDevices,
+    handleAddEreaderDevice,
+    handleRemoveEreaderDevice,
+    handleScanEreaderDevice,
+    handleQueueEreaderAdd,
+    handleQueueEreaderRemove,
+    handleQueueEreaderImport,
+    handleRemoveFromEreaderQueue,
+    handleExecuteEreaderSync,
+  } = useEreader({
+    isDesktop,
+    refreshLibrary,
+    setScanStatus,
+    setActivityLog,
+  });
+
+  const {
+    uniqueAuthors,
+    uniqueSeries,
+    enrichableCount,
+    fixIssues,
+    allFixItems,
+    filteredBooks,
+    sortedBooks,
+    selectedItem,
+    selectedTags,
+    availableTags,
+    availableLanguages,
+    scanEtaLabel,
+  } = useLibrarySelectors({
+    libraryItems,
+    coverOverrides,
+    fixFilter,
+    inbox,
+    titleCleanupIgnoreMap,
+    libraryFilter,
+    selectedTagIds,
+    selectedAuthorNames,
+    selectedSeries,
+    query,
+    isDesktop,
+    sampleBooks,
+    librarySort,
+    tags,
+    selectedItemId,
+    scanProgress,
+    scanStartedAt,
+    currentTimeMs,
+  });
 
   useEffect(() => {
     pendingChangesStatusRef.current = pendingChangesStatus;
@@ -328,55 +373,6 @@ function App() {
     }
   }, [pendingChangesStatus]);
 
-  const refreshTitleCleanupIgnores = useCallback(async () => {
-    if (!isTauri()) return;
-    try {
-      const rows = await invoke<TitleCleanupIgnore[]>("get_title_cleanup_ignores");
-      const nextMap: Record<string, string> = {};
-      rows.forEach((row) => {
-        nextMap[row.itemId] = row.titleSnapshot;
-      });
-      setTitleCleanupIgnoreMap(nextMap);
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const checkForUpdates = useCallback(async (silent = false) => {
-    if (!isTauri()) return;
-    try {
-      console.info("[updater] check start", { silent });
-      if (!silent) setUpdateStatus("Checking for updates…");
-      const result = await check();
-      if (!result) {
-        console.info("[updater] no update available");
-        setUpdateAvailable(false);
-        setUpdateVersion(null);
-        if (!silent) setUpdateStatus("No updates found.");
-        return;
-      }
-      console.info("[updater] update available", {
-        version: result.version,
-        currentVersion: result.currentVersion,
-      });
-      setUpdateAvailable(true);
-      setUpdateVersion(result.version);
-      if (silent) return;
-      setUpdateStatus(`Update ${result.version} available. Downloading…`);
-      await result.downloadAndInstall();
-      console.info("[updater] download complete, relaunching");
-      setUpdateStatus("Update downloaded. Restarting…");
-      await relaunch();
-    } catch (error) {
-      console.error("[updater] check failed", error);
-      if (silent) return;
-      if (!silent) {
-        const message = error instanceof Error ? error.message : String(error ?? "Update failed.");
-        setUpdateStatus(`Update failed: ${message}`);
-      }
-    }
-  }, []);
-
   const toggleChangeSelection = (id: string) => {
     setSelectedChangeIds((prev) => {
       const next = new Set(prev);
@@ -392,374 +388,6 @@ function App() {
   const clearChangeSelection = () => {
     setSelectedChangeIds(new Set());
   };
-  const isDesktop =
-    isTauri() ||
-    (typeof window !== "undefined" &&
-      Boolean((window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__));
-
-  // Derived filter data
-  const uniqueAuthors = useMemo((): Author[] => {
-    const counts = new Map<string, number>();
-    libraryItems.forEach((item) => {
-      item.authors.forEach((author) => {
-        counts.set(author, (counts.get(author) || 0) + 1);
-      });
-    });
-    return Array.from(counts.entries())
-      .map(([name, bookCount]) => ({ name, bookCount }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [libraryItems]);
-
-  const uniqueSeries = useMemo((): Array<{ name: string; bookCount: number }> => {
-    const series = new Map<string, number>();
-    libraryItems.forEach((item) => {
-      if (item.series) {
-        series.set(item.series, (series.get(item.series) || 0) + 1);
-      }
-    });
-    return Array.from(series.entries())
-      .map(([name, bookCount]) => ({ name, bookCount }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [libraryItems]);
-
-  // Books needing metadata fixes based on filter
-  const booksNeedingFix = useMemo(() => {
-    return libraryItems.filter((item) => {
-      const hasCover = Boolean(item.cover_path) || typeof coverOverrides[item.id] === "string";
-      const hasIsbn = Boolean(item.isbn && item.isbn.trim().length > 0);
-      if (fixFilter.missingAuthor && item.authors.length === 0) return true;
-      if (fixFilter.missingTitle && !item.title) return true;
-      if (fixFilter.missingCover && !hasCover) return true;
-      if (fixFilter.missingIsbn && !hasIsbn) return true;
-      if (fixFilter.missingYear && !item.published_year) return true;
-      if (fixFilter.missingLanguage && !item.language) return true;
-      if (fixFilter.missingSeries && !item.series) return true;
-      return false;
-    });
-  }, [libraryItems, fixFilter, coverOverrides]);
-
-  const enrichableCount = useMemo(() => {
-    return libraryItems.reduce((count, item) => {
-      if (!item.cover_path || item.authors.length === 0 || item.published_year === null) {
-        return count + 1;
-      }
-      return count;
-    }, 0);
-  }, [libraryItems]);
-
-  const titleIssueItems = useMemo<InboxItem[]>(() => {
-    return libraryItems
-      .map((item) => {
-        const metadata: ItemMetadata = {
-          title: item.title,
-          authors: item.authors,
-          publishedYear: item.published_year,
-          language: item.language ?? null,
-          isbn: item.isbn ?? null,
-          series: item.series ?? null,
-          seriesIndex: item.series_index ?? null,
-          description: null,
-        };
-        const cleaned = cleanupMetadataTitle(metadata);
-        if (!cleaned.changed || !item.title) return null;
-        const ignoredSnapshot = titleCleanupIgnoreMap[item.id];
-        if (ignoredSnapshot && ignoredSnapshot === normalizeTitleSnapshot(item.title)) {
-          return null;
-        }
-        return {
-          id: item.id,
-          title: item.title,
-          reason: "Possible incorrect title",
-        } satisfies InboxItem;
-      })
-      .filter((item): item is InboxItem => Boolean(item));
-  }, [libraryItems, titleCleanupIgnoreMap]);
-
-  const fixIssues = useMemo<InboxItem[]>(() => {
-    const byId = new Map<string, InboxItem>();
-    for (const issue of inbox) {
-      byId.set(issue.id, issue);
-    }
-    for (const titleIssue of titleIssueItems) {
-      const existing = byId.get(titleIssue.id);
-      if (!existing) {
-        byId.set(titleIssue.id, titleIssue);
-        continue;
-      }
-      if (!existing.reason.toLowerCase().includes("possible incorrect title")) {
-        byId.set(titleIssue.id, {
-          ...existing,
-          reason: `${existing.reason} · Possible incorrect title`,
-        });
-      }
-    }
-    return Array.from(byId.values());
-  }, [inbox, titleIssueItems]);
-
-  // Combine with issue items if includeIssues is true
-  const allFixItems = useMemo(() => {
-    const fixItemIds = new Set(booksNeedingFix.map((item) => item.id));
-
-    const result = [...booksNeedingFix];
-    if (fixFilter.includeIssues) {
-      fixIssues.forEach((issue) => {
-        if (!fixItemIds.has(issue.id)) {
-          const libraryItem = libraryItems.find((li) => li.id === issue.id);
-          if (libraryItem) {
-            result.push(libraryItem);
-          }
-        }
-      });
-    }
-    return result;
-  }, [booksNeedingFix, fixIssues, fixFilter.includeIssues, libraryItems]);
-
-  useEffect(() => {
-    if (!isDesktop) return;
-    getVersion()
-      .then((version) => setAppVersion(version))
-      .catch(() => {
-        setAppVersion(null);
-      });
-  }, [isDesktop]);
-
-  useEffect(() => {
-    if (!isDesktop) return;
-    let unlistenProgress: (() => void) | undefined;
-    let unlistenComplete: (() => void) | undefined;
-
-    listen<OperationProgress>("organize-progress", (event) => {
-      setOrganizeProgress(event.payload);
-      setOrganizing(true);
-    }).then((stop) => {
-      unlistenProgress = stop;
-    });
-
-    listen<OperationStats>("organize-complete", async (event) => {
-      setOrganizeProgress(null);
-      setOrganizing(false);
-      setOrganizeStatus(
-        `Organizer complete: ${event.payload.processed} applied, ${event.payload.errors} errors.`
-      );
-      try {
-        const log = await invoke<OrganizerLog | null>("get_latest_organizer_log");
-        setOrganizeLog(log);
-      } catch {
-        // ignore
-      }
-      if (organizeRoot) {
-        try {
-          const plan = await invoke<OrganizePlan>("plan_organize", {
-            mode: organizeMode,
-            libraryRoot: organizeRoot,
-            template: organizeTemplate,
-          });
-          setOrganizePlan(plan);
-          const actionable = plan.entries.filter((entry) => entry.action !== "skip").length;
-          setOrganizeStatus(
-            actionable > 0
-              ? `Prepared ${actionable} actions.`
-              : "No changes needed based on current settings."
-          );
-        } catch {
-          // ignore
-        }
-      }
-    }).then((stop) => {
-      unlistenComplete = stop;
-    });
-
-    return () => {
-      if (unlistenProgress) unlistenProgress();
-      if (unlistenComplete) unlistenComplete();
-    };
-  }, [isDesktop, organizeMode, organizeRoot, organizeTemplate]);
-
-  useEffect(() => {
-    if (!isDesktop) return;
-    invoke<OrganizerSettings>("get_organizer_settings")
-      .then((settings) => {
-        setOrganizeMode(settings.mode);
-        setOrganizeTemplate(settings.template);
-        setOrganizeRoot(settings.libraryRoot || null);
-      })
-      .catch(() => {
-        // ignore
-      })
-      .finally(() => {
-        organizerSettingsLoaded.current = true;
-      });
-  }, [isDesktop]);
-
-  useEffect(() => {
-    if (!isDesktop || !organizerSettingsLoaded.current) return;
-    const timeout = window.setTimeout(() => {
-      void invoke("set_organizer_settings", {
-        settings: {
-          libraryRoot: organizeRoot,
-          mode: organizeMode,
-          template: organizeTemplate,
-        },
-      });
-    }, 400);
-    return () => window.clearTimeout(timeout);
-  }, [isDesktop, organizeRoot, organizeMode, organizeTemplate]);
-
-  useEffect(() => {
-    if (!isDesktop) return;
-    invoke<OrganizerLog | null>("get_latest_organizer_log")
-      .then((log) => setOrganizeLog(log))
-      .catch(() => {
-        // ignore
-      });
-  }, [isDesktop]);
-
-  const filteredBooks = useMemo(() => {
-    const base = isDesktop
-      ? libraryItems.map((item) => ({
-        id: item.id,
-        title: item.title ?? "Untitled",
-        author: item.authors.length ? item.authors.join(", ") : "Unknown",
-        authors: item.authors,
-        format: item.formats[0] ?? "FILE",
-        year: item.published_year ?? "—",
-        status: item.title && item.authors.length ? "Complete" : "Needs Metadata",
-        cover: typeof coverOverrides[item.id] === "string" ? coverOverrides[item.id] : null,
-        tags: item.tags ?? [],
-        language: item.language ?? null,
-        series: item.series ?? null,
-        seriesIndex: item.series_index ?? null,
-        createdAt: item.created_at,
-      }))
-      : sampleBooks.map((book, index) => ({
-        ...book,
-        authors: [book.author],
-        language: null as string | null,
-        series: null as string | null,
-        seriesIndex: null as number | null,
-        createdAt: Date.now() - index * 1000,
-      }));
-
-    // Format filter
-    const filteredByFormat = base.filter((book) => {
-      const normalizedFormat = String(book.format)
-        .replace(".", "")
-        .toLowerCase();
-      switch (libraryFilter) {
-        case "epub":
-          return normalizedFormat.includes("epub");
-        case "pdf":
-          return normalizedFormat.includes("pdf");
-        case "needs-metadata":
-          return book.status !== "Complete";
-        case "tagged":
-          return (book.tags ?? []).length > 0;
-        default:
-          return true;
-      }
-    });
-
-    // Tag filter (AND-logic)
-    const filteredByTags = selectedTagIds.length
-      ? filteredByFormat.filter((book) =>
-        selectedTagIds.every((tagId) =>
-          (book.tags ?? []).some((tag) => tag.id === tagId)
-        )
-      )
-      : filteredByFormat;
-
-    // Author filter (for navigation from Authors view)
-    const filteredByAuthors = selectedAuthorNames.length
-      ? filteredByTags.filter((book) =>
-        selectedAuthorNames.some((name) => book.authors.includes(name))
-      )
-      : filteredByTags;
-
-    // Series filter (for navigation from Series view)
-    const filteredBySeries = selectedSeries.length
-      ? filteredByAuthors.filter(
-        (book) => book.series && selectedSeries.includes(book.series)
-      )
-      : filteredByAuthors;
-
-    // Search query
-    if (!query) return filteredBySeries;
-    const lowered = query.toLowerCase();
-    return filteredBySeries.filter(
-      (book) =>
-        book.title.toLowerCase().includes(lowered) ||
-        book.author.toLowerCase().includes(lowered)
-    );
-  }, [
-    query,
-    libraryItems,
-    isDesktop,
-    coverOverrides,
-    libraryFilter,
-    selectedTagIds,
-    selectedAuthorNames,
-    selectedSeries,
-  ]);
-
-  const sortedBooks = useMemo(() => {
-    if (librarySort === "default") return filteredBooks;
-
-    const toLower = (value: string) => value.toLowerCase();
-    const compareText = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });
-    const getYearValue = (value: number | string) => {
-      if (typeof value === "number") return value;
-      const parsed = Number.parseInt(String(value), 10);
-      return Number.isFinite(parsed) ? parsed : null;
-    };
-
-    const withIndex = filteredBooks.map((book, index) => ({ book, index }));
-
-    withIndex.sort((a, b) => {
-      const left = a.book;
-      const right = b.book;
-      let result = 0;
-
-      switch (librarySort) {
-        case "title-asc":
-          result = compareText(toLower(left.title), toLower(right.title));
-          break;
-        case "title-desc":
-          result = compareText(toLower(right.title), toLower(left.title));
-          break;
-        case "author-asc":
-          result = compareText(toLower(left.author), toLower(right.author));
-          break;
-        case "year-desc": {
-          const leftYear = getYearValue(left.year);
-          const rightYear = getYearValue(right.year);
-          if (leftYear === null && rightYear === null) result = 0;
-          else if (leftYear === null) result = 1;
-          else if (rightYear === null) result = -1;
-          else result = rightYear - leftYear;
-          break;
-        }
-        case "year-asc": {
-          const leftYear = getYearValue(left.year);
-          const rightYear = getYearValue(right.year);
-          if (leftYear === null && rightYear === null) result = 0;
-          else if (leftYear === null) result = 1;
-          else if (rightYear === null) result = -1;
-          else result = leftYear - rightYear;
-          break;
-        }
-        case "recent":
-          result = right.createdAt - left.createdAt;
-          break;
-        default:
-          result = 0;
-      }
-
-      if (result !== 0) return result;
-      return a.index - b.index;
-    });
-
-    return withIndex.map(({ book }) => book);
-  }, [filteredBooks, librarySort]);
 
   const refreshTags = useCallback(async () => {
     if (!isTauri()) {
@@ -892,44 +520,6 @@ function App() {
     };
   }, [view, isDesktop, pendingChangesStatus]);
 
-  useEffect(() => {
-    void checkForUpdates(true);
-  }, [checkForUpdates]);
-
-  // Load eReader devices and poll connection status periodically
-  useEffect(() => {
-    if (!isDesktop) return;
-    const loadEreaderDevices = async () => {
-      try {
-        const devices = await invoke<EReaderDevice[]>("list_ereader_devices");
-        setEreaderDevices(devices);
-        if (devices.length > 0 && !selectedEreaderDeviceId) {
-          setSelectedEreaderDeviceId(devices[0].id);
-        }
-      } catch {
-        setEreaderDevices([]);
-      }
-    };
-    void loadEreaderDevices();
-    // Poll every 3 seconds to detect device connect/disconnect
-    const interval = window.setInterval(loadEreaderDevices, 3000);
-    return () => window.clearInterval(interval);
-  }, [isDesktop, selectedEreaderDeviceId]);
-
-  // Load sync queue when device changes
-  useEffect(() => {
-    if (!isDesktop || !selectedEreaderDeviceId) return;
-    const loadQueue = async () => {
-      try {
-        const queue = await invoke<SyncQueueItem[]>("get_sync_queue", { deviceId: selectedEreaderDeviceId });
-        setEreaderSyncQueue(queue);
-      } catch {
-        setEreaderSyncQueue([]);
-      }
-    };
-    void loadQueue();
-  }, [isDesktop, selectedEreaderDeviceId]);
-
   const handleApplyChange = async (changeId: string) => {
     if (!isTauri()) return;
     try {
@@ -1055,49 +645,6 @@ function App() {
     }
   };
 
-  const selectedItem = useMemo(() => {
-    if (!selectedItemId) return null;
-    return filteredBooks.find((book) => book.id === selectedItemId) ?? null;
-  }, [filteredBooks, selectedItemId]);
-
-  const selectedTags = useMemo(() => selectedItem?.tags ?? [], [selectedItem]);
-  const availableTags = useMemo(
-    () => tags.filter((tag) => !selectedTags.some((selected) => selected.id === tag.id)),
-    [tags, selectedTags]
-  );
-
-  // Find available languages for the selected item (other editions with same title/author)
-  const availableLanguages = useMemo(() => {
-    if (!selectedItem) return [];
-    const normalizeTitle = (t: string) => t.toLowerCase().replace(/[^\w\s]/g, "").trim();
-    const selectedTitle = normalizeTitle(selectedItem.title);
-    const selectedAuthor = selectedItem.author.toLowerCase();
-
-    const languages = new Set<string>();
-    libraryItems.forEach((item) => {
-      if (!item.language) return;
-      const itemTitle = normalizeTitle(item.title ?? "");
-      const itemAuthors = item.authors.map((a) => a.toLowerCase());
-      // Match if title is similar and at least one author matches
-      if (itemTitle === selectedTitle && itemAuthors.some((a) => selectedAuthor.includes(a) || a.includes(selectedAuthor))) {
-        languages.add(item.language);
-      }
-    });
-    return Array.from(languages).sort();
-  }, [selectedItem, libraryItems]);
-
-  const scanEtaSeconds = useMemo(() => {
-    if (!scanProgress || !scanStartedAt || scanProgress.total === 0) return null;
-    const elapsedSeconds = (Date.now() - scanStartedAt) / 1000;
-    if (elapsedSeconds < 1 || scanProgress.processed === 0) return null;
-    const rate = scanProgress.processed / elapsedSeconds;
-    if (!Number.isFinite(rate) || rate <= 0) return null;
-    const remaining = (scanProgress.total - scanProgress.processed) / rate;
-    if (!Number.isFinite(remaining) || remaining < 0) return null;
-    return Math.round(remaining);
-  }, [scanProgress, scanStartedAt]);
-  const scanEtaLabel = scanEtaSeconds !== null ? formatEta(scanEtaSeconds) : null;
-
   const getCandidateCoverUrl = (candidate: EnrichmentCandidate) => {
     if (candidate.cover_url) return candidate.cover_url;
     const isbn = candidate.identifiers
@@ -1106,68 +653,6 @@ function App() {
     if (!isbn) return null;
     return `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg`;
   };
-
-  useEffect(() => {
-    const load = async () => {
-      if (!isTauri()) {
-        setLibraryReady(true);
-        return;
-      }
-      try {
-        const items = await invoke<LibraryItem[]>("get_library_items");
-        setLibraryItems(items);
-        const inboxItems = await invoke<InboxItem[]>("get_inbox_items");
-        setInbox(inboxItems);
-        const duplicateGroups = await invoke<DuplicateGroup[]>("get_duplicate_groups");
-        const titleGroups = await invoke<DuplicateGroup[]>("get_title_duplicate_groups");
-        const fuzzyGroups = await invoke<DuplicateGroup[]>("get_fuzzy_duplicate_groups");
-        setDuplicates(duplicateGroups);
-        setTitleDuplicates(titleGroups);
-        setFuzzyDuplicates(fuzzyGroups);
-        const missing = await invoke<MissingFileItem[]>("get_missing_files");
-        setMissingFiles(missing);
-        const health = await invoke<LibraryHealth>("get_library_health");
-        setLibraryHealth(health);
-        await refreshTitleCleanupIgnores();
-        setCoverRefreshToken((value) => value + 1);
-      } catch {
-        setScanStatus("Could not load library data.");
-      } finally {
-        setLibraryReady(true);
-        // Close splash screen and show main window
-        try {
-          await invoke("close_splashscreen");
-        } catch {
-          // Splash screen might not exist (e.g., in dev mode)
-        }
-      }
-    };
-    load();
-  }, [refreshTitleCleanupIgnores]);
-
-  const refreshLibrary = useCallback(async () => {
-    if (!isTauri()) return;
-    try {
-      const items = await invoke<LibraryItem[]>("get_library_items");
-      setLibraryItems(items);
-      const inboxItems = await invoke<InboxItem[]>("get_inbox_items");
-      setInbox(inboxItems);
-      const duplicateGroups = await invoke<DuplicateGroup[]>("get_duplicate_groups");
-      const titleGroups = await invoke<DuplicateGroup[]>("get_title_duplicate_groups");
-      const fuzzyGroups = await invoke<DuplicateGroup[]>("get_fuzzy_duplicate_groups");
-      setDuplicates(duplicateGroups);
-      setTitleDuplicates(titleGroups);
-      setFuzzyDuplicates(fuzzyGroups);
-      const missing = await invoke<MissingFileItem[]>("get_missing_files");
-      setMissingFiles(missing);
-      const health = await invoke<LibraryHealth>("get_library_health");
-      setLibraryHealth(health);
-      await refreshTitleCleanupIgnores();
-      setCoverRefreshToken((value) => value + 1);
-    } catch {
-      setScanStatus("Could not refresh library data.");
-    }
-  }, [refreshTitleCleanupIgnores]);
 
   const handleAddTag = useCallback(
     async (tagId: string) => {
@@ -1289,9 +774,7 @@ function App() {
     try {
       await invoke("clear_library");
       setScanStatus("Library cleared.");
-      setLibraryItems([]);
-      setInbox([]);
-      setDuplicates([]);
+      resetLibraryState();
       await refreshLibrary();
     } catch (error) {
       if (error instanceof Error) {
@@ -1326,9 +809,81 @@ function App() {
     }
   }, [normalizingDescriptions, refreshLibrary]);
 
+  const handleImportCancel = () => {
+    setView("library-books");
+  };
+
+  const handleImportComplete = () => {
+    setView("library-books");
+    refreshLibrary();
+  };
+
+  const handleChooseRoot = async () => {
+    if (!isTauri()) return;
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const selection: string | string[] | null = await open({
+      directory: true,
+      multiple: false,
+    });
+    if (typeof selection !== "string") return;
+    setOrganizeRoot(selection);
+  };
+
+  const handleRelinkMissing = async (fileId: string) => {
+    if (!isTauri()) return;
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selection = await open({ multiple: false });
+      if (typeof selection !== "string") return;
+      await invoke("relink_missing_file", { fileId, newPath: selection });
+      await refreshLibrary();
+      setScanStatus("File relinked.");
+    } catch (err) {
+      console.error("Failed to relink file", err);
+      setScanStatus("Could not relink file.");
+    }
+  };
+
+  const handleRemoveMissing = async (fileId: string) => {
+    if (!isTauri()) return;
+    try {
+      await invoke("remove_missing_file", { fileId });
+      await refreshLibrary();
+      setScanStatus("Missing file removed.");
+    } catch (err) {
+      console.error("Failed to remove missing file", err);
+      setScanStatus("Could not remove missing file.");
+    }
+  };
+
+  const handleRescanMissing = async () => {
+    if (!isTauri()) return;
+    try {
+      let selection = organizeRoot;
+      if (!selection) {
+        const { open } = await import("@tauri-apps/plugin-dialog");
+        const picked: string | string[] | null = await open({
+          directory: true,
+          multiple: false,
+        });
+        if (typeof picked !== "string") return;
+        selection = picked;
+        setOrganizeRoot(picked);
+      }
+      setScanStatus("Scanning for missing files...");
+      await invoke("scan_folder", { root: selection });
+      await refreshLibrary();
+      setScanStatus("Missing files refreshed.");
+    } catch (err) {
+      console.error("Failed to rescan", err);
+      setScanStatus("Could not rescan folder.");
+    }
+  };
+
   useEffect(() => {
     if (!scanning) return;
     const interval = setInterval(() => {
+      setCurrentTimeMs(Date.now());
       setScanStatus((prev) => prev ?? "Scanning...");
     }, 1000);
     return () => clearInterval(interval);
@@ -1404,55 +959,6 @@ function App() {
     };
   }, [isDesktop, scanStartedAt, scanning]);
 
-  // Listen for eReader sync progress events
-  useEffect(() => {
-    if (!isDesktop) return;
-    let unlistenSyncProgress: (() => void) | undefined;
-    let unlistenSyncComplete: (() => void) | undefined;
-
-    listen<SyncProgress>("sync-progress", (event) => {
-      console.log("sync-progress event:", event.payload);
-      setEreaderSyncProgress(event.payload);
-      if (!ereaderSyncing) setEreaderSyncing(true);
-    }).then((stop) => {
-      unlistenSyncProgress = stop;
-    });
-
-    listen<{ added: number; removed: number; imported: number; errors: string[] }>("sync-complete", (event) => {
-      setEreaderSyncProgress(null);
-      setEreaderSyncing(false);
-      const parts: string[] = [];
-      if (event.payload.added > 0) parts.push(`${event.payload.added} added`);
-      if (event.payload.removed > 0) parts.push(`${event.payload.removed} removed`);
-      if (event.payload.imported > 0) parts.push(`${event.payload.imported} imported`);
-      if (event.payload.errors.length > 0) parts.push(`${event.payload.errors.length} errors`);
-      setScanStatus(`Sync complete: ${parts.join(", ")}`);
-      setActivityLog((prev) => [
-        {
-          id: `sync-${Date.now()}`,
-          type: "sync",
-          message: `Synced: ${parts.join(", ")}`,
-          timestamp: Date.now(),
-        },
-        ...prev,
-      ]);
-      setEreaderSyncDialogOpen(false);
-      // Refresh the queue
-      if (selectedEreaderDeviceId) {
-        invoke<SyncQueueItem[]>("get_sync_queue", { deviceId: selectedEreaderDeviceId })
-          .then(setEreaderSyncQueue)
-          .catch(() => setEreaderSyncQueue([]));
-      }
-    }).then((stop) => {
-      unlistenSyncComplete = stop;
-    });
-
-    return () => {
-      if (unlistenSyncProgress) unlistenSyncProgress();
-      if (unlistenSyncComplete) unlistenSyncComplete();
-    };
-  }, [isDesktop, ereaderSyncing, selectedEreaderDeviceId]);
-
   // Listen for enrich progress events
   useEffect(() => {
     if (!isDesktop) return;
@@ -1521,30 +1027,6 @@ function App() {
     };
   }, [isDesktop, refreshLibrary]);
 
-  // Listen for apply-metadata-progress events (single item metadata apply)
-  useEffect(() => {
-    if (!isDesktop) return;
-    let unlisten: (() => void) | undefined;
-
-    listen<{ itemId: string; step: string; message: string; current: number; total: number }>(
-      "apply-metadata-progress",
-      (event) => {
-        setMatchApplyProgress({
-          step: event.payload.step,
-          message: event.payload.message,
-          current: event.payload.current,
-          total: event.payload.total,
-        });
-      }
-    ).then((stop) => {
-      unlisten = stop;
-    });
-
-    return () => {
-      if (unlisten) unlisten();
-    };
-  }, [isDesktop]);
-
   // Listen for change progress events
   useEffect(() => {
     if (!isDesktop) return;
@@ -1612,6 +1094,62 @@ function App() {
       setScanStatus("Could not fetch enrichment candidates.");
     } finally {
       setFixLoading(false);
+    }
+  };
+
+  const handleSearchFixWithQuery = async (queryValue: string) => {
+    if (!selectedFixItemId || !isTauri()) return;
+    setFixLoading(true);
+    try {
+      const candidates = await invoke<EnrichmentCandidate[]>("search_candidates", {
+        query: queryValue,
+        itemId: selectedFixItemId,
+      });
+      setFixCandidates(candidates);
+    } catch {
+      setScanStatus("Could not search metadata sources.");
+      setFixCandidates([]);
+    } finally {
+      setFixLoading(false);
+    }
+  };
+
+  const handleApplyFixCandidate = async (candidate: EnrichmentCandidate) => {
+    if (!selectedFixItemId || !isTauri()) return;
+    try {
+      await invoke("apply_fix_candidate", {
+        itemId: selectedFixItemId,
+        candidate,
+      });
+      const queued = await refreshPendingChanges();
+      setScanStatus(
+        queued > 0
+          ? `Metadata updated. ${queued} file changes queued.`
+          : "Metadata updated."
+      );
+      await refreshLibrary();
+      clearCoverOverride(selectedFixItemId);
+      await fetchCoverOverride(selectedFixItemId, true);
+      setFixCandidates([]);
+    } catch {
+      setScanStatus("Could not apply metadata.");
+    }
+  };
+
+  const handleSaveFixMetadata = async (id: string, data: ItemMetadata) => {
+    if (!isDesktop) return;
+    setFixSaving(true);
+    try {
+      await invoke("save_item_metadata", { itemId: id, metadata: data });
+      setScanStatus("Metadata saved.");
+      await refreshLibrary();
+      clearCoverOverride(id);
+      await fetchCoverOverride(id, true);
+    } catch (e) {
+      console.error("Failed to save metadata", e);
+      setScanStatus("Could not save metadata.");
+    } finally {
+      setFixSaving(false);
     }
   };
 
@@ -1710,78 +1248,6 @@ function App() {
     }
   };
 
-  const handlePlanOrganize = async () => {
-    if (!isTauri()) {
-      setOrganizeStatus("Organizer requires the Tauri desktop runtime.");
-      return;
-    }
-    try {
-      let selection = organizeRoot;
-      if (!selection) {
-        const { open } = await import("@tauri-apps/plugin-dialog");
-        const picked = await open({ directory: true, multiple: false });
-        if (typeof picked !== "string") return;
-        selection = picked;
-        setOrganizeRoot(picked);
-      }
-      const plan = await invoke<OrganizePlan>("plan_organize", {
-        mode: organizeMode,
-        libraryRoot: selection,
-        template: organizeTemplate,
-      });
-      setOrganizePlan(plan);
-      const actionable = plan.entries.filter((entry) => entry.action !== "skip").length;
-      setOrganizeStatus(
-        actionable > 0
-          ? `Prepared ${actionable} actions.`
-          : "No changes needed based on current settings."
-      );
-    } catch {
-      setOrganizeStatus("Could not prepare organize plan.");
-    }
-  };
-
-  const handleApplyOrganize = async () => {
-    if (!organizePlan || !isTauri()) return;
-    try {
-      setOrganizeStatus("Organizing files...");
-      setOrganizing(true);
-      await invoke<string>("apply_organize", {
-        plan: organizePlan,
-      });
-      setOrganizeStatus("Organized files. Review details below.");
-      const log = await invoke<OrganizerLog | null>("get_latest_organizer_log");
-      setOrganizeLog(log);
-      await refreshLibrary();
-      setActivityLog((prev) => [
-        {
-          id: `organize-${Date.now()}`,
-          type: "organize",
-          message: `Organized ${organizePlan.entries.length} items`,
-          timestamp: Date.now(),
-        },
-        ...prev,
-      ]);
-      await refreshLibrary();
-    } catch (err) {
-      console.error("Organize error:", err);
-      setOrganizeStatus(`Error: ${err}`);
-    }
-  };
-
-  const handleQueueOrganize = async () => {
-    if (!organizePlan || !isTauri()) return;
-    try {
-      const created = await invoke<number>("generate_pending_changes_from_organize", {
-        plan: organizePlan,
-      });
-      setOrganizeStatus(`Queued ${created} changes for review.`);
-      setView("changes");
-    } catch {
-      setOrganizeStatus("Could not queue organize plan.");
-    }
-  };
-
   const pickBestDuplicate = useCallback((group: DuplicateGroup) => {
     const scoreFile = (fileName: string, filePath: string) => {
       const lowerPath = filePath.toLowerCase();
@@ -1877,133 +1343,14 @@ function App() {
     [duplicateKeepSelection, pickBestDuplicate, refreshLibrary]
   );
 
-  // eReader handlers
-  const handleAddEreaderDevice = async (name: string, mountPath: string) => {
-    if (!isTauri()) return;
-    try {
-      const device = await invoke<EReaderDevice>("add_ereader_device", { name, mountPath });
-      setEreaderDevices((prev) => [...prev, device]);
-      setSelectedEreaderDeviceId(device.id);
-    } catch {
-      setScanStatus("Could not add eReader device.");
-    }
-  };
-
-  const handleRemoveEreaderDevice = async (deviceId: string) => {
-    if (!isTauri()) return;
-    try {
-      await invoke("remove_ereader_device", { deviceId });
-      setEreaderDevices((prev) => prev.filter((d) => d.id !== deviceId));
-      if (selectedEreaderDeviceId === deviceId) {
-        setSelectedEreaderDeviceId(null);
-      }
-    } catch {
-      setScanStatus("Could not remove eReader device.");
-    }
-  };
-
-  const handleScanEreaderDevice = async (deviceId: string) => {
-    if (!isTauri()) return;
-    setEreaderScanning(true);
-    try {
-      const books = await invoke<EReaderBook[]>("scan_ereader", { deviceId });
-      setEreaderBooks(books);
-    } catch {
-      setScanStatus("Could not scan eReader device.");
-    } finally {
-      setEreaderScanning(false);
-    }
-  };
-
-  const handleQueueEreaderAdd = async (itemId: string) => {
-    if (!isTauri() || !selectedEreaderDeviceId) return;
-    try {
-      const item = await invoke<SyncQueueItem>("queue_sync_action", {
-        deviceId: selectedEreaderDeviceId,
-        action: "add",
-        itemId,
-        ereaderPath: null,
-      });
-      setEreaderSyncQueue((prev) => [...prev, item]);
-    } catch {
-      setScanStatus("Could not queue book for sync.");
-    }
-  };
-
-  const handleQueueEreaderRemove = async (ereaderPath: string) => {
-    if (!isTauri() || !selectedEreaderDeviceId) return;
-    try {
-      const item = await invoke<SyncQueueItem>("queue_sync_action", {
-        deviceId: selectedEreaderDeviceId,
-        action: "remove",
-        itemId: null,
-        ereaderPath,
-      });
-      setEreaderSyncQueue((prev) => [...prev, item]);
-    } catch {
-      setScanStatus("Could not queue book for removal.");
-    }
-  };
-
-  const handleQueueEreaderImport = async (ereaderPath: string) => {
-    if (!isTauri() || !selectedEreaderDeviceId) return;
-    try {
-      const item = await invoke<SyncQueueItem>("queue_sync_action", {
-        deviceId: selectedEreaderDeviceId,
-        action: "import",
-        itemId: null,
-        ereaderPath,
-      });
-      setEreaderSyncQueue((prev) => [...prev, item]);
-    } catch {
-      setScanStatus("Could not queue book for import.");
-    }
-  };
-
-  const handleRemoveFromEreaderQueue = async (queueId: string) => {
-    if (!isTauri()) return;
-    try {
-      await invoke("remove_from_sync_queue", { queueId });
-      setEreaderSyncQueue((prev) => prev.filter((q) => q.id !== queueId));
-    } catch {
-      setScanStatus("Could not remove from sync queue.");
-    }
-  };
-
   const handleOpenSyncDialog = () => {
     setEreaderSyncDialogOpen(true);
   };
 
-  const handleExecuteEreaderSync = async () => {
-    if (!isTauri() || !selectedEreaderDeviceId) return;
-    setEreaderSyncing(true);
-    try {
-      const result = await invoke<{ added: number; removed: number; imported: number; errors: string[] }>("execute_sync", {
-        deviceId: selectedEreaderDeviceId,
-      });
-
-      // Refresh data
-      const queue = await invoke<SyncQueueItem[]>("get_sync_queue", { deviceId: selectedEreaderDeviceId });
-      setEreaderSyncQueue(queue);
-
-      const books = await invoke<EReaderBook[]>("scan_ereader", { deviceId: selectedEreaderDeviceId });
-      setEreaderBooks(books);
-
-      await refreshLibrary();
-
-      // Show result
-      const parts = [];
-      if (result.added > 0) parts.push(`${result.added} added`);
-      if (result.removed > 0) parts.push(`${result.removed} removed`);
-      if (result.imported > 0) parts.push(`${result.imported} imported`);
-      if (result.errors.length > 0) parts.push(`${result.errors.length} errors`);
-
-      setScanStatus(`Sync complete: ${parts.join(", ")}`);
-      setEreaderSyncDialogOpen(false);
-    } catch {
-      setScanStatus("Sync failed.");
-    } finally {
-      setEreaderSyncing(false);
+  const handleQueueOrganizeAndView = async () => {
+    const created = await handleQueueOrganize();
+    if (created !== null) {
+      setView("changes");
     }
   };
 
@@ -2024,7 +1371,7 @@ function App() {
           pendingChangesCount={pendingChangesStatus === "pending" ? pendingChanges.length : 0}
           duplicateCount={duplicates.length}
           missingFilesCount={missingFiles.length}
-          handleClearLibrary={handleClearLibrary}
+          handleClearLibrary={() => void handleClearLibrary()}
           appVersion={appVersion}
           ereaderConnected={ereaderDevices.some((d) => d.isConnected)}
         />
@@ -2032,7 +1379,7 @@ function App() {
       <main className="flex h-screen flex-col gap-4 overflow-y-auto px-6 py-4">
         <TopToolbar
           view={view}
-          checkForUpdates={checkForUpdates}
+          checkForUpdates={(silent) => void checkForUpdates(silent)}
           query={query}
           setQuery={setQuery}
           grid={grid}
@@ -2054,372 +1401,167 @@ function App() {
         />
 
         <div className="flex flex-col gap-4">
-          <section className="flex flex-col gap-4">
-            {(view === "library" || view === "library-books") && !libraryReady && isDesktop ? (
-              <div className="flex flex-col items-center justify-center gap-4 py-16">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--app-accent)] border-t-transparent" />
-                <div className="text-sm text-[var(--app-ink-muted)]">Loading library...</div>
-              </div>
-            ) : null}
-
-            {(view === "library" || view === "library-books") && libraryReady ? (
-              <LibraryView
-                isDesktop={isDesktop}
-                libraryItemsLength={libraryItems.length}
-                filteredBooks={sortedBooks}
-                selectedItemId={selectedItemId}
-                setSelectedItemId={setSelectedItemId}
-                libraryFilter={libraryFilter}
-                setLibraryFilter={setLibraryFilter}
-                librarySort={librarySort}
-                setLibrarySort={setLibrarySort}
-                tags={tags}
-                selectedTagIds={selectedTagIds}
-                setSelectedTagIds={setSelectedTagIds}
-                grid={grid}
-                coverRefreshToken={coverRefreshToken}
-                fetchCoverOverride={fetchCoverOverride}
-                clearCoverOverride={clearCoverOverride}
-                selectedAuthorNames={selectedAuthorNames}
-                setSelectedAuthorNames={setSelectedAuthorNames}
-                selectedSeries={selectedSeries}
-                setSelectedSeries={setSelectedSeries}
-                onEnrichAll={handleEnrichAll}
-                onCancelEnrich={handleCancelEnrich}
-                enriching={enriching}
-                enrichingItems={enrichingItems}
-                enrichProgress={enrichProgress}
-                enrichableCount={enrichableCount}
-              />
-            ) : null}
-
-            {view === "library-authors" ? (
-              <AuthorsView
-                authors={uniqueAuthors}
-                setSelectedAuthorNames={setSelectedAuthorNames}
-                setView={setView}
-              />
-            ) : null}
-
-            {view === "library-series" ? (
-              <SeriesView
-                series={uniqueSeries}
-                books={filteredBooks}
-                setSelectedSeries={setSelectedSeries}
-                setView={setView}
-                onSelectBook={(bookId) => {
-                  setSelectedItemId(bookId);
-                  setView("library-books");
-                }}
-              />
-            ) : null}
-
-            {view === "inbox" ? (
-              <InboxView items={isDesktop ? inbox : inboxItems} />
-            ) : null}
-
-            {view === "duplicates" ? (
-              <DuplicatesView
-                hashGroups={isDesktop ? duplicates : duplicateGroups}
-                titleGroups={isDesktop ? titleDuplicates : []}
-                fuzzyGroups={isDesktop ? fuzzyDuplicates : []}
-                duplicateKeepSelection={duplicateKeepSelection}
-                setDuplicateKeepSelection={setDuplicateKeepSelection}
-                handleResolveDuplicate={handleResolveDuplicate}
-                handleAutoSelectAll={handleAutoSelectDuplicates}
-                handleResolveAll={handleResolveAllDuplicates}
-                applyNow={duplicateApplyNow}
-                setApplyNow={setDuplicateApplyNow}
-              />
-            ) : null}
-
-            {view === "fix" ? (
-              <FixView
-                items={allFixItems}
-                inboxItems={isDesktop ? fixIssues : []}
-                selectedItemId={selectedFixItemId}
-                setSelectedItemId={setSelectedFixItemId}
-                fixFilter={fixFilter}
-                setFixFilter={setFixFilter}
-                formData={fixFormData}
-                setFormData={setFixFormData}
-                searchQuery={fixSearchQuery}
-                setSearchQuery={setFixSearchQuery}
-                searchLoading={fixLoading}
-                searchCandidates={fixCandidates}
-                coverUrl={selectedFixItemId ? coverOverrides[selectedFixItemId] : null}
-                onFetchCover={fetchCoverOverride}
-                onSearch={() => {
-                  if (!selectedFixItemId) return;
-                  handleFetchCandidatesForItem(selectedFixItemId);
-                }}
-                onSearchWithQuery={async (query: string) => {
-                  if (!selectedFixItemId || !isTauri()) return;
-                  setFixLoading(true);
-                  try {
-                    const candidates = await invoke<EnrichmentCandidate[]>("search_candidates", {
-                      query,
-                      itemId: selectedFixItemId,
-                    });
-                    setFixCandidates(candidates);
-                  } catch {
-                    setScanStatus("Could not search metadata sources.");
-                    setFixCandidates([]);
-                  } finally {
-                    setFixLoading(false);
-                  }
-                }}
-                onApplyCandidate={async (candidate) => {
-                  if (!selectedFixItemId || !isTauri()) return;
-                  try {
-                    await invoke("apply_fix_candidate", {
-                      itemId: selectedFixItemId,
-                      candidate,
-                    });
-                    const queued = await refreshPendingChanges();
-                    setScanStatus(
-                      queued > 0
-                        ? `Metadata updated. ${queued} file changes queued.`
-                        : "Metadata updated."
-                    );
-                    await refreshLibrary();
-                    clearCoverOverride(selectedFixItemId);
-                    await fetchCoverOverride(selectedFixItemId, true);
-                    setFixCandidates([]);
-                  } catch {
-                    setScanStatus("Could not apply metadata.");
-                  }
-                }}
-                onSaveMetadata={async (id, data) => {
-                  if (!isDesktop) return;
-                  setFixSaving(true);
-                  try {
-                    await invoke("save_item_metadata", { itemId: id, metadata: data });
-                    setScanStatus("Metadata saved.");
-                    await refreshLibrary();
-                    clearCoverOverride(id);
-                    await fetchCoverOverride(id, true);
-                  } catch (e) {
-                    console.error("Failed to save metadata", e);
-                    setScanStatus("Could not save metadata.");
-                  } finally {
-                    setFixSaving(false);
-                  }
-                }}
-                onNavigateToEdit={(itemId) => {
-                  setSelectedItemId(itemId);
-                  setPreviousView("fix");
-                  setView("edit");
-                }}
-                onMarkTitleCorrect={handleMarkTitleCorrect}
-                markingTitleCorrectId={markingTitleCorrectId}
-                saving={fixSaving}
-                getCandidateCoverUrl={getCandidateCoverUrl}
-                isDesktop={isDesktop}
-              />
-            ) : null}
-
-            {view === "changes" ? (
-              <ChangesView
-                pendingChangesStatus={pendingChangesStatus}
-                setPendingChangesStatus={setPendingChangesStatus}
-                pendingChangesApplying={pendingChangesApplying}
-                pendingChangesLoading={pendingChangesLoading}
-                pendingChanges={pendingChanges}
-                selectedChangeIds={selectedChangeIds}
-                toggleChangeSelection={toggleChangeSelection}
-                handleApplyAllChanges={handleApplyAllChanges}
-                handleApplySelectedChanges={handleApplySelectedChanges}
-                handleApplyChange={handleApplyChange}
-                handleRemoveChange={handleRemoveChange}
-                handleRemoveAllChanges={handleRemoveAllChanges}
-                handleRemoveSelectedChanges={handleRemoveSelectedChanges}
-                confirmDeleteOpen={confirmDeleteOpen}
-                confirmDeleteIds={confirmDeleteIds}
-                setConfirmDeleteOpen={setConfirmDeleteOpen}
-                setConfirmDeleteIds={setConfirmDeleteIds}
-                handleConfirmDelete={handleConfirmDelete}
-                applyingChangeIds={applyingChangeIds}
-                changeProgress={changeProgress}
-              />
-            ) : null}
-
-            {view === "organize" ? (
-              <OrganizerView
-                organizeMode={organizeMode}
-                setOrganizeMode={setOrganizeMode}
-                organizeRoot={organizeRoot}
-                organizeTemplate={organizeTemplate}
-                setOrganizeTemplate={setOrganizeTemplate}
-                organizePlan={organizePlan}
-                handlePlanOrganize={handlePlanOrganize}
-                handleApplyOrganize={handleApplyOrganize}
-                handleQueueOrganize={handleQueueOrganize}
-                organizeStatus={organizeStatus}
-                organizeProgress={organizeProgress}
-                organizing={organizing}
-                organizeLog={organizeLog}
-              />
-            ) : null}
-
-            {view === "import" ? (
-              <ImportView
-                onCancel={() => {
-                  setView("library-books");
-                }}
-                onImportComplete={() => {
-                  setView("library-books");
-                  refreshLibrary();
-                }}
-                libraryRoot={organizeRoot}
-                template={organizeTemplate}
-              />
-            ) : null}
-
-            {view === "settings" ? (
-              <SettingsView
-                libraryRoot={organizeRoot}
-                onChooseRoot={async () => {
-                  if (!isTauri()) return;
-                  const { open } = await import("@tauri-apps/plugin-dialog");
-                  const selection: string | string[] | null = await open({
-                    directory: true,
-                    multiple: false,
-                  });
-                  if (typeof selection !== "string") return;
-                  setOrganizeRoot(selection);
-                }}
-                onNormalizeDescriptions={handleNormalizeDescriptions}
-                normalizingDescriptions={normalizingDescriptions}
-              />
-            ) : null}
-
-            {view === "missing-files" ? (
-              <MissingFilesView
-                items={missingFiles}
-                libraryRoot={organizeRoot}
-                onRelink={async (fileId) => {
-                  if (!isTauri()) return;
-                  try {
-                    const { open } = await import("@tauri-apps/plugin-dialog");
-                    const selection = await open({ multiple: false });
-                    if (typeof selection !== "string") return;
-                    await invoke("relink_missing_file", { fileId, newPath: selection });
-                    await refreshLibrary();
-                    setScanStatus("File relinked.");
-                  } catch (err) {
-                    console.error("Failed to relink file", err);
-                    setScanStatus("Could not relink file.");
-                  }
-                }}
-                onRemove={async (fileId) => {
-                  if (!isTauri()) return;
-                  try {
-                    await invoke("remove_missing_file", { fileId });
-                    await refreshLibrary();
-                    setScanStatus("Missing file removed.");
-                  } catch (err) {
-                    console.error("Failed to remove missing file", err);
-                    setScanStatus("Could not remove missing file.");
-                  }
-                }}
-                onRescan={async () => {
-                  if (!isTauri()) return;
-                  try {
-                    let selection = organizeRoot;
-                    if (!selection) {
-                      const { open } = await import("@tauri-apps/plugin-dialog");
-                      const picked: string | string[] | null = await open({
-                        directory: true,
-                        multiple: false,
-                      });
-                      if (typeof picked !== "string") return;
-                      selection = picked;
-                      setOrganizeRoot(picked);
-                    }
-                    setScanStatus("Scanning for missing files...");
-                    await invoke("scan_folder", { root: selection });
-                    await refreshLibrary();
-                    setScanStatus("Missing files refreshed.");
-                  } catch (err) {
-                    console.error("Failed to rescan", err);
-                    setScanStatus("Could not rescan folder.");
-                  }
-                }}
-              />
-            ) : null}
-
-            {view === "edit" ? (
-              <BookEditView
-                selectedItemId={selectedItemId}
-                libraryItems={libraryItems}
-                setView={setView}
-                previousView={previousView}
-                isDesktop={isDesktop}
-                onItemUpdate={refreshLibrary}
-                coverUrl={selectedItemId ? coverOverrides[selectedItemId] : null}
-                onFetchCover={fetchCoverOverride}
-                onClearCover={clearCoverOverride}
-                detailsVersion={editDetailsVersion}
-                matchQuery={editMatchQuery}
-                onMatchQueryChange={setEditMatchQuery}
-                matchLoading={editMatchLoading}
-                matchCandidates={editMatchCandidates}
-                onMatchSearch={handleEditMatchSearch}
-                onMatchApply={handleEditMatchApply}
-                matchApplyingId={editMatchApplying}
-                getCandidateCoverUrl={getCandidateCoverUrl}
-              />
-            ) : null}
-
-
-            {view === "tags" ? (
-              <TagsView
-                tags={tags}
-                newTagName={newTagName}
-                setNewTagName={setNewTagName}
-                newTagColor={newTagColor}
-                setNewTagColor={setNewTagColor}
-                handleCreateTag={handleCreateTag}
-              />
-            ) : null}
-
-            {view === "ereader" ? (
-              <EReaderView
-                devices={ereaderDevices}
-                selectedDeviceId={selectedEreaderDeviceId}
-                setSelectedDeviceId={setSelectedEreaderDeviceId}
-                ereaderBooks={ereaderBooks}
-                syncQueue={ereaderSyncQueue}
-                libraryItems={libraryItems}
-                onAddDevice={handleAddEreaderDevice}
-                onRemoveDevice={handleRemoveEreaderDevice}
-                onScanDevice={handleScanEreaderDevice}
-                onQueueAdd={handleQueueEreaderAdd}
-                onQueueRemove={handleQueueEreaderRemove}
-                onQueueImport={handleQueueEreaderImport}
-                onRemoveFromQueue={handleRemoveFromEreaderQueue}
-                onExecuteSync={handleOpenSyncDialog}
-                onRefreshDevices={async () => {
-                  try {
-                    const devices = await invoke<EReaderDevice[]>("list_ereader_devices");
-                    setEreaderDevices(devices);
-                  } catch {
-                    // ignore
-                  }
-                }}
-                scanning={ereaderScanning}
-                syncing={ereaderSyncing}
-                syncProgress={ereaderSyncProgress}
-              />
-            ) : null}
-          </section>
+          <AppRoutes
+            view={view}
+            setView={setView}
+            isDesktop={isDesktop}
+            libraryReady={libraryReady}
+            libraryItemsLength={libraryItems.length}
+            sortedBooks={sortedBooks}
+            filteredBooks={filteredBooks}
+            selectedItemId={selectedItemId}
+            setSelectedItemId={setSelectedItemId}
+            libraryFilter={libraryFilter}
+            setLibraryFilter={setLibraryFilter}
+            librarySort={librarySort}
+            setLibrarySort={setLibrarySort}
+            tags={tags}
+            selectedTagIds={selectedTagIds}
+            setSelectedTagIds={setSelectedTagIds}
+            grid={grid}
+            coverRefreshToken={coverRefreshToken}
+            fetchCoverOverride={fetchCoverOverride}
+            clearCoverOverride={clearCoverOverride}
+            selectedAuthorNames={selectedAuthorNames}
+            setSelectedAuthorNames={setSelectedAuthorNames}
+            selectedSeries={selectedSeries}
+            setSelectedSeries={setSelectedSeries}
+            onEnrichAll={handleEnrichAll}
+            onCancelEnrich={handleCancelEnrich}
+            enriching={enriching}
+            enrichingItems={enrichingItems}
+            enrichProgress={enrichProgress}
+            enrichableCount={enrichableCount}
+            uniqueAuthors={uniqueAuthors}
+            uniqueSeries={uniqueSeries}
+            inbox={inbox}
+            sampleInboxItems={inboxItems}
+            duplicates={duplicates}
+            sampleDuplicateGroups={duplicateGroups}
+            titleDuplicates={titleDuplicates}
+            fuzzyDuplicates={fuzzyDuplicates}
+            duplicateKeepSelection={duplicateKeepSelection}
+            setDuplicateKeepSelection={setDuplicateKeepSelection}
+            handleResolveDuplicate={handleResolveDuplicate}
+            handleAutoSelectAll={handleAutoSelectDuplicates}
+            handleResolveAll={handleResolveAllDuplicates}
+            duplicateApplyNow={duplicateApplyNow}
+            setDuplicateApplyNow={setDuplicateApplyNow}
+            allFixItems={allFixItems}
+            fixIssues={fixIssues}
+            selectedFixItemId={selectedFixItemId}
+            setSelectedFixItemId={setSelectedFixItemId}
+            fixFilter={fixFilter}
+            setFixFilter={setFixFilter}
+            fixFormData={fixFormData}
+            setFixFormData={setFixFormData}
+            fixSearchQuery={fixSearchQuery}
+            setFixSearchQuery={setFixSearchQuery}
+            fixLoading={fixLoading}
+            fixCandidates={fixCandidates}
+            fixCoverUrl={selectedFixItemId ? coverOverrides[selectedFixItemId] : null}
+            onFetchFixCover={fetchCoverOverride}
+            onSearchFixCandidates={() => {
+              if (!selectedFixItemId) return;
+              handleFetchCandidatesForItem(selectedFixItemId);
+            }}
+            onSearchFixWithQuery={handleSearchFixWithQuery}
+            onApplyFixCandidate={handleApplyFixCandidate}
+            onSaveFixMetadata={handleSaveFixMetadata}
+            onNavigateToEdit={(itemId) => {
+              setSelectedItemId(itemId);
+              setPreviousView("fix");
+              setView("edit");
+            }}
+            onMarkTitleCorrect={handleMarkTitleCorrect}
+            markingTitleCorrectId={markingTitleCorrectId}
+            fixSaving={fixSaving}
+            getCandidateCoverUrl={getCandidateCoverUrl}
+            pendingChangesStatus={pendingChangesStatus}
+            setPendingChangesStatus={setPendingChangesStatus}
+            pendingChangesApplying={pendingChangesApplying}
+            pendingChangesLoading={pendingChangesLoading}
+            pendingChanges={pendingChanges}
+            selectedChangeIds={selectedChangeIds}
+            toggleChangeSelection={toggleChangeSelection}
+            handleApplyAllChanges={handleApplyAllChanges}
+            handleApplySelectedChanges={handleApplySelectedChanges}
+            handleApplyChange={handleApplyChange}
+            handleRemoveChange={handleRemoveChange}
+            handleRemoveAllChanges={handleRemoveAllChanges}
+            handleRemoveSelectedChanges={handleRemoveSelectedChanges}
+            confirmDeleteOpen={confirmDeleteOpen}
+            confirmDeleteIds={confirmDeleteIds}
+            setConfirmDeleteOpen={setConfirmDeleteOpen}
+            setConfirmDeleteIds={setConfirmDeleteIds}
+            handleConfirmDelete={handleConfirmDelete}
+            applyingChangeIds={applyingChangeIds}
+            changeProgress={changeProgress}
+            organizeMode={organizeMode}
+            setOrganizeMode={setOrganizeMode}
+            organizeRoot={organizeRoot}
+            organizeTemplate={organizeTemplate}
+            setOrganizeTemplate={setOrganizeTemplate}
+            organizePlan={organizePlan}
+            handlePlanOrganize={handlePlanOrganize}
+            handleApplyOrganize={handleApplyOrganize}
+            handleQueueOrganize={handleQueueOrganizeAndView}
+            organizeStatus={organizeStatus}
+            organizeProgress={organizeProgress}
+            organizing={organizing}
+            organizeLog={organizeLog}
+            onImportCancel={handleImportCancel}
+            onImportComplete={handleImportComplete}
+            onChooseRoot={handleChooseRoot}
+            onNormalizeDescriptions={handleNormalizeDescriptions}
+            normalizingDescriptions={normalizingDescriptions}
+            missingFiles={missingFiles}
+            onRelinkMissing={handleRelinkMissing}
+            onRemoveMissing={handleRemoveMissing}
+            onRescanMissing={handleRescanMissing}
+            libraryItems={libraryItems}
+            previousView={previousView}
+            onEditItemUpdate={refreshLibrary}
+            editCoverUrl={selectedItemId ? coverOverrides[selectedItemId] : null}
+            detailsVersion={editDetailsVersion}
+            matchQuery={editMatchQuery}
+            onMatchQueryChange={setEditMatchQuery}
+            matchLoading={editMatchLoading}
+            matchCandidates={editMatchCandidates}
+            onMatchSearch={handleEditMatchSearch}
+            onMatchApply={handleEditMatchApply}
+            matchApplyingId={editMatchApplying}
+            newTagName={newTagName}
+            setNewTagName={setNewTagName}
+            newTagColor={newTagColor}
+            setNewTagColor={setNewTagColor}
+            handleCreateTag={handleCreateTag}
+            ereaderDevices={ereaderDevices}
+            selectedEreaderDeviceId={selectedEreaderDeviceId}
+            setSelectedEreaderDeviceId={setSelectedEreaderDeviceId}
+            ereaderBooks={ereaderBooks}
+            ereaderSyncQueue={ereaderSyncQueue}
+            onAddEreaderDevice={handleAddEreaderDevice}
+            onRemoveEreaderDevice={handleRemoveEreaderDevice}
+            onScanEreaderDevice={handleScanEreaderDevice}
+            onQueueEreaderAdd={handleQueueEreaderAdd}
+            onQueueEreaderRemove={handleQueueEreaderRemove}
+            onQueueEreaderImport={handleQueueEreaderImport}
+            onRemoveFromQueue={handleRemoveFromEreaderQueue}
+            onExecuteSync={handleOpenSyncDialog}
+            onRefreshDevices={async () => {
+              await refreshEreaderDevices();
+            }}
+            ereaderScanning={ereaderScanning}
+            ereaderSyncing={ereaderSyncing}
+            ereaderSyncProgress={ereaderSyncProgress}
+          />
         </div>
 
         <SyncConfirmDialog
           open={ereaderSyncDialogOpen}
           onClose={() => setEreaderSyncDialogOpen(false)}
-          onConfirm={handleExecuteEreaderSync}
+          onConfirm={() => void handleExecuteEreaderSync()}
           deviceName={ereaderDevices.find((d) => d.id === selectedEreaderDeviceId)?.name ?? "eReader"}
           queue={ereaderSyncQueue}
           libraryItems={libraryItems}
@@ -2441,10 +1583,10 @@ function App() {
           availableLanguages={availableLanguages}
           selectedTags={selectedTags}
           availableTags={availableTags}
-          handleAddTag={handleAddTag}
-          handleRemoveTag={handleRemoveTag}
+          handleAddTag={(tagId) => void handleAddTag(tagId)}
+          handleRemoveTag={(tagId) => void handleRemoveTag(tagId)}
           clearCoverOverride={clearCoverOverride}
-          fetchCoverOverride={fetchCoverOverride}
+          fetchCoverOverride={(itemId) => void fetchCoverOverride(itemId)}
           setView={setView}
           setSelectedAuthorNames={setSelectedAuthorNames}
           setSelectedSeries={setSelectedSeries}
@@ -2458,7 +1600,7 @@ function App() {
               matchConfidence: (onDevice?.matchConfidence as "exact" | "isbn" | "title" | "fuzzy" | null) ?? null,
             };
           })() : null}
-          onQueueEreaderAdd={handleQueueEreaderAdd}
+          onQueueEreaderAdd={(itemId) => void handleQueueEreaderAdd(itemId)}
           onNavigateToEdit={() => {
             setPreviousView(view);
             setView("edit");
@@ -2467,15 +1609,6 @@ function App() {
       ) : null}
     </div>
   );
-}
-
-function formatEta(totalSeconds: number) {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes > 0) {
-    return `${minutes}m ${seconds}s`;
-  }
-  return `${seconds}s`;
 }
 
 export default App;
