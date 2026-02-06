@@ -4,7 +4,6 @@ import { listen } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MatchModal } from "./components/MatchModal";
 import { ScanProgressBar } from "./components/ProgressBar";
 import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
 import { cleanupMetadataTitle, normalizeTitleSnapshot } from "./lib/metadataCleanup";
@@ -240,18 +239,12 @@ function App() {
   );
   const organizerSettingsLoaded = useRef(false);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-  const [matchOpen, setMatchOpen] = useState(false);
-  const [matchCandidates, setMatchCandidates] = useState<EnrichmentCandidate[]>([]);
-  const [matchLoading, setMatchLoading] = useState(false);
-  const [matchApplying, setMatchApplying] = useState<string | null>(null);
-  const [matchApplyProgress, setMatchApplyProgress] = useState<{
-    step: string;
-    message: string;
-    current: number;
-    total: number;
-  } | null>(null);
-  const [matchQuery, setMatchQuery] = useState("");
   const [coverRefreshToken, setCoverRefreshToken] = useState(0);
+  const [editMatchQuery, setEditMatchQuery] = useState("");
+  const [editMatchLoading, setEditMatchLoading] = useState(false);
+  const [editMatchCandidates, setEditMatchCandidates] = useState<EnrichmentCandidate[]>([]);
+  const [editMatchApplying, setEditMatchApplying] = useState<string | null>(null);
+  const [editDetailsVersion, setEditDetailsVersion] = useState(0);
 
 
   // Fix View State
@@ -1622,56 +1615,50 @@ function App() {
     }
   };
 
-  const handleOpenMatchModal = async () => {
-    if (!selectedItemId) return;
-    setMatchQuery(selectedItem?.title ?? "");
-    setMatchOpen(true);
+  const loadEditMatchCandidates = async (itemId: string) => {
     if (!isTauri()) {
-      setMatchCandidates(sampleFixCandidates);
+      setEditMatchCandidates(sampleFixCandidates);
       return;
     }
-    setMatchLoading(true);
+    setEditMatchLoading(true);
     try {
       const candidates = await invoke<EnrichmentCandidate[]>(
         "get_fix_candidates",
-        {
-          itemId: selectedItemId,
-        }
+        { itemId }
       );
-      setMatchCandidates(candidates.slice(0, 5));
+      setEditMatchCandidates(candidates);
     } catch {
       setScanStatus("Could not fetch match candidates.");
-      setMatchCandidates([]);
+      setEditMatchCandidates([]);
     } finally {
-      setMatchLoading(false);
+      setEditMatchLoading(false);
     }
   };
 
-  const handleMatchSearch = async () => {
-    if (!matchQuery.trim()) return;
+  const handleEditMatchSearch = async (query: string) => {
+    if (!query.trim()) return;
     if (!isTauri()) {
-      setMatchCandidates(sampleFixCandidates);
+      setEditMatchCandidates(sampleFixCandidates);
       return;
     }
-    setMatchLoading(true);
+    setEditMatchLoading(true);
     try {
       const candidates = await invoke<EnrichmentCandidate[]>("search_candidates", {
-        query: matchQuery,
+        query,
         itemId: selectedItemId ?? undefined,
       });
-      setMatchCandidates(candidates.slice(0, 5));
+      setEditMatchCandidates(candidates);
     } catch {
       setScanStatus("Could not search metadata sources.");
-      setMatchCandidates([]);
+      setEditMatchCandidates([]);
     } finally {
-      setMatchLoading(false);
+      setEditMatchLoading(false);
     }
   };
 
-  const handleMatchApply = async (candidate: EnrichmentCandidate) => {
+  const handleEditMatchApply = async (candidate: EnrichmentCandidate) => {
     if (!selectedItemId || !isTauri()) return;
-    setMatchApplying(candidate.id);
-    setMatchApplyProgress(null);
+    setEditMatchApplying(candidate.id);
     try {
       await invoke("apply_fix_candidate", {
         itemId: selectedItemId,
@@ -1683,19 +1670,24 @@ function App() {
           ? `Metadata updated. ${queued} file changes queued.`
           : "Metadata updated."
       );
-      setMatchOpen(false);
-      setMatchCandidates([]);
-      // Clear any cached cover and fetch the new one from the backend
+      // Clear cached cover and fetch the updated one
       clearCoverOverride(selectedItemId);
       await fetchCoverOverride(selectedItemId);
       await refreshLibrary();
+      setEditDetailsVersion((value) => value + 1);
     } catch {
       setScanStatus("Could not apply metadata.");
     } finally {
-      setMatchApplying(null);
-      setMatchApplyProgress(null);
+      setEditMatchApplying(null);
     }
   };
+
+  useEffect(() => {
+    if (view !== "edit") return;
+    if (!selectedItemId) return;
+    setEditMatchQuery(selectedItem?.title ?? "");
+    void loadEditMatchCandidates(selectedItemId);
+  }, [view, selectedItemId, selectedItem?.title]);
 
   const handleMarkTitleCorrect = async (itemId: string, title: string) => {
     if (!isTauri()) return;
@@ -2214,6 +2206,11 @@ function App() {
                     setFixSaving(false);
                   }
                 }}
+                onNavigateToEdit={(itemId) => {
+                  setSelectedItemId(itemId);
+                  setPreviousView("fix");
+                  setView("edit");
+                }}
                 onMarkTitleCorrect={handleMarkTitleCorrect}
                 markingTitleCorrectId={markingTitleCorrectId}
                 saving={fixSaving}
@@ -2363,6 +2360,15 @@ function App() {
                 coverUrl={selectedItemId ? coverOverrides[selectedItemId] : null}
                 onFetchCover={fetchCoverOverride}
                 onClearCover={clearCoverOverride}
+                detailsVersion={editDetailsVersion}
+                matchQuery={editMatchQuery}
+                onMatchQueryChange={setEditMatchQuery}
+                matchLoading={editMatchLoading}
+                matchCandidates={editMatchCandidates}
+                onMatchSearch={handleEditMatchSearch}
+                onMatchApply={handleEditMatchApply}
+                matchApplyingId={editMatchApplying}
+                getCandidateCoverUrl={getCandidateCoverUrl}
               />
             ) : null}
 
@@ -2410,21 +2416,6 @@ function App() {
           </section>
         </div>
 
-        <MatchModal
-          open={matchOpen}
-          itemTitle={selectedItem?.title ?? "Untitled"}
-          itemAuthor={selectedItem?.author ?? "Unknown"}
-          query={matchQuery}
-          loading={matchLoading}
-          applyingId={matchApplying}
-          applyProgress={matchApplyProgress}
-          candidates={matchCandidates}
-          onQueryChange={setMatchQuery}
-          onSearch={handleMatchSearch}
-          onApply={handleMatchApply}
-          onClose={() => setMatchOpen(false)}
-        />
-
         <SyncConfirmDialog
           open={ereaderSyncDialogOpen}
           onClose={() => setEreaderSyncDialogOpen(false)}
@@ -2452,8 +2443,6 @@ function App() {
           availableTags={availableTags}
           handleAddTag={handleAddTag}
           handleRemoveTag={handleRemoveTag}
-          handleOpenMatchModal={handleOpenMatchModal}
-          isDesktop={isDesktop}
           clearCoverOverride={clearCoverOverride}
           fetchCoverOverride={fetchCoverOverride}
           setView={setView}

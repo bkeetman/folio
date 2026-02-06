@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { BookOpen, FileText, FolderOpen, Globe, HardDrive, PencilLine, Sparkles } from "lucide-react";
+import { BookOpen, FileText, FolderOpen, Globe, HardDrive, PencilLine } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useState } from "react";
 import { Button, Separator } from "../components/ui";
@@ -33,8 +33,6 @@ type InspectorProps = {
   availableTags: Tag[];
   handleAddTag: (tagId: string) => void;
   handleRemoveTag: (tagId: string) => void;
-  handleOpenMatchModal: () => void;
-  isDesktop: boolean;
   clearCoverOverride: (itemId: string) => void;
   fetchCoverOverride: (itemId: string) => void;
   // Navigation
@@ -55,8 +53,6 @@ export function Inspector({
   availableTags,
   handleAddTag,
   handleRemoveTag,
-  handleOpenMatchModal,
-  isDesktop,
   clearCoverOverride,
   fetchCoverOverride,
   setView,
@@ -308,16 +304,6 @@ export function Inspector({
               >
                 <PencilLine size={14} />
                 Edit
-              </Button>
-              <Button
-                variant="toolbar"
-                size="sm"
-                className="col-span-2 w-full justify-center"
-                onClick={handleOpenMatchModal}
-                disabled={!isDesktop}
-              >
-                <Sparkles size={14} />
-                Match metadata
               </Button>
             </div>
 

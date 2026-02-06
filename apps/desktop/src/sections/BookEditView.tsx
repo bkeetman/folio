@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowLeft, Check, Image as ImageIcon, Loader2, X } from "lucide-react";
+import { ArrowLeft, Check, Image as ImageIcon, Loader2, Search, X } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useState } from "react";
 import { Button, Input } from "../components/ui";
 import { cleanupMetadataTitle } from "../lib/metadataCleanup";
 import { LANGUAGE_OPTIONS } from "../lib/languageFlags";
-import type { ItemMetadata, LibraryItem, View } from "../types/library";
+import type { EnrichmentCandidate, ItemMetadata, LibraryItem, View } from "../types/library";
 
 type EmbeddedCoverCandidate = {
     path: string;
@@ -24,6 +24,15 @@ type BookEditViewProps = {
     coverUrl: string | null;
     onFetchCover: (itemId: string, force?: boolean) => Promise<void>;
     onClearCover: (itemId: string) => void;
+    detailsVersion: number;
+    matchQuery: string;
+    onMatchQueryChange: (query: string) => void;
+    matchLoading: boolean;
+    matchCandidates: EnrichmentCandidate[];
+    onMatchSearch: (query: string) => void;
+    onMatchApply: (candidate: EnrichmentCandidate) => void;
+    matchApplyingId: string | null;
+    getCandidateCoverUrl: (candidate: EnrichmentCandidate) => string | null;
 };
 
 export function BookEditView({
@@ -36,6 +45,15 @@ export function BookEditView({
     coverUrl,
     onFetchCover,
     onClearCover,
+    detailsVersion,
+    matchQuery,
+    onMatchQueryChange,
+    matchLoading,
+    matchCandidates,
+    onMatchSearch,
+    onMatchApply,
+    matchApplyingId,
+    getCandidateCoverUrl,
 }: BookEditViewProps) {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -79,7 +97,7 @@ export function BookEditView({
                 void onFetchCover(selectedItemId);
             }
         }
-    }, [selectedItemId, isDesktop, coverUrl, onFetchCover]);
+    }, [selectedItemId, isDesktop, coverUrl, onFetchCover, detailsVersion]);
 
     useEffect(() => {
         return () => {
@@ -267,7 +285,7 @@ export function BookEditView({
                         </div>
                     )}
 
-                    <div className="grid grid-cols-1 gap-8 md:grid-cols-[280px_1fr]">
+                    <div className="grid grid-cols-1 gap-8 md:grid-cols-[280px_1fr_320px]">
                         {/* Left Column: Cover */}
                         <div className="space-y-4">
                             <h2 className="text-sm font-semibold uppercase tracking-wider text-app-ink-muted">
@@ -498,6 +516,107 @@ export function BookEditView({
                                         className="flex min-h-[160px] w-full rounded-md border border-app-border bg-white px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                     />
                                 </div>
+                            </div>
+                        </div>
+
+                        {/* Right Column: Match/Search */}
+                        <div className="flex flex-col rounded-lg border border-app-border bg-white p-4 shadow-sm">
+                            <div className="mb-3 flex items-center justify-between">
+                                <h2 className="text-xs font-semibold uppercase tracking-wider text-app-ink-muted">
+                                    Match metadata
+                                </h2>
+                            </div>
+                            <div className="flex gap-2">
+                                <Input
+                                    value={matchQuery}
+                                    onChange={(e) => onMatchQueryChange(e.target.value)}
+                                    placeholder="Search title or author..."
+                                    className="flex-1 text-sm"
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            onMatchSearch(matchQuery);
+                                        }
+                                    }}
+                                />
+                                <Button
+                                    variant="primary"
+                                    size="sm"
+                                    onClick={() => onMatchSearch(matchQuery)}
+                                    disabled={matchLoading || !matchQuery.trim() || !isDesktop}
+                                >
+                                    {matchLoading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+                                </Button>
+                            </div>
+
+                            <div className="mt-4 flex-1 overflow-y-auto">
+                                {matchLoading ? (
+                                    <div className="flex items-center justify-center gap-2 py-6 text-sm text-[var(--app-ink-muted)]">
+                                        <Loader2 size={16} className="animate-spin" />
+                                        Searching...
+                                    </div>
+                                ) : matchCandidates.length > 0 ? (
+                                    <div className="space-y-3">
+                                        {matchCandidates.map((candidate) => {
+                                            const coverUrl = getCandidateCoverUrl(candidate);
+                                            return (
+                                                <div
+                                                    key={candidate.id}
+                                                    className="rounded-md border border-[var(--app-border)] bg-white p-2"
+                                                >
+                                                    <div className="flex gap-2">
+                                                        <div className="h-16 w-11 flex-shrink-0 overflow-hidden rounded border border-[var(--app-border)] bg-[#fffaf4]">
+                                                            {coverUrl ? (
+                                                                <img
+                                                                    src={coverUrl}
+                                                                    alt=""
+                                                                    className="h-full w-full object-cover"
+                                                                    onError={(e) => {
+                                                                        e.currentTarget.style.display = "none";
+                                                                    }}
+                                                                />
+                                                            ) : (
+                                                                <div className="h-full w-full flex items-center justify-center text-[8px] text-[var(--app-ink-muted)]">
+                                                                    No cover
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center justify-between gap-1 mb-0.5">
+                                                                <span className="text-[9px] rounded-full bg-[rgba(201,122,58,0.12)] px-1.5 py-0.5 text-[var(--app-accent)]">
+                                                                    {candidate.source}
+                                                                </span>
+                                                                <span className="text-[9px] text-[var(--app-ink-muted)]">
+                                                                    {Math.round(candidate.confidence * 100)}%
+                                                                </span>
+                                                            </div>
+                                                            <div className="text-xs font-medium truncate">{candidate.title}</div>
+                                                            <div className="text-[10px] text-[var(--app-ink-muted)] truncate">
+                                                                {candidate.authors.join(", ")}
+                                                            </div>
+                                                            <div className="text-[10px] text-[var(--app-ink-muted)]">
+                                                                {candidate.published_year ?? "—"}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => onMatchApply(candidate)}
+                                                        className="w-full mt-2 text-xs"
+                                                        disabled={!isDesktop || matchApplyingId === candidate.id}
+                                                    >
+                                                        {matchApplyingId === candidate.id ? "Applying..." : "Apply This"}
+                                                    </Button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                ) : (
+                                    <div className="text-center py-6 text-sm text-[var(--app-ink-muted)]">
+                                        <p>No results found.</p>
+                                        <p className="mt-1 text-xs">Try a different query or edit metadata manually.</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
