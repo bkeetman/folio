@@ -275,6 +275,14 @@ export type OperationProgress = {
   total: number;
 };
 
+export type ApplyMetadataProgress = {
+  itemId: string;
+  step: string;
+  message: string;
+  current: number;
+  total: number;
+};
+
 export type OperationStats = {
   total: number;
   processed: number;

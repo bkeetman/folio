@@ -1,6 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ProgressBar, ScanProgressBar } from "./components/ProgressBar";
 import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
 import { useEreader } from "./hooks/useEreader";
@@ -24,6 +24,7 @@ import { StatusBar } from "./sections/StatusBar";
 import { TopToolbar } from "./sections/TopToolbar";
 import type {
   ActivityLogItem,
+  ApplyMetadataProgress,
   DuplicateGroup,
   EnrichmentCandidate,
   FixFilter,
@@ -84,6 +85,8 @@ function App() {
   const [fixFormData, setFixFormData] = useState<ItemMetadata | null>(null);
   const [fixSearchQuery, setFixSearchQuery] = useState("");
   const [fixSaving, setFixSaving] = useState(false);
+  const [fixApplyingCandidateId, setFixApplyingCandidateId] = useState<string | null>(null);
+  const [fixApplyingMessage, setFixApplyingMessage] = useState<string | null>(null);
   const [markingTitleCorrectId, setMarkingTitleCorrectId] = useState<string | null>(null);
   const [coverOverrides, setCoverOverrides] = useState<Record<string, string | null>>({});
   const coverOverrideRef = useRef<Record<string, string | null>>({});
@@ -1031,6 +1034,23 @@ function App() {
     };
   }, [isDesktop, refreshLibrary]);
 
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlisten: (() => void) | undefined;
+    listen<ApplyMetadataProgress>("apply-metadata-progress", (event) => {
+      const { message, current, total, step } = event.payload;
+      const progressMessage =
+        step === "done" ? "Metadata apply complete." : `${message} (${current}/${total})`;
+      setFixApplyingMessage(progressMessage);
+      setScanStatus(progressMessage);
+    }).then((stop) => {
+      unlisten = stop;
+    });
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [isDesktop]);
+
   const handleFetchCandidatesForItem = async (itemId: string) => {
     if (!isTauri()) {
       setFixCandidates([]);
@@ -1053,12 +1073,17 @@ function App() {
   const handleSearchFixWithQuery = async (queryValue: string) => {
     if (!selectedFixItemId || !isTauri()) return;
     setFixLoading(true);
+    setScanStatus("Searching metadata...");
+    await new Promise((resolve) => setTimeout(resolve, 0));
     try {
       const candidates = await invoke<EnrichmentCandidate[]>("search_candidates", {
         query: queryValue,
         itemId: selectedFixItemId,
       });
       setFixCandidates(candidates);
+      if (candidates.length === 0) {
+        setScanStatus("No metadata matches found.");
+      }
     } catch {
       setScanStatus("Could not search metadata sources.");
       setFixCandidates([]);
@@ -1069,6 +1094,10 @@ function App() {
 
   const handleApplyFixCandidate = async (candidate: EnrichmentCandidate) => {
     if (!selectedFixItemId || !isTauri()) return;
+    if (fixApplyingCandidateId) return;
+    setFixApplyingCandidateId(candidate.id);
+    setFixApplyingMessage("Applying metadata... (1/4)");
+    setScanStatus("Applying metadata...");
     try {
       await invoke("apply_fix_candidate", {
         itemId: selectedFixItemId,
@@ -1086,12 +1115,16 @@ function App() {
       setFixCandidates([]);
     } catch {
       setScanStatus("Could not apply metadata.");
+    } finally {
+      setFixApplyingCandidateId(null);
+      setFixApplyingMessage(null);
     }
   };
 
   const handleSaveFixMetadata = async (id: string, data: ItemMetadata) => {
     if (!isDesktop) return;
     setFixSaving(true);
+    setScanStatus("Saving metadata...");
     try {
       await invoke("save_item_metadata", { itemId: id, metadata: data });
       setScanStatus("Metadata saved.");
@@ -1133,12 +1166,17 @@ function App() {
       return;
     }
     setEditMatchLoading(true);
+    setScanStatus("Searching metadata...");
+    await new Promise((resolve) => setTimeout(resolve, 0));
     try {
       const candidates = await invoke<EnrichmentCandidate[]>("search_candidates", {
         query,
         itemId: selectedItemId ?? undefined,
       });
       setEditMatchCandidates(candidates);
+      if (candidates.length === 0) {
+        setScanStatus("No metadata matches found.");
+      }
     } catch {
       setScanStatus("Could not search metadata sources.");
       setEditMatchCandidates([]);
@@ -1172,6 +1210,28 @@ function App() {
       setEditMatchApplying(null);
     }
   };
+
+  const handleQueueRemoveItem = useCallback(async (itemId: string) => {
+    if (!isTauri()) return;
+    setScanStatus("Queueing delete change...");
+    try {
+      const queued = await invoke<number>("queue_remove_item", { itemId });
+      const pending = await refreshPendingChanges();
+      await refreshLibrary();
+      setScanStatus(
+        queued > 0
+          ? `Removed from library. ${queued} delete change(s) queued.`
+          : "Removed from library. Delete was already queued."
+      );
+      if (pending > 0) {
+        setView("changes");
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error ?? "Could not queue delete.");
+      setScanStatus(`Could not queue delete: ${message}`);
+    }
+  }, [refreshLibrary, refreshPendingChanges]);
 
   useEffect(() => {
     if (view !== "edit") return;
@@ -1307,6 +1367,32 @@ function App() {
     }
   };
 
+  const duplicateActionCount = useMemo(() => {
+    const actionableHash = duplicates.filter((group) => {
+      const titles = group.file_titles.length ? group.file_titles : [group.title];
+      const normalized = titles.map((title) => title.trim().toLowerCase());
+      return new Set(normalized).size <= 1;
+    }).length;
+    return actionableHash + titleDuplicates.length + fuzzyDuplicates.length;
+  }, [duplicates, titleDuplicates, fuzzyDuplicates]);
+
+  const fixActionCount = useMemo(() => {
+    const missingMetadataIds = new Set(
+      libraryItems
+        .filter((item) => !item.title || item.authors.length === 0 || !item.cover_path)
+        .map((item) => item.id)
+    );
+    fixIssues.forEach((issue) => {
+      missingMetadataIds.add(issue.id);
+    });
+    return missingMetadataIds.size;
+  }, [libraryItems, fixIssues]);
+
+  const ereaderPendingCount = useMemo(
+    () => ereaderSyncQueue.filter((item) => item.status === "pending").length,
+    [ereaderSyncQueue]
+  );
+
   useEffect(() => {
     if (mainScrollRef.current) {
       mainScrollRef.current.scrollTo({ top: 0, behavior: "auto" });
@@ -1328,8 +1414,10 @@ function App() {
         handleScan={() => setView("import")}
         libraryHealth={libraryHealth}
         pendingChangesCount={pendingChangesStatus === "pending" ? pendingChanges.length : 0}
-        duplicateCount={duplicates.length}
+        duplicateCount={duplicateActionCount}
         missingFilesCount={missingFiles.length}
+        fixActionCount={fixActionCount}
+        ereaderPendingCount={ereaderPendingCount}
         handleClearLibrary={() => void handleClearLibrary()}
         appVersion={appVersion}
         ereaderConnected={ereaderDevices.some((d) => d.isConnected)}
@@ -1443,6 +1531,8 @@ function App() {
             onMarkTitleCorrect={handleMarkTitleCorrect}
             markingTitleCorrectId={markingTitleCorrectId}
             fixSaving={fixSaving}
+            fixApplyingCandidateId={fixApplyingCandidateId}
+            fixApplyingMessage={fixApplyingMessage}
             getCandidateCoverUrl={getCandidateCoverUrl}
             pendingChangesStatus={pendingChangesStatus}
             setPendingChangesStatus={setPendingChangesStatus}
@@ -1498,9 +1588,10 @@ function App() {
             matchLoading={editMatchLoading}
             matchCandidates={editMatchCandidates}
             onMatchSearch={handleEditMatchSearch}
-            onMatchApply={handleEditMatchApply}
-            matchApplyingId={editMatchApplying}
-            newTagName={newTagName}
+          onMatchApply={handleEditMatchApply}
+          matchApplyingId={editMatchApplying}
+          onQueueRemoveItem={handleQueueRemoveItem}
+          newTagName={newTagName}
             setNewTagName={setNewTagName}
             newTagColor={newTagColor}
             setNewTagColor={setNewTagColor}

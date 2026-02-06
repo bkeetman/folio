@@ -104,6 +104,8 @@ type AppRoutesProps = {
   onMarkTitleCorrect: (itemId: string, title: string) => Promise<void>;
   markingTitleCorrectId: string | null;
   fixSaving: boolean;
+  fixApplyingCandidateId: string | null;
+  fixApplyingMessage: string | null;
   getCandidateCoverUrl: (candidate: EnrichmentCandidate) => string | null;
   pendingChangesStatus: "pending" | "applied" | "error";
   setPendingChangesStatus: Dispatch<SetStateAction<"pending" | "applied" | "error">>;
@@ -161,6 +163,7 @@ type AppRoutesProps = {
   onMatchSearch: (query: string) => void | Promise<void>;
   onMatchApply: (candidate: EnrichmentCandidate) => void | Promise<void>;
   matchApplyingId: string | null;
+  onQueueRemoveItem: (itemId: string) => void | Promise<void>;
   newTagName: string;
   setNewTagName: Dispatch<SetStateAction<string>>;
   newTagColor: string;
@@ -253,6 +256,8 @@ export function AppRoutes(props: AppRoutesProps) {
     onMarkTitleCorrect,
     markingTitleCorrectId,
     fixSaving,
+    fixApplyingCandidateId,
+    fixApplyingMessage,
     getCandidateCoverUrl,
     pendingChangesStatus,
     setPendingChangesStatus,
@@ -310,6 +315,7 @@ export function AppRoutes(props: AppRoutesProps) {
     onMatchSearch,
     onMatchApply,
     matchApplyingId,
+    onQueueRemoveItem,
     newTagName,
     setNewTagName,
     newTagColor,
@@ -435,6 +441,8 @@ export function AppRoutes(props: AppRoutesProps) {
           onMarkTitleCorrect={onMarkTitleCorrect}
           markingTitleCorrectId={markingTitleCorrectId}
           saving={fixSaving}
+          applyingCandidateId={fixApplyingCandidateId}
+          applyingMessage={fixApplyingMessage}
           getCandidateCoverUrl={getCandidateCoverUrl}
           isDesktop={isDesktop}
           onEnrichAll={() => void onEnrichAll(allFixItems.map((item) => item.id))}
@@ -544,6 +552,9 @@ export function AppRoutes(props: AppRoutesProps) {
           onMatchSearch={(query) => void onMatchSearch(query)}
           onMatchApply={(candidate) => void onMatchApply(candidate)}
           matchApplyingId={matchApplyingId}
+          onQueueRemoveItem={async (itemId) => {
+            await onQueueRemoveItem(itemId);
+          }}
           getCandidateCoverUrl={getCandidateCoverUrl}
         />
       ) : null}

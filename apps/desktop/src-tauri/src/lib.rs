@@ -1175,6 +1175,58 @@ fn remove_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<i64
   Ok(removed)
 }
 
+#[tauri::command]
+fn queue_remove_item(app: tauri::AppHandle, item_id: String) -> Result<i64, String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+  let mut queued = 0i64;
+
+  let mut stmt = conn
+    .prepare("SELECT id, path FROM files WHERE item_id = ?1 AND status = 'active'")
+    .map_err(|err| err.to_string())?;
+  let rows = stmt
+    .query_map(params![item_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+    .map_err(|err| err.to_string())?;
+
+  for row in rows {
+    let (file_id, path) = row.map_err(|err| err.to_string())?;
+    let existing: Option<String> = conn
+      .query_row(
+        "SELECT id FROM pending_changes WHERE file_id = ?1 AND type = 'delete' AND status = 'pending' LIMIT 1",
+        params![file_id],
+        |r| r.get(0),
+      )
+      .optional()
+      .map_err(|err| err.to_string())?;
+    if existing.is_some() {
+      continue;
+    }
+
+    let change_id = Uuid::new_v4().to_string();
+    conn.execute(
+      "INSERT INTO pending_changes (id, file_id, type, from_path, to_path, changes_json, status, created_at) \
+       VALUES (?1, ?2, 'delete', ?3, NULL, NULL, 'pending', ?4)",
+      params![change_id, file_id, path, now],
+    )
+    .map_err(|err| err.to_string())?;
+    queued += 1;
+  }
+
+  conn.execute(
+    "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE item_id = ?2 AND status = 'active'",
+    params![now, item_id],
+  )
+  .map_err(|err| err.to_string())?;
+
+  conn.execute(
+    "UPDATE issues SET resolved_at = ?1 WHERE item_id = ?2 AND resolved_at IS NULL",
+    params![now, item_id],
+  )
+  .map_err(|err| err.to_string())?;
+
+  Ok(queued)
+}
+
 fn apply_pending_changes_sync(app: &tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
   let conn = open_db(app)?;
   let now = chrono::Utc::now().timestamp_millis();
@@ -1927,7 +1979,14 @@ fn clean_search_author(author: &str) -> Option<String> {
 }
 
 #[tauri::command]
-fn get_fix_candidates(app: tauri::AppHandle, item_id: String) -> Result<Vec<EnrichmentCandidate>, String> {
+async fn get_fix_candidates(app: tauri::AppHandle, item_id: String) -> Result<Vec<EnrichmentCandidate>, String> {
+  let app_handle = app.clone();
+  tauri::async_runtime::spawn_blocking(move || get_fix_candidates_sync(app_handle, item_id))
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+fn get_fix_candidates_sync(app: tauri::AppHandle, item_id: String) -> Result<Vec<EnrichmentCandidate>, String> {
   let conn = open_db(&app)?;
   let title: Option<String> = conn
     .query_row(
@@ -1994,7 +2053,18 @@ fn get_fix_candidates(app: tauri::AppHandle, item_id: String) -> Result<Vec<Enri
 }
 
 #[tauri::command]
-fn search_candidates(
+async fn search_candidates(
+  app: tauri::AppHandle,
+  query: String,
+  item_id: Option<String>,
+) -> Result<Vec<EnrichmentCandidate>, String> {
+  let app_handle = app.clone();
+  tauri::async_runtime::spawn_blocking(move || search_candidates_sync(app_handle, query, item_id))
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+fn search_candidates_sync(
   app: tauri::AppHandle,
   query: String,
   item_id: Option<String>,
@@ -2002,7 +2072,7 @@ fn search_candidates(
   let trimmed = query.trim();
   if trimmed.is_empty() {
     if let Some(item_id) = item_id {
-      return get_fix_candidates(app, item_id);
+      return get_fix_candidates_sync(app, item_id);
     }
     return Ok(vec![]);
   }
@@ -2288,7 +2358,20 @@ struct ItemMetadata {
 }
 
 #[tauri::command]
-fn apply_fix_candidate(
+async fn apply_fix_candidate(
+  app: tauri::AppHandle,
+  item_id: String,
+  candidate: EnrichmentCandidate,
+) -> Result<(), String> {
+  let app_handle = app.clone();
+  tauri::async_runtime::spawn_blocking(move || {
+    apply_fix_candidate_sync(app_handle, item_id, candidate)
+  })
+  .await
+  .map_err(|err| err.to_string())?
+}
+
+fn apply_fix_candidate_sync(
   app: tauri::AppHandle,
   item_id: String,
   candidate: EnrichmentCandidate,
@@ -2369,7 +2452,20 @@ fn apply_fix_candidate(
 }
 
 #[tauri::command]
-fn save_item_metadata(
+async fn save_item_metadata(
+  app: tauri::AppHandle,
+  item_id: String,
+  metadata: ItemMetadata,
+) -> Result<(), String> {
+  let app_handle = app.clone();
+  tauri::async_runtime::spawn_blocking(move || {
+    save_item_metadata_sync(app_handle, item_id, metadata)
+  })
+  .await
+  .map_err(|err| err.to_string())?
+}
+
+fn save_item_metadata_sync(
   app: tauri::AppHandle,
   item_id: String,
   metadata: ItemMetadata,
@@ -8072,6 +8168,7 @@ pub fn run() {
       get_pending_changes,
       apply_pending_changes,
       remove_pending_changes,
+      queue_remove_item,
       generate_pending_changes_from_organize,
       resolve_duplicate_group,
       get_library_health,

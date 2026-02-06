@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowLeft, Check, Image as ImageIcon, Loader2, Search, X } from "lucide-react";
+import { ArrowLeft, Check, Image as ImageIcon, Loader2, Search, Trash2, X } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useState } from "react";
 import { Button, Input } from "../components/ui";
@@ -32,6 +32,7 @@ type BookEditViewProps = {
     onMatchSearch: (query: string) => void;
     onMatchApply: (candidate: EnrichmentCandidate) => void;
     matchApplyingId: string | null;
+    onQueueRemoveItem: (itemId: string) => Promise<void>;
     getCandidateCoverUrl: (candidate: EnrichmentCandidate) => string | null;
 };
 
@@ -53,6 +54,7 @@ export function BookEditView({
     onMatchSearch,
     onMatchApply,
     matchApplyingId,
+    onQueueRemoveItem,
     getCandidateCoverUrl,
 }: BookEditViewProps) {
     const [isLoading, setIsLoading] = useState(true);
@@ -60,6 +62,7 @@ export function BookEditView({
     const [isSaving, setIsSaving] = useState(false);
     const [isUploadingCover, setIsUploadingCover] = useState(false);
     const [isApplyingEmbeddedCover, setIsApplyingEmbeddedCover] = useState(false);
+    const [isQueueingRemove, setIsQueueingRemove] = useState(false);
     const [isLoadingEmbeddedPreview, setIsLoadingEmbeddedPreview] = useState(false);
     const [embeddedPreviewUrl, setEmbeddedPreviewUrl] = useState<string | null>(null);
     const [embeddedCandidates, setEmbeddedCandidates] = useState<EmbeddedCoverCandidate[]>([]);
@@ -126,6 +129,30 @@ export function BookEditView({
 
     const handleCancel = () => {
         setView(previousView === "edit" ? "library-books" : previousView);
+    };
+
+    const handleQueueRemove = async () => {
+        if (!selectedItemId || !isDesktop) return;
+        const { confirm } = await import("@tauri-apps/plugin-dialog");
+        const ok = await confirm(
+            "Dit verwijdert het boek uit je library en voegt delete changes toe in Changes. Bestanden worden pas echt verwijderd na Apply in Changes.",
+            {
+                title: "Verwijder uit library",
+                kind: "warning",
+            }
+        );
+        if (!ok) return;
+
+        setIsQueueingRemove(true);
+        setError(null);
+        try {
+            await onQueueRemoveItem(selectedItemId);
+        } catch (err) {
+            console.error("Failed to queue remove", err);
+            setError(err instanceof Error ? err.message : String(err));
+        } finally {
+            setIsQueueingRemove(false);
+        }
     };
 
     const titleCleanupPreview = cleanupMetadataTitle(formData);
@@ -260,7 +287,17 @@ export function BookEditView({
                     </div>
                 </div>
                 <div className="flex gap-2 items-center">
-                    <Button variant="outline" size="sm" onClick={handleCancel} disabled={isSaving || isUploadingCover} className="h-9 px-4">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleQueueRemove}
+                        disabled={isSaving || isUploadingCover || isQueueingRemove}
+                        className="h-9 px-4 border-red-300 text-red-600 hover:bg-red-50"
+                    >
+                        {isQueueingRemove ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
+                        Remove from Library
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={handleCancel} disabled={isSaving || isUploadingCover || isQueueingRemove} className="h-9 px-4">
                         <X size={14} className="mr-2" />
                         Cancel
                     </Button>
@@ -268,7 +305,7 @@ export function BookEditView({
                         size="sm"
                         className="h-9 px-4 bg-app-accent hover:bg-app-accent-hover text-white shadow-soft"
                         onClick={handleSave}
-                        disabled={isSaving || isUploadingCover}
+                        disabled={isSaving || isUploadingCover || isQueueingRemove}
                     >
                         {isSaving ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Check size={14} className="mr-2" />}
                         Save Changes
@@ -549,6 +586,12 @@ export function BookEditView({
 
                         <div className="mt-4 flex-1 overflow-y-auto">
                             {matchLoading ? (
+                                <div className="mb-3 flex items-center gap-2 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2.5 py-2 text-xs text-[var(--app-ink-muted)]">
+                                    <Loader2 size={14} className="animate-spin" />
+                                    <span>Searching metadata sources...</span>
+                                </div>
+                            ) : null}
+                            {matchLoading ? (
                                 <div className="flex items-center justify-center gap-2 py-6 text-sm text-[var(--app-ink-muted)]">
                                     <Loader2 size={16} className="animate-spin" />
                                     Searching...
@@ -602,9 +645,16 @@ export function BookEditView({
                                                     size="sm"
                                                     onClick={() => onMatchApply(candidate)}
                                                     className="w-full mt-2 text-xs"
-                                                    disabled={!isDesktop || matchApplyingId === candidate.id}
+                                                    disabled={!isDesktop || matchLoading || matchApplyingId === candidate.id}
                                                 >
-                                                    {matchApplyingId === candidate.id ? "Applying..." : "Apply This"}
+                                                    {matchApplyingId === candidate.id ? (
+                                                        <span className="flex items-center gap-2">
+                                                            <Loader2 size={12} className="animate-spin" />
+                                                            Applying...
+                                                        </span>
+                                                    ) : (
+                                                        "Apply This"
+                                                    )}
                                                 </Button>
                                             </div>
                                         );

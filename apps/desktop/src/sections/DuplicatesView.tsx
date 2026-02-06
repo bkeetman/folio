@@ -1,6 +1,6 @@
-import type { DuplicateGroup } from "../types/library";
 import { useMemo, useState } from "react";
 import { Button } from "../components/ui";
+import type { DuplicateGroup } from "../types/library";
 
 type DuplicatesViewProps = {
   hashGroups: DuplicateGroup[];
@@ -55,18 +55,22 @@ export function DuplicatesView({
   const [mode, setMode] = useState<"hash" | "title" | "fuzzy">("hash");
   const [hideTitleMismatches, setHideTitleMismatches] = useState(true);
   const [ignoredGroupIds, setIgnoredGroupIds] = useState<Set<string>>(new Set());
-  const baseGroups = mode === "hash" ? hashGroups : mode === "title" ? titleGroups : fuzzyGroups;
-  const filteredGroups = useMemo(() => {
-    if (mode !== "hash" || !hideTitleMismatches) return baseGroups;
-    return baseGroups.filter((group) => {
+  const hashReviewableGroups = useMemo(() => {
+    return hashGroups.filter((group) => {
       const titles = group.file_titles.length ? group.file_titles : [group.title];
       const normalized = titles.map((title) => title.trim().toLowerCase());
       return new Set(normalized).size <= 1;
     });
-  }, [baseGroups, hideTitleMismatches, mode]);
+  }, [hashGroups]);
+  const baseGroups = mode === "hash" ? hashGroups : mode === "title" ? titleGroups : fuzzyGroups;
+  const filteredGroups = useMemo(() => {
+    if (mode !== "hash" || !hideTitleMismatches) return baseGroups;
+    return hashReviewableGroups;
+  }, [baseGroups, hashReviewableGroups, hideTitleMismatches, mode]);
   const visibleGroups = filteredGroups.filter((group) => !ignoredGroupIds.has(group.id));
   const selectedCount = visibleGroups.filter((group) => duplicateKeepSelection[group.id]).length;
   const ignoredInModeCount = filteredGroups.length - visibleGroups.length;
+  const openActionCount = hashReviewableGroups.length + titleGroups.length + fuzzyGroups.length;
 
   const formatBytes = (value: number) => {
     if (!value) return "—";
@@ -87,6 +91,17 @@ export function DuplicatesView({
   return (
     <section className="flex flex-col gap-4">
       <div className="text-xs text-[var(--app-ink-muted)]">{helperText}</div>
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--app-ink-muted)]">
+        <CounterPill
+          label="Hash"
+          value={hashReviewableGroups.length}
+          tone="high"
+          suffix={hashGroups.length > hashReviewableGroups.length ? `/${hashGroups.length}` : undefined}
+        />
+        <CounterPill label="Title + Author" value={titleGroups.length} tone="medium" />
+        <CounterPill label="Fuzzy" value={fuzzyGroups.length} tone="low" />
+        <span className="ml-1">Open actions: {openActionCount}</span>
+      </div>
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] p-1">
           <Button
@@ -141,6 +156,11 @@ export function DuplicatesView({
             Hide title mismatches
           </label>
         ) : null}
+        {mode === "hash" && hideTitleMismatches && hashGroups.length > hashReviewableGroups.length ? (
+          <span className="text-xs text-[var(--app-ink-muted)]">
+            Showing {hashReviewableGroups.length} of {hashGroups.length} hash groups
+          </span>
+        ) : null}
         <span className="text-xs text-[var(--app-ink-muted)]">
           Selected {selectedCount}/{visibleGroups.length}
         </span>
@@ -167,84 +187,84 @@ export function DuplicatesView({
               key={group.id}
               className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 rounded-md border border-[var(--app-border)] bg-white/70 p-3"
             >
-            <div className="min-w-0">
-              <div className="text-[13px] font-semibold">{group.title}</div>
-              <div className="text-xs text-[var(--app-ink-muted)]">
-                {group.files.length} matching files
-              </div>
-              <ul>
-                {group.files.map((file, index) => {
-                  const fileId = group.file_ids[index] ?? file;
-                  const filePath = group.file_paths[index] ?? file;
-                  const fileTitle = group.file_titles[index] ?? group.title;
-                  const fileAuthor = group.file_authors[index] ?? "";
-                  const fileSize = group.file_sizes[index] ?? 0;
-                  const isSelected = duplicateKeepSelection[group.id] === fileId;
-                  return (
-                    <li key={fileId} className="mt-2">
-                      <label className="flex cursor-pointer items-start gap-2 text-xs">
-                        <input
-                          type="radio"
-                          name={`duplicate-${group.id}`}
-                          value={fileId}
-                          checked={isSelected}
-                          onChange={() =>
-                            setDuplicateKeepSelection((prev) => ({
-                              ...prev,
-                              [group.id]: fileId,
-                            }))
-                          }
-                        />
-                        <span className="min-w-0">
-                          <span className="block text-[11px] font-semibold text-[var(--app-ink)]">
-                            {fileTitle}
-                          </span>
-                          {fileAuthor ? (
-                            <span className="block text-[10px] text-[var(--app-ink-muted)]">
-                              {fileAuthor}
+              <div className="min-w-0">
+                <div className="text-[13px] font-semibold">{group.title}</div>
+                <div className="text-xs text-[var(--app-ink-muted)]">
+                  {group.files.length} matching files
+                </div>
+                <ul>
+                  {group.files.map((file, index) => {
+                    const fileId = group.file_ids[index] ?? file;
+                    const filePath = group.file_paths[index] ?? file;
+                    const fileTitle = group.file_titles[index] ?? group.title;
+                    const fileAuthor = group.file_authors[index] ?? "";
+                    const fileSize = group.file_sizes[index] ?? 0;
+                    const isSelected = duplicateKeepSelection[group.id] === fileId;
+                    return (
+                      <li key={fileId} className="mt-2">
+                        <label className="flex cursor-pointer items-start gap-2 text-xs">
+                          <input
+                            type="radio"
+                            name={`duplicate-${group.id}`}
+                            value={fileId}
+                            checked={isSelected}
+                            onChange={() =>
+                              setDuplicateKeepSelection((prev) => ({
+                                ...prev,
+                                [group.id]: fileId,
+                              }))
+                            }
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-[11px] font-semibold text-[var(--app-ink)]">
+                              {fileTitle}
                             </span>
-                          ) : null}
-                          <span className="mt-1 block text-[10px] text-[var(--app-ink-muted)] break-all">
-                            {file}
+                            {fileAuthor ? (
+                              <span className="block text-[10px] text-[var(--app-ink-muted)]">
+                                {fileAuthor}
+                              </span>
+                            ) : null}
+                            <span className="mt-1 block text-[10px] text-[var(--app-ink-muted)] break-all">
+                              {file}
+                            </span>
+                            <span className="block text-[10px] text-[var(--app-ink-muted)] break-all">
+                              {trimPrefix(filePath, prefix)}
+                            </span>
                           </span>
-                          <span className="block text-[10px] text-[var(--app-ink-muted)] break-all">
-                            {trimPrefix(filePath, prefix)}
+                          <span className="text-[10px] text-[var(--app-ink-muted)] whitespace-nowrap">
+                            {formatBytes(fileSize)}
+                            {group.kind === "hash" ? ` · ${hashSuffix(group.id)}` : ""}
                           </span>
-                        </span>
-                        <span className="text-[10px] text-[var(--app-ink-muted)] whitespace-nowrap">
-                          {formatBytes(fileSize)}
-                          {group.kind === "hash" ? ` · ${hashSuffix(group.id)}` : ""}
-                        </span>
-                      </label>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                onClick={() =>
-                  handleResolveDuplicate(group, duplicateKeepSelection[group.id])
-                }
-                disabled={!duplicateKeepSelection[group.id]}
-              >
-                Resolve
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setIgnoredGroupIds((prev) => new Set([...prev, group.id]));
-                  setDuplicateKeepSelection((prev) => {
-                    const next = { ...prev };
-                    delete next[group.id];
-                    return next;
-                  });
-                }}
-              >
-                Not duplicate
-              </Button>
-            </div>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setIgnoredGroupIds((prev) => new Set([...prev, group.id]));
+                    setDuplicateKeepSelection((prev) => {
+                      const next = { ...prev };
+                      delete next[group.id];
+                      return next;
+                    });
+                  }}
+                >
+                  Not duplicate
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() =>
+                    handleResolveDuplicate(group, duplicateKeepSelection[group.id])
+                  }
+                  disabled={!duplicateKeepSelection[group.id]}
+                >
+                  Resolve
+                </Button>
+              </div>
             </div>
           );
         })}
@@ -255,5 +275,30 @@ export function DuplicatesView({
         ) : null}
       </div>
     </section>
+  );
+}
+
+function CounterPill({
+  label,
+  value,
+  tone,
+  suffix,
+}: {
+  label: string;
+  value: number;
+  tone: "high" | "medium" | "low";
+  suffix?: string;
+}) {
+  const toneClass =
+    tone === "high"
+      ? "bg-emerald-500/10 text-emerald-700"
+      : tone === "medium"
+        ? "bg-amber-500/10 text-amber-700"
+        : "bg-stone-500/10 text-stone-700";
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium ${toneClass}`}>
+      <span>{label}</span>
+      <span>{value}{suffix ?? ""}</span>
+    </span>
   );
 }

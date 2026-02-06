@@ -1,13 +1,13 @@
-import { useState, useMemo } from "react";
-import { ArrowLeft, FileUp, FolderUp, Loader2, AlertCircle } from "lucide-react";
-import { Button } from "../components/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { AlertCircle, ArrowLeft, FileUp, FolderUp, Loader2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Button } from "../components/ui";
 import type {
   ImportCandidate,
-  ImportRequest,
   ImportDuplicate,
+  ImportRequest,
   ImportScanResult,
   OperationProgress,
 } from "../types/library";
@@ -601,11 +601,11 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
         </p>
       </div>
       <div className="flex gap-3">
-        <Button variant="ghost" onClick={handleBack}>
-          Try Again
-        </Button>
         <Button variant="outline" onClick={onCancel}>
           Cancel
+        </Button>
+        <Button variant="primary" onClick={handleBack}>
+          Try Again
         </Button>
       </div>
     </div>

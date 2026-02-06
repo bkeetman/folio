@@ -28,6 +28,8 @@ type SidebarProps = {
   pendingChangesCount: number;
   duplicateCount: number;
   missingFilesCount: number;
+  fixActionCount: number;
+  ereaderPendingCount: number;
   handleClearLibrary: () => void;
   appVersion: string | null;
   ereaderConnected: boolean;
@@ -42,6 +44,8 @@ export function Sidebar({
   pendingChangesCount,
   duplicateCount,
   missingFilesCount,
+  fixActionCount,
+  ereaderPendingCount,
   handleClearLibrary,
   appVersion,
   ereaderConnected,
@@ -99,12 +103,19 @@ export function Sidebar({
           </SidebarItem>
           <SidebarItem active={view === "ereader"} onClick={() => setView("ereader")}>
             <HardDrive size={16} />
-            <span className="flex items-center gap-1.5">
-              eReader
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${ereaderConnected ? "bg-emerald-500" : "bg-stone-300"}`}
-                title={ereaderConnected ? "Device connected" : "No device connected"}
-              />
+            <span className="flex flex-1 items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5">
+                eReader
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${ereaderConnected ? "bg-emerald-500" : "bg-stone-300"}`}
+                  title={ereaderConnected ? "Device connected" : "No device connected"}
+                />
+              </span>
+              {ereaderPendingCount > 0 ? (
+                <span className="min-w-[20px] rounded-full bg-app-accent/10 px-2 py-0.5 text-[10px] font-semibold text-app-accent">
+                  {ereaderPendingCount}
+                </span>
+              ) : null}
             </span>
           </SidebarItem>
         </nav>
@@ -141,7 +152,14 @@ export function Sidebar({
           </SidebarItem>
           <SidebarItem active={view === "fix"} onClick={() => setView("fix")}>
             <Sparkles size={16} />
-            Fix Metadata
+            <span className="flex flex-1 items-center justify-between gap-2">
+              <span>Fix Metadata</span>
+              {fixActionCount > 0 ? (
+                <span className="min-w-[20px] rounded-full bg-app-accent/10 px-2 py-0.5 text-[10px] font-semibold text-app-accent">
+                  {fixActionCount}
+                </span>
+              ) : null}
+            </span>
           </SidebarItem>
           <SidebarItem active={view === "changes"} onClick={() => setView("changes")}>
             <FileClock size={16} />
