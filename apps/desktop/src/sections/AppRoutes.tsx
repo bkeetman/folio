@@ -25,6 +25,7 @@ import type {
   LibrarySort,
   MissingFileItem,
   OperationProgress,
+  ImportRequest,
   OrganizerLog,
   OrganizePlan,
   PendingChange,
@@ -61,12 +62,11 @@ type AppRoutesProps = {
   setSelectedAuthorNames: Dispatch<SetStateAction<string[]>>;
   selectedSeries: string[];
   setSelectedSeries: Dispatch<SetStateAction<string[]>>;
-  onEnrichAll: () => void | Promise<void>;
+  onEnrichAll: (itemIds?: string[]) => void | Promise<void>;
   onCancelEnrich: () => void | Promise<void>;
   enriching: boolean;
   enrichingItems: Set<string>;
   enrichProgress: OperationProgress | null;
-  enrichableCount: number;
   uniqueAuthors: Array<{ name: string; bookCount: number }>;
   uniqueSeries: Array<{ name: string; bookCount: number }>;
   inbox: InboxItem[];
@@ -139,10 +139,12 @@ type AppRoutesProps = {
   organizing: boolean;
   organizeLog: OrganizerLog | null;
   onImportCancel: () => void;
-  onImportComplete: () => void;
+  onImportStart: (request: ImportRequest) => Promise<void>;
   onChooseRoot: () => Promise<void>;
   onNormalizeDescriptions: () => Promise<void>;
   normalizingDescriptions: boolean;
+  onBatchFixTitles: () => Promise<void>;
+  batchFixingTitles: boolean;
   missingFiles: MissingFileItem[];
   onRelinkMissing: (fileId: string) => void | Promise<void>;
   onRemoveMissing: (fileId: string) => void | Promise<void>;
@@ -214,7 +216,6 @@ export function AppRoutes(props: AppRoutesProps) {
     enriching,
     enrichingItems,
     enrichProgress,
-    enrichableCount,
     uniqueAuthors,
     uniqueSeries,
     inbox,
@@ -287,10 +288,12 @@ export function AppRoutes(props: AppRoutesProps) {
     organizing,
     organizeLog,
     onImportCancel,
-    onImportComplete,
+    onImportStart,
     onChooseRoot,
     onNormalizeDescriptions,
     normalizingDescriptions,
+    onBatchFixTitles,
+    batchFixingTitles,
     missingFiles,
     onRelinkMissing,
     onRemoveMissing,
@@ -333,7 +336,7 @@ export function AppRoutes(props: AppRoutesProps) {
 
   return (
     <section className="flex flex-col gap-4">
-      {(view === "library" || view === "library-books") && !libraryReady && isDesktop ? (
+      {(view === "library" || view === "library-books") && !libraryReady ? (
         <div className="flex flex-col items-center justify-center gap-4 py-16">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--app-accent)] border-t-transparent" />
           <div className="text-sm text-[var(--app-ink-muted)]">Loading library...</div>
@@ -362,12 +365,7 @@ export function AppRoutes(props: AppRoutesProps) {
           setSelectedAuthorNames={setSelectedAuthorNames}
           selectedSeries={selectedSeries}
           setSelectedSeries={setSelectedSeries}
-          onEnrichAll={() => void onEnrichAll()}
-          onCancelEnrich={() => void onCancelEnrich()}
-          enriching={enriching}
           enrichingItems={enrichingItems}
-          enrichProgress={enrichProgress}
-          enrichableCount={enrichableCount}
         />
       ) : null}
 
@@ -439,6 +437,10 @@ export function AppRoutes(props: AppRoutesProps) {
           saving={fixSaving}
           getCandidateCoverUrl={getCandidateCoverUrl}
           isDesktop={isDesktop}
+          onEnrichAll={() => void onEnrichAll(allFixItems.map((item) => item.id))}
+          onCancelEnrich={() => void onCancelEnrich()}
+          enriching={enriching}
+          enrichProgress={enrichProgress}
         />
       ) : null}
 
@@ -488,7 +490,7 @@ export function AppRoutes(props: AppRoutesProps) {
       {view === "import" ? (
         <ImportView
           onCancel={onImportCancel}
-          onImportComplete={onImportComplete}
+          onImportStart={onImportStart}
           libraryRoot={organizeRoot}
           template={organizeTemplate}
         />
@@ -500,6 +502,8 @@ export function AppRoutes(props: AppRoutesProps) {
           onChooseRoot={onChooseRoot}
           onNormalizeDescriptions={onNormalizeDescriptions}
           normalizingDescriptions={normalizingDescriptions}
+          onBatchFixTitles={onBatchFixTitles}
+          batchFixingTitles={batchFixingTitles}
         />
       ) : null}
 

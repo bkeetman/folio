@@ -314,8 +314,22 @@ export type ImportCandidate = {
 export type ImportDuplicate = ImportCandidate & {
   matchedItemId: string;
   matchedItemTitle: string;
-  matchType: "hash" | "metadata";
+  matchType: "hash" | "title_author" | "isbn" | "title_fuzzy" | "filename_author";
   existingFormats: string[];
+};
+
+export type ImportCandidateInput = ImportCandidate & {
+  matchedItemId: string | null;
+  matchType: string | null;
+};
+
+export type ImportRequest = {
+  mode: "move" | "copy";
+  libraryRoot: string;
+  template: string;
+  newBookIds: string[];
+  duplicateActions: Record<string, string>;
+  candidates: ImportCandidateInput[];
 };
 
 export type ImportScanResult = {

@@ -1,4 +1,5 @@
 use ab_glyph::{FontRef, PxScale};
+use chrono::Datelike;
 use image::{ImageBuffer, Rgba, ImageEncoder};
 use image::codecs::png::PngEncoder;
 use imageproc::drawing::draw_text_mut;
@@ -348,6 +349,18 @@ struct EmbeddedCoverCandidate {
 #[serde(rename_all = "camelCase")]
 struct DescriptionCleanupResult {
   items_updated: i64,
+  files_queued: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TitleCleanupBatchResult {
+  items_updated: i64,
+  titles_cleaned: i64,
+  years_inferred: i64,
+  authors_inferred: i64,
+  isbns_normalized: i64,
+  isbns_removed: i64,
   files_queued: i64,
 }
 
@@ -2033,12 +2046,13 @@ fn search_candidates(
 // defined earlier in the file for consistency across all operations.
 
 #[tauri::command]
-fn enrich_all(app: tauri::AppHandle) -> Result<(), String> {
+fn enrich_all(app: tauri::AppHandle, item_ids: Option<Vec<String>>) -> Result<(), String> {
   // Reset cancellation flag
   ENRICH_CANCELLED.store(false, Ordering::SeqCst);
+  let target_item_ids = item_ids.clone();
   // Spawn the enrichment in a background thread so UI stays responsive
   std::thread::spawn(move || {
-    let _ = enrich_all_sync(&app);
+    let _ = enrich_all_sync(&app, target_item_ids);
   });
   Ok(())
 }
@@ -2052,7 +2066,7 @@ fn cancel_enrich() -> Result<(), String> {
 
 // EnrichStats is replaced by OperationStats for consistency
 
-fn enrich_all_sync(app: &tauri::AppHandle) -> Result<OperationStats, String> {
+fn enrich_all_sync(app: &tauri::AppHandle, item_ids: Option<Vec<String>>) -> Result<OperationStats, String> {
   use tauri::Emitter;
 
   let conn = open_db(app)?;
@@ -2079,7 +2093,7 @@ fn enrich_all_sync(app: &tauri::AppHandle) -> Result<OperationStats, String> {
     )
     .map_err(|err| err.to_string())?;
 
-  let items: Vec<(String, Option<String>, Option<String>, Option<String>)> = stmt
+  let mut items: Vec<(String, Option<String>, Option<String>, Option<String>)> = stmt
     .query_map(params![], |row| {
       Ok((
         row.get::<_, String>(0)?,
@@ -2091,6 +2105,11 @@ fn enrich_all_sync(app: &tauri::AppHandle) -> Result<OperationStats, String> {
     .map_err(|err| err.to_string())?
     .filter_map(|r| r.ok())
     .collect();
+
+  if let Some(target_ids) = item_ids {
+    let allowed: std::collections::HashSet<String> = target_ids.into_iter().collect();
+    items.retain(|(item_id, _, _, _)| allowed.contains(item_id));
+  }
 
   let total = items.len();
   let mut stats = OperationStats {
@@ -3208,6 +3227,378 @@ fn normalize_item_descriptions(app: tauri::AppHandle) -> Result<DescriptionClean
   })
 }
 
+fn normalize_ws(value: &str) -> String {
+  value.split_whitespace().collect::<Vec<_>>().join(" ").trim().to_string()
+}
+
+fn parse_year_from_title_suffix(title: &str) -> Option<i64> {
+  let patterns = [
+    r"\((19|20)\d{2}\)\s*$",
+    r"(?:\s+|[-:–—]\s*)(19|20)\d{2}\s*$",
+  ];
+  for pattern in patterns {
+    let re = Regex::new(pattern).expect("valid title year regex");
+    if let Some(mat) = re.find(title) {
+      let year_re = Regex::new(r"(19|20)\d{2}").expect("valid year regex");
+      if let Some(year_match) = year_re.find(mat.as_str()) {
+        let year = year_match.as_str().parse::<i64>().ok()?;
+        let max_year = chrono::Utc::now().year() as i64 + 1;
+        if (1400..=max_year).contains(&year) {
+          return Some(year);
+        }
+      }
+    }
+  }
+  None
+}
+
+fn strip_year_noise_from_title(title: &str) -> String {
+  let mut cleaned = title.to_string();
+  let patterns = [
+    r"\s*\((19|20)\d{2}\)\s*$",
+    r"\s*[-:–—]\s*(19|20)\d{2}\s*$",
+    r"\s+(19|20)\d{2}\s*$",
+    r"\s*\(\s*\)\s*$",
+  ];
+  for pattern in patterns {
+    let re = Regex::new(pattern).expect("valid strip year regex");
+    cleaned = re.replace(&cleaned, "").to_string();
+  }
+  normalize_ws(&cleaned)
+}
+
+fn strip_unknown_noise_from_title(title: &str) -> String {
+  let unknown_re = Regex::new(r"(?i)\s*[\(\[\{]\s*unknown\s*[\)\]\}]\s*").expect("valid unknown token regex");
+  normalize_ws(&unknown_re.replace_all(title, " ").to_string())
+}
+
+fn strip_dangling_separators(title: &str) -> String {
+  let start_re = Regex::new(r"^\s*[-:–—|]+\s*").expect("valid separator regex");
+  let end_re = Regex::new(r"\s*[-:–—|]+\s*$").expect("valid separator regex");
+  let without_start = start_re.replace(title, "").to_string();
+  normalize_ws(&end_re.replace(&without_start, "").to_string())
+}
+
+fn cleanup_item_isbn_identifiers(
+  conn: &Connection,
+  item_id: &str,
+  now: i64,
+) -> Result<(Option<String>, bool, bool), String> {
+  let mut stmt = conn
+    .prepare(
+      "SELECT type, value FROM identifiers \
+       WHERE item_id = ?1 AND type IN ('ISBN10','ISBN13','OTHER','isbn10','isbn13','other')",
+    )
+    .map_err(|err| err.to_string())?;
+  let rows = stmt
+    .query_map(params![item_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+    .map_err(|err| err.to_string())?;
+
+  let mut existing: Vec<(String, String)> = Vec::new();
+  for row in rows {
+    existing.push(row.map_err(|err| err.to_string())?);
+  }
+  if existing.is_empty() {
+    return Ok((None, false, false));
+  }
+
+  let mut normalized_candidates: Vec<String> = existing
+    .iter()
+    .filter_map(|(_, value)| normalize_isbn(value))
+    .collect();
+  normalized_candidates.sort();
+  normalized_candidates.dedup();
+
+  let kept = normalized_candidates
+    .iter()
+    .find(|value| value.len() == 13)
+    .cloned()
+    .or_else(|| normalized_candidates.first().cloned());
+
+  let canonical_unchanged = if let Some(ref kept_value) = kept {
+    if existing.len() != 1 {
+      false
+    } else {
+      let (existing_type, existing_value) = &existing[0];
+      let expected_type = if kept_value.len() == 13 { "ISBN13" } else { "ISBN10" };
+      existing_type.eq_ignore_ascii_case(expected_type)
+        && normalize_isbn(existing_value).as_deref() == Some(kept_value.as_str())
+    }
+  } else {
+    false
+  };
+
+  conn
+    .execute(
+      "DELETE FROM identifiers WHERE item_id = ?1 AND type IN ('ISBN10','ISBN13','OTHER','isbn10','isbn13','other')",
+      params![item_id],
+    )
+    .map_err(|err| err.to_string())?;
+
+  if let Some(ref kept_value) = kept {
+    let isbn_type = if kept_value.len() == 13 { "ISBN13" } else { "ISBN10" };
+    conn
+      .execute(
+        "INSERT INTO identifiers (id, item_id, type, value, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![Uuid::new_v4().to_string(), item_id, isbn_type, kept_value, now],
+      )
+      .map_err(|err| err.to_string())?;
+  }
+
+  let normalized = kept.is_some() && !canonical_unchanged;
+  let removed = kept.is_none();
+  Ok((kept, normalized, removed))
+}
+
+fn normalize_for_compare(value: &str) -> String {
+  normalize_ws(value).to_lowercase()
+}
+
+fn author_matches(candidate: &str, author: &str) -> bool {
+  normalize_for_compare(candidate) == normalize_for_compare(author)
+}
+
+fn strip_known_author_prefix(mut title: String, authors: &[String]) -> String {
+  let split_re = Regex::new(r"^\s*(.+?)\s+(?:-|–|—|:)\s+(.+)$").expect("valid author prefix regex");
+  loop {
+    let captures = match split_re.captures(&title) {
+      Some(value) => value,
+      None => break,
+    };
+    let prefix = captures.get(1).map(|m| m.as_str().trim()).unwrap_or("");
+    let rest = captures.get(2).map(|m| m.as_str().trim()).unwrap_or("");
+    let is_author_prefix = authors.iter().any(|author| author_matches(prefix, author));
+    if !is_author_prefix || rest.is_empty() {
+      break;
+    }
+    title = rest.to_string();
+  }
+  normalize_ws(&title)
+}
+
+fn is_plausible_author_prefix(prefix: &str) -> bool {
+  let cleaned = normalize_ws(prefix);
+  if cleaned.is_empty() || cleaned.chars().any(|ch| ch.is_ascii_digit()) {
+    return false;
+  }
+
+  let rejected_tokens = [
+    "journal",
+    "notizbuch",
+    "babytagebuch",
+    "baby",
+    "notebook",
+    "notitieboek",
+    "boek",
+    "druck",
+    "druk",
+    "jahr",
+    "jaar",
+  ];
+  let lower = cleaned.to_lowercase();
+  if rejected_tokens.iter().any(|token| lower.contains(token)) {
+    return false;
+  }
+
+  let particles = [
+    "de", "den", "der", "van", "von", "la", "le", "da", "di", "du", "del",
+  ];
+  let words: Vec<&str> = cleaned.split_whitespace().collect();
+  if words.len() < 2 || words.len() > 5 {
+    return false;
+  }
+
+  words.iter().all(|word| {
+    let token = word.trim_matches(|ch: char| ch == '.' || ch == '\'' || ch == '-');
+    if token.is_empty() {
+      return false;
+    }
+    let token_lower = token.to_lowercase();
+    if particles.contains(&token_lower.as_str()) {
+      return true;
+    }
+    let mut chars = token.chars();
+    let first = match chars.next() {
+      Some(ch) => ch,
+      None => return false,
+    };
+    first.is_uppercase() && chars.all(|ch| ch.is_alphabetic() || ch == '.' || ch == '\'' || ch == '-')
+  })
+}
+
+#[tauri::command]
+fn batch_cleanup_titles(app: tauri::AppHandle) -> Result<TitleCleanupBatchResult, String> {
+  let conn = open_db(&app)?;
+  let now = chrono::Utc::now().timestamp_millis();
+
+  let mut stmt = conn
+    .prepare(
+      "SELECT items.id, items.title, items.published_year, \
+       COALESCE(GROUP_CONCAT(DISTINCT authors.name), '') as authors \
+       FROM items \
+       LEFT JOIN item_authors ON item_authors.item_id = items.id \
+       LEFT JOIN authors ON authors.id = item_authors.author_id \
+       GROUP BY items.id",
+    )
+    .map_err(|err| err.to_string())?;
+
+  let rows = stmt
+    .query_map(params![], |row| {
+      Ok((
+        row.get::<_, String>(0)?,
+        row.get::<_, Option<String>>(1)?,
+        row.get::<_, Option<i64>>(2)?,
+        row.get::<_, String>(3)?,
+      ))
+    })
+    .map_err(|err| err.to_string())?;
+
+  let mut items_updated = 0i64;
+  let mut titles_cleaned = 0i64;
+  let mut years_inferred = 0i64;
+  let mut authors_inferred = 0i64;
+  let mut isbns_normalized = 0i64;
+  let mut isbns_removed = 0i64;
+  let mut files_queued = 0i64;
+
+  let split_re = Regex::new(r"^\s*(.+?)\s+(?:-|–|—|:)\s+(.+)$").expect("valid author split regex");
+
+  for row in rows {
+    let (item_id, raw_title, existing_year, raw_authors) = row.map_err(|err| err.to_string())?;
+    let original_title = normalize_ws(raw_title.as_deref().unwrap_or(""));
+
+    let existing_authors: Vec<String> = raw_authors
+      .split(',')
+      .map(|author| normalize_ws(author))
+      .filter(|author| !author.is_empty())
+      .collect();
+
+    let mut cleaned_title = original_title.clone();
+    if !cleaned_title.is_empty() {
+      cleaned_title = strip_known_author_prefix(cleaned_title, &existing_authors);
+    }
+    let mut inferred_author: Option<String> = None;
+    if existing_authors.is_empty() {
+      if let Some(captures) = split_re.captures(&cleaned_title) {
+        let prefix = captures.get(1).map(|m| normalize_ws(m.as_str())).unwrap_or_default();
+        let rest = captures.get(2).map(|m| normalize_ws(m.as_str())).unwrap_or_default();
+        if !rest.is_empty() && is_plausible_author_prefix(&prefix) {
+          inferred_author = Some(prefix);
+          cleaned_title = rest;
+        }
+      }
+    }
+
+    let inferred_year = if cleaned_title.is_empty() {
+      existing_year
+    } else {
+      existing_year.or_else(|| parse_year_from_title_suffix(&cleaned_title))
+    };
+    if !cleaned_title.is_empty() {
+      cleaned_title = strip_year_noise_from_title(&cleaned_title);
+      cleaned_title = strip_unknown_noise_from_title(&cleaned_title);
+      cleaned_title = strip_dangling_separators(&cleaned_title);
+      if cleaned_title.is_empty() {
+        cleaned_title = original_title.clone();
+      }
+    }
+
+    let title_changed = cleaned_title != original_title;
+    let year_changed = existing_year != inferred_year;
+    let author_changed = inferred_author.is_some();
+    let (isbn_for_epub, isbn_normalized, isbn_removed) =
+      cleanup_item_isbn_identifiers(&conn, &item_id, now)?;
+    if isbn_normalized {
+      isbns_normalized += 1;
+      insert_field_source_with_source(&conn, &item_id, "isbn", "cleanup", 0.9, now)?;
+    }
+    if isbn_removed {
+      isbns_removed += 1;
+    }
+    let isbn_changed = isbn_normalized || isbn_removed;
+    if !title_changed && !year_changed && !author_changed && !isbn_changed {
+      continue;
+    }
+
+    if !cleaned_title.is_empty() || year_changed {
+      conn.execute(
+        "UPDATE items SET title = ?1, published_year = ?2, updated_at = ?3 WHERE id = ?4",
+        params![if cleaned_title.is_empty() { raw_title } else { Some(cleaned_title.clone()) }, inferred_year, now, item_id],
+      )
+      .map_err(|err| err.to_string())?;
+    }
+
+    if title_changed {
+      titles_cleaned += 1;
+      insert_field_source_with_source(&conn, &item_id, "title", "cleanup", 0.95, now)?;
+    }
+    if year_changed && inferred_year.is_some() {
+      years_inferred += 1;
+      insert_field_source_with_source(&conn, &item_id, "published_year", "cleanup", 0.9, now)?;
+    }
+
+    if let Some(author_name) = inferred_author.clone() {
+      let author_id: Option<String> = conn
+        .query_row(
+          "SELECT id FROM authors WHERE name = ?1",
+          params![author_name],
+          |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+      let resolved_author_id = match author_id {
+        Some(id) => id,
+        None => {
+          let new_id = Uuid::new_v4().to_string();
+          conn.execute(
+            "INSERT INTO authors (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+            params![new_id, author_name, now, now],
+          )
+          .map_err(|err| err.to_string())?;
+          new_id
+        }
+      };
+      conn.execute(
+        "INSERT OR IGNORE INTO item_authors (item_id, author_id) VALUES (?1, ?2)",
+        params![item_id, resolved_author_id],
+      )
+      .map_err(|err| err.to_string())?;
+      authors_inferred += 1;
+      insert_field_source_with_source(&conn, &item_id, "authors", "cleanup", 0.85, now)?;
+    }
+
+    files_queued += queue_epub_changes_for_item(
+      &conn,
+      &item_id,
+      &EpubChangeSet {
+        title: if title_changed { Some(cleaned_title.clone()) } else { None },
+        author: inferred_author,
+        isbn: isbn_for_epub,
+        description: None,
+      },
+      now,
+    )?;
+
+    conn.execute(
+      "UPDATE issues SET resolved_at = ?1 WHERE item_id = ?2 AND type = 'missing_metadata' AND resolved_at IS NULL",
+      params![now, item_id],
+    )
+    .map_err(|err| err.to_string())?;
+
+    items_updated += 1;
+  }
+
+  Ok(TitleCleanupBatchResult {
+    items_updated,
+    titles_cleaned,
+    years_inferred,
+    authors_inferred,
+    isbns_normalized,
+    isbns_removed,
+    files_queued,
+  })
+}
+
 #[tauri::command]
 async fn scan_folder(app: tauri::AppHandle, root: String) -> Result<ScanStats, String> {
   let app_handle = app.clone();
@@ -3639,6 +4030,17 @@ async fn scan_for_import(app: tauri::AppHandle, paths: Vec<String>) -> Result<Im
 
 fn scan_for_import_sync(app: tauri::AppHandle, paths: Vec<String>) -> Result<ImportScanResult, String> {
   let conn = open_db(&app)?;
+  let progress_item_id = "import-scan".to_string();
+  let _ = app.emit(
+    "import-scan-progress",
+    OperationProgress {
+      item_id: progress_item_id.clone(),
+      status: "pending".to_string(),
+      message: Some("Collecting ebook files...".to_string()),
+      current: 0,
+      total: 0,
+    },
+  );
 
   // Collect all epub/pdf files from paths
   let mut files_to_scan: Vec<std::path::PathBuf> = Vec::new();
@@ -3669,6 +4071,17 @@ fn scan_for_import_sync(app: tauri::AppHandle, paths: Vec<String>) -> Result<Imp
       }
     }
   }
+  let total_files = files_to_scan.len();
+  let _ = app.emit(
+    "import-scan-progress",
+    OperationProgress {
+      item_id: progress_item_id.clone(),
+      status: "processing".to_string(),
+      message: Some(format!("Found {} files. Reading metadata...", total_files)),
+      current: 0,
+      total: total_files,
+    },
+  );
 
   // Query existing file hashes for duplicate detection
   let mut existing_hashes: std::collections::HashMap<String, (String, String)> =
@@ -3696,17 +4109,25 @@ fn scan_for_import_sync(app: tauri::AppHandle, paths: Vec<String>) -> Result<Imp
     }
   }
 
-  // Query existing title+author combos for metadata matching
-  let mut existing_title_authors: std::collections::HashMap<String, (String, String)> =
+  // Query existing title/author/isbn data for metadata matching.
+  let mut existing_isbns: std::collections::HashMap<String, (String, String)> =
+    std::collections::HashMap::new();
+  let mut existing_titles_exact: std::collections::HashMap<String, Vec<(String, String, Vec<String>)>> =
+    std::collections::HashMap::new();
+  let mut existing_titles_normalized: std::collections::HashMap<String, Vec<(String, String, Vec<String>)>> =
+    std::collections::HashMap::new();
+  let mut existing_filename_titles_normalized: std::collections::HashMap<String, Vec<(String, String, Vec<String>)>> =
     std::collections::HashMap::new();
   {
     let mut stmt = conn
       .prepare(
-        "SELECT i.id, COALESCE(LOWER(i.title), ''), \
-         COALESCE(GROUP_CONCAT(LOWER(a.name), '|'), '') \
+        "SELECT i.id, COALESCE(i.title, ''), \
+         COALESCE(GROUP_CONCAT(DISTINCT a.name), ''), \
+         COALESCE(GROUP_CONCAT(DISTINCT identifiers.value), '') \
          FROM items i \
          LEFT JOIN item_authors ia ON ia.item_id = i.id \
          LEFT JOIN authors a ON a.id = ia.author_id \
+         LEFT JOIN identifiers ON identifiers.item_id = i.id \
          GROUP BY i.id",
       )
       .map_err(|err| err.to_string())?;
@@ -3716,36 +4137,113 @@ fn scan_for_import_sync(app: tauri::AppHandle, paths: Vec<String>) -> Result<Imp
           row.get::<_, String>(0)?,
           row.get::<_, String>(1)?,
           row.get::<_, String>(2)?,
+          row.get::<_, String>(3)?,
         ))
       })
       .map_err(|err| err.to_string())?;
     for row in rows {
-      let (item_id, title, authors) = row.map_err(|err| err.to_string())?;
-      let title_clean = title.trim().to_lowercase();
-      if !title_clean.is_empty() {
-        // Key is "title||authors_sorted"
-        let mut author_list: Vec<&str> = authors.split('|').filter(|s| !s.is_empty()).collect();
-        author_list.sort();
-        let key = format!("{}||{}", title_clean, author_list.join("|"));
-        // Get item title for display
-        let display_title: String = conn
-          .query_row("SELECT COALESCE(title, '') FROM items WHERE id = ?1", params![item_id], |row| row.get(0))
-          .unwrap_or_default();
-        existing_title_authors.insert(key, (item_id, display_title));
+      let (item_id, title, authors, identifiers) = row.map_err(|err| err.to_string())?;
+      let display_title = title.trim().to_string();
+      let title_exact = title.trim().to_lowercase();
+
+      let author_list: Vec<String> = authors
+        .split(',')
+        .map(|author| author.trim())
+        .filter(|author| !author.is_empty())
+        .map(|author| author.to_string())
+        .collect();
+
+      if !title_exact.is_empty() {
+        let entry = (item_id.clone(), display_title.clone(), author_list.clone());
+        existing_titles_exact
+          .entry(title_exact)
+          .or_default()
+          .push(entry);
       }
+
+      let title_normalized = normalize_title_for_matching(&title);
+      if !title_normalized.is_empty() {
+        let entry = (item_id.clone(), display_title.clone(), author_list.clone());
+        existing_titles_normalized
+          .entry(title_normalized)
+          .or_default()
+          .push(entry);
+      }
+
+      for raw_identifier in identifiers.split(',') {
+        if let Some(normalized) = normalize_isbn(raw_identifier.trim()) {
+          existing_isbns.insert(normalized, (item_id.clone(), display_title.clone()));
+        }
+      }
+    }
+  }
+
+  // Also index normalized existing file names to catch duplicates with poor embedded metadata.
+  {
+    let mut stmt = conn
+      .prepare(
+        "SELECT i.id, COALESCE(i.title, ''), COALESCE(f.path, ''), \
+         COALESCE(GROUP_CONCAT(DISTINCT a.name), '') \
+         FROM files f \
+         JOIN items i ON i.id = f.item_id \
+         LEFT JOIN item_authors ia ON ia.item_id = i.id \
+         LEFT JOIN authors a ON a.id = ia.author_id \
+         WHERE f.status = 'active' \
+         GROUP BY f.id",
+      )
+      .map_err(|err| err.to_string())?;
+    let rows = stmt
+      .query_map(params![], |row| {
+        Ok((
+          row.get::<_, String>(0)?,
+          row.get::<_, String>(1)?,
+          row.get::<_, String>(2)?,
+          row.get::<_, String>(3)?,
+        ))
+      })
+      .map_err(|err| err.to_string())?;
+
+    for row in rows {
+      let (item_id, item_title, file_path, authors) = row.map_err(|err| err.to_string())?;
+      let normalized_filename = normalize_filename_title_for_matching(&file_path);
+      if normalized_filename.is_empty() {
+        continue;
+      }
+
+      let author_list: Vec<String> = authors
+        .split(',')
+        .map(|author| author.trim())
+        .filter(|author| !author.is_empty())
+        .map(|author| author.to_string())
+        .collect();
+
+      existing_filename_titles_normalized
+        .entry(normalized_filename)
+        .or_default()
+        .push((item_id, item_title, author_list));
     }
   }
 
   let mut new_books: Vec<ImportCandidate> = Vec::new();
   let mut duplicates: Vec<ImportDuplicate> = Vec::new();
 
-  for file_path in files_to_scan {
+  for (index, file_path) in files_to_scan.into_iter().enumerate() {
     let path_str = file_path.to_string_lossy().to_string();
     let filename = file_path
       .file_name()
       .and_then(|n| n.to_str())
       .unwrap_or("")
       .to_string();
+    let _ = app.emit(
+      "import-scan-progress",
+      OperationProgress {
+        item_id: progress_item_id.clone(),
+        status: "processing".to_string(),
+        message: Some(filename.clone()),
+        current: index + 1,
+        total: total_files,
+      },
+    );
     let extension = file_path
       .extension()
       .and_then(|e| e.to_str())
@@ -3798,34 +4296,129 @@ fn scan_for_import_sync(app: tauri::AppHandle, paths: Vec<String>) -> Result<Imp
       continue;
     }
 
-    // Check for title+author duplicate
-    let title_clean = metadata.title.as_ref().map(|t| t.trim().to_lowercase()).unwrap_or_default();
-    if !title_clean.is_empty() {
-      let mut author_list: Vec<String> = metadata.authors.iter().map(|a| a.trim().to_lowercase()).collect();
-      author_list.sort();
-      let key = format!("{}||{}", title_clean, author_list.join("|"));
+    // Check for ISBN duplicate.
+    if let Some((matched_item_id, matched_title)) = metadata
+      .identifiers
+      .iter()
+      .filter_map(|identifier| normalize_isbn(identifier))
+      .find_map(|isbn| existing_isbns.get(&isbn))
+    {
+      let existing_formats = get_item_formats(&conn, matched_item_id)?;
+      duplicates.push(ImportDuplicate {
+        id,
+        file_path: path_str,
+        filename,
+        title: metadata.title,
+        authors: metadata.authors,
+        published_year: metadata.published_year,
+        language: metadata.language,
+        identifiers: metadata.identifiers,
+        hash,
+        size_bytes,
+        extension,
+        has_cover,
+        matched_item_id: matched_item_id.clone(),
+        matched_item_title: matched_title.clone(),
+        match_type: "isbn".to_string(),
+        existing_formats,
+      });
+      continue;
+    }
 
-      if let Some((matched_item_id, matched_title)) = existing_title_authors.get(&key) {
-        let existing_formats = get_item_formats(&conn, matched_item_id)?;
-        duplicates.push(ImportDuplicate {
-          id,
-          file_path: path_str,
-          filename,
-          title: metadata.title,
-          authors: metadata.authors,
-          published_year: metadata.published_year,
-          language: metadata.language,
-          identifiers: metadata.identifiers,
-          hash,
-          size_bytes,
-          extension,
-          has_cover,
-          matched_item_id: matched_item_id.clone(),
-          matched_item_title: matched_title.clone(),
-          match_type: "title_author".to_string(),
-          existing_formats,
-        });
-        continue;
+    // Check for title+author duplicate (exact + normalized).
+    if let Some(title_value) = metadata.title.as_ref() {
+      let title_clean = title_value.trim().to_lowercase();
+      if !title_clean.is_empty() {
+        if let Some(entries) = existing_titles_exact.get(&title_clean) {
+          if let Some((matched_item_id, matched_title, _)) = entries
+            .iter()
+            .find(|(_, _, lib_authors)| authors_match_fuzzy(lib_authors, &metadata.authors))
+          {
+            let existing_formats = get_item_formats(&conn, matched_item_id)?;
+            duplicates.push(ImportDuplicate {
+              id,
+              file_path: path_str,
+              filename,
+              title: metadata.title,
+              authors: metadata.authors,
+              published_year: metadata.published_year,
+              language: metadata.language,
+              identifiers: metadata.identifiers,
+              hash,
+              size_bytes,
+              extension,
+              has_cover,
+              matched_item_id: matched_item_id.clone(),
+              matched_item_title: matched_title.clone(),
+              match_type: "title_author".to_string(),
+              existing_formats,
+            });
+            continue;
+          }
+        }
+      }
+
+      let normalized_title = normalize_title_for_matching(title_value);
+      if !normalized_title.is_empty() {
+        if let Some(entries) = existing_titles_normalized.get(&normalized_title) {
+          if let Some((matched_item_id, matched_title, _)) = entries
+            .iter()
+            .find(|(_, _, lib_authors)| authors_match_fuzzy(lib_authors, &metadata.authors))
+          {
+            let existing_formats = get_item_formats(&conn, matched_item_id)?;
+            duplicates.push(ImportDuplicate {
+              id,
+              file_path: path_str,
+              filename,
+              title: metadata.title,
+              authors: metadata.authors,
+              published_year: metadata.published_year,
+              language: metadata.language,
+              identifiers: metadata.identifiers,
+              hash,
+              size_bytes,
+              extension,
+              has_cover,
+              matched_item_id: matched_item_id.clone(),
+              matched_item_title: matched_title.clone(),
+              match_type: "title_fuzzy".to_string(),
+              existing_formats,
+            });
+            continue;
+          }
+        }
+      }
+    }
+
+    // Check for filename+author duplicate when metadata title is missing/noisy.
+    let normalized_file_title = normalize_filename_title_for_matching(&path_str);
+    if !normalized_file_title.is_empty() {
+      if let Some(entries) = existing_filename_titles_normalized.get(&normalized_file_title) {
+        if let Some((matched_item_id, matched_title, _)) = entries
+          .iter()
+          .find(|(_, _, lib_authors)| authors_match_fuzzy(lib_authors, &metadata.authors))
+        {
+          let existing_formats = get_item_formats(&conn, matched_item_id)?;
+          duplicates.push(ImportDuplicate {
+            id,
+            file_path: path_str,
+            filename,
+            title: metadata.title,
+            authors: metadata.authors,
+            published_year: metadata.published_year,
+            language: metadata.language,
+            identifiers: metadata.identifiers,
+            hash,
+            size_bytes,
+            extension,
+            has_cover,
+            matched_item_id: matched_item_id.clone(),
+            matched_item_title: matched_title.clone(),
+            match_type: "filename_author".to_string(),
+            existing_formats,
+          });
+          continue;
+        }
       }
     }
 
@@ -3845,6 +4438,20 @@ fn scan_for_import_sync(app: tauri::AppHandle, paths: Vec<String>) -> Result<Imp
       has_cover,
     });
   }
+  let _ = app.emit(
+    "import-scan-progress",
+    OperationProgress {
+      item_id: progress_item_id,
+      status: "done".to_string(),
+      message: Some(format!(
+        "Scan complete: {} new, {} duplicates",
+        new_books.len(),
+        duplicates.len()
+      )),
+      current: total_files,
+      total: total_files,
+    },
+  );
 
   Ok(ImportScanResult {
     new_books,
@@ -3875,24 +4482,24 @@ struct ImportMetadata {
   identifiers: Vec<String>,
 }
 
-fn extract_metadata_for_import(path: &std::path::Path, extension: &str) -> ImportMetadata {
+fn extract_metadata_for_import(path: &std::path::Path, _extension: &str) -> ImportMetadata {
   match extract_metadata(path) {
     Ok(meta) => ImportMetadata {
-      title: meta.title,
+      title: meta
+        .title
+        .and_then(|title| {
+          let trimmed = title.trim().to_string();
+          if trimmed.is_empty() { None } else { Some(trimmed) }
+        })
+        .or_else(|| infer_title_from_filename(path)),
       authors: meta.authors,
       published_year: meta.published_year,
       language: meta.language,
       identifiers: meta.identifiers,
     },
     Err(_) => {
-      // Fallback: use filename as title
-      let filename = path
-        .file_stem()
-        .and_then(|n| n.to_str())
-        .unwrap_or("")
-        .to_string();
       ImportMetadata {
-        title: if filename.is_empty() { None } else { Some(filename) },
+        title: infer_title_from_filename(path),
         authors: vec![],
         published_year: None,
         language: None,
@@ -3900,6 +4507,31 @@ fn extract_metadata_for_import(path: &std::path::Path, extension: &str) -> Impor
       }
     }
   }
+}
+
+fn infer_title_from_filename(path: &std::path::Path) -> Option<String> {
+  let raw = path.file_stem().and_then(|name| name.to_str())?;
+  let cleaned = raw
+    .trim_end_matches(".kepub")
+    .replace('_', " ")
+    .replace('-', " ")
+    .trim()
+    .to_string();
+  if cleaned.is_empty() { None } else { Some(cleaned) }
+}
+
+fn normalize_filename_title_for_matching(path_or_name: &str) -> String {
+  let filename = std::path::Path::new(path_or_name)
+    .file_name()
+    .and_then(|name| name.to_str())
+    .unwrap_or(path_or_name);
+  let stem = std::path::Path::new(filename)
+    .file_stem()
+    .and_then(|name| name.to_str())
+    .unwrap_or(filename)
+    .trim_end_matches(".kepub");
+  let cleaned = stem.replace('_', " ").replace('-', " ");
+  normalize_title_for_matching(&cleaned)
 }
 
 fn check_has_embedded_cover(path: &std::path::Path, extension: &str) -> bool {
@@ -4049,7 +4681,7 @@ fn import_books_sync(app: tauri::AppHandle, request: ImportRequest) -> Result<Op
           continue;
         }
         "replace" => replace_file_for_item(&conn, &app, &item_id, candidate, &request),
-        "add" => add_file_to_item(&conn, &app, &item_id, candidate, &request),
+        "add" | "add-format" => add_file_to_item(&conn, &app, &item_id, candidate, &request),
         _ => {
           stats.skipped += 1;
           let _ = app.emit(
@@ -5075,14 +5707,10 @@ fn extract_pdf_metadata(path: &std::path::Path) -> Result<ExtractedMetadata, Str
       }
     }
   }
-
-  let pages = doc.get_pages();
-  let page_numbers: Vec<u32> = pages.keys().take(10).cloned().collect();
-  if !page_numbers.is_empty() {
-    if let Ok(text) = doc.extract_text(&page_numbers) {
-      metadata.identifiers.extend(extract_isbn_candidates(&text));
-    }
-  }
+  // Avoid text extraction here: some PDFs make lopdf text decoding very slow
+  // during import scans and can flood logs (Identity-H / StandardEncoding).
+  metadata.identifiers.sort();
+  metadata.identifiers.dedup();
 
   Ok(metadata)
 }
@@ -7392,6 +8020,7 @@ pub fn run() {
         app.handle().plugin(
           tauri_plugin_log::Builder::default()
             .level(log::LevelFilter::Info)
+            .level_for("lopdf", log::LevelFilter::Warn)
             .build(),
         )?;
       } else {
@@ -7458,6 +8087,7 @@ pub fn run() {
       apply_organize,
       clear_library,
       normalize_item_descriptions,
+      batch_cleanup_titles,
       scan_folder,
       scan_for_import,
       import_books,

@@ -5,6 +5,8 @@ type SettingsViewProps = {
   onChooseRoot: () => Promise<void>;
   onNormalizeDescriptions: () => Promise<void>;
   normalizingDescriptions: boolean;
+  onBatchFixTitles: () => Promise<void>;
+  batchFixingTitles: boolean;
 };
 
 export function SettingsView({
@@ -12,6 +14,8 @@ export function SettingsView({
   onChooseRoot,
   onNormalizeDescriptions,
   normalizingDescriptions,
+  onBatchFixTitles,
+  batchFixingTitles,
 }: SettingsViewProps) {
   const isICloudPath =
     !!libraryRoot &&
@@ -63,6 +67,27 @@ export function SettingsView({
             disabled={normalizingDescriptions}
           >
             {normalizingDescriptions ? "Cleaning..." : "Clean descriptions"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-app-border bg-white p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-app-ink-muted">
+              Title Batch Fix
+            </div>
+            <p className="mt-1 text-xs text-app-ink-muted">
+              Clean title noise in batch and infer year/author from patterns like
+              "Author - Title (Year)".
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => void onBatchFixTitles()}
+            disabled={batchFixingTitles}
+          >
+            {batchFixingTitles ? "Fixing..." : "Fix titles in batch"}
           </Button>
         </div>
       </div>

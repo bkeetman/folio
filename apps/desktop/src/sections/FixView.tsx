@@ -1,10 +1,11 @@
-import { BookOpen, Image, User, AlertTriangle, ChevronDown, PencilLine, Search, Save, Loader2 } from "lucide-react";
+import { BookOpen, Image, User, AlertTriangle, ChevronDown, PencilLine, Search, Save, Loader2, Sparkles, X } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect } from "react";
+import { ProgressBar } from "../components/ProgressBar";
 import { Button, Input } from "../components/ui";
 import { cleanupMetadataTitle } from "../lib/metadataCleanup";
 import { LANGUAGE_OPTIONS } from "../lib/languageFlags";
-import type { EnrichmentCandidate, FixFilter, InboxItem, ItemMetadata, LibraryItem } from "../types/library";
+import type { EnrichmentCandidate, FixFilter, InboxItem, ItemMetadata, LibraryItem, OperationProgress } from "../types/library";
 
 type FixViewProps = {
   items: LibraryItem[];
@@ -31,6 +32,10 @@ type FixViewProps = {
   coverUrl: string | null;
   onFetchCover: (itemId: string, force?: boolean) => Promise<void>;
   isDesktop: boolean;
+  onEnrichAll: () => void;
+  onCancelEnrich: () => void;
+  enriching: boolean;
+  enrichProgress: OperationProgress | null;
 };
 
 function getIssueIcon(item: LibraryItem, inboxItems: InboxItem[]) {
@@ -72,7 +77,54 @@ export function FixView({
   coverUrl,
   onFetchCover,
   isDesktop,
+  onEnrichAll,
+  onCancelEnrich,
+  enriching,
+  enrichProgress,
 }: FixViewProps) {
+  const enrichLabel =
+    items.length > 0
+      ? `Needs Fixing list: ${items.length} items`
+      : "Needs Fixing list is empty";
+
+  const renderEnrichToolbar = () => {
+    if (!isDesktop) return null;
+    return (
+      <div className="rounded-lg border border-[var(--app-border)] bg-white/70 px-3 py-2">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--app-ink)]">
+              Metadata Enrichment
+            </div>
+            <div className="text-[11px] text-[var(--app-ink-muted)]">{enrichLabel}</div>
+          </div>
+          {enriching ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onCancelEnrich}
+              className="gap-2 border-red-300 text-red-600 shadow-sm hover:bg-red-50"
+            >
+              <X size={14} />
+              Cancel
+            </Button>
+          ) : (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={onEnrichAll}
+              className="gap-2 shadow-sm"
+              disabled={items.length === 0}
+            >
+              <Sparkles size={14} />
+              Enrich Needs Fixing
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // Initialize form data when selection changes
   useEffect(() => {
     if (!selectedItemId) {
@@ -117,41 +169,50 @@ export function FixView({
   if (items.length === 0) {
     const hasActiveFilters = Object.values(fixFilter).some(Boolean);
     return (
-      <section className="flex flex-col items-center justify-center gap-4 py-16">
-        <div className="text-4xl">🎉</div>
-        <div className="text-lg font-medium text-[var(--app-ink)]">All books have complete metadata!</div>
-        <div className="text-sm text-[var(--app-ink-muted)]">Nothing needs fixing based on your current filter.</div>
-        <div className="flex items-center gap-2">
-          {!fixFilter.includeIssues ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setFixFilter((current) => ({ ...current, includeIssues: true }))}
-            >
-              Show Items With Issues
-            </Button>
-          ) : null}
-          {hasActiveFilters ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                setFixFilter({
-                  missingAuthor: true,
-                  missingTitle: true,
-                  missingCover: true,
-                  missingIsbn: false,
-                  missingYear: false,
-                  missingDescription: false,
-                  missingLanguage: false,
-                  missingSeries: false,
-                  includeIssues: true,
-                })
-              }
-            >
-              Reset Filters
-            </Button>
-          ) : null}
+      <section className="flex flex-col gap-4">
+        {renderEnrichToolbar()}
+        <ProgressBar
+          progress={enrichProgress}
+          label="Enriching Library"
+          variant="purple"
+          show={enriching && enrichProgress !== null}
+        />
+        <div className="flex flex-col items-center justify-center gap-4 py-16">
+          <div className="text-4xl">🎉</div>
+          <div className="text-lg font-medium text-[var(--app-ink)]">All books have complete metadata!</div>
+          <div className="text-sm text-[var(--app-ink-muted)]">Nothing needs fixing based on your current filter.</div>
+          <div className="flex items-center gap-2">
+            {!fixFilter.includeIssues ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setFixFilter((current) => ({ ...current, includeIssues: true }))}
+              >
+                Show Items With Issues
+              </Button>
+            ) : null}
+            {hasActiveFilters ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  setFixFilter({
+                    missingAuthor: true,
+                    missingTitle: true,
+                    missingCover: true,
+                    missingIsbn: false,
+                    missingYear: false,
+                    missingDescription: false,
+                    missingLanguage: false,
+                    missingSeries: false,
+                    includeIssues: true,
+                  })
+                }
+              >
+                Reset Filters
+              </Button>
+            ) : null}
+          </div>
         </div>
       </section>
     );
@@ -164,7 +225,15 @@ export function FixView({
     Boolean(selectedIssueReason?.toLowerCase().includes("possible incorrect title"));
 
   return (
-    <section className="flex gap-4 h-[calc(100vh-200px)]">
+    <section className="flex flex-col gap-4">
+      {renderEnrichToolbar()}
+      <ProgressBar
+        progress={enrichProgress}
+        label="Enriching Library"
+        variant="purple"
+        show={enriching && enrichProgress !== null}
+      />
+      <div className="flex h-[calc(100vh-240px)] gap-4">
       {/* Left Panel: Book List */}
       <div className="w-56 flex-shrink-0 flex flex-col rounded-lg border border-[var(--app-border)] bg-white/70 overflow-hidden">
         <div className="flex items-center justify-between border-b border-[var(--app-border)] px-3 py-2">
@@ -525,6 +594,7 @@ export function FixView({
             </div>
           )}
         </div>
+      </div>
       </div>
     </section>
   );

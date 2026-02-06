@@ -1,7 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ScanProgressBar } from "./components/ProgressBar";
+import { ProgressBar, ScanProgressBar } from "./components/ProgressBar";
 import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
 import { useEreader } from "./hooks/useEreader";
 import { useLibraryData } from "./hooks/useLibraryData";
@@ -9,6 +9,13 @@ import { useLibrarySelectors } from "./hooks/useLibrarySelectors";
 import { useOrganizer } from "./hooks/useOrganizer";
 import { useUpdater } from "./hooks/useUpdater";
 import { normalizeTitleSnapshot } from "./lib/metadataCleanup";
+import {
+  sampleBooks,
+  sampleDuplicateGroups,
+  sampleFixCandidates,
+  sampleInboxItems,
+  sampleTags,
+} from "./lib/sampleData";
 import { TAG_COLORS } from "./lib/tagColors";
 import { AppRoutes } from "./sections/AppRoutes";
 import { Inspector } from "./sections/Inspector";
@@ -20,6 +27,7 @@ import type {
   DuplicateGroup,
   EnrichmentCandidate,
   FixFilter,
+  ImportRequest,
   ItemMetadata,
   LibraryFilter,
   LibrarySort,
@@ -31,148 +39,6 @@ import type {
   Tag,
   View,
 } from "./types/library";
-
-const sampleBooks = [
-  {
-    id: "1",
-    title: "The Shallows",
-    author: "Nicholas Carr",
-    format: "EPUB",
-    year: 2010,
-    status: "Complete",
-    cover: null,
-    tags: [{ id: "t1", name: "Favorites", color: "amber" }],
-  },
-  {
-    id: "2",
-    title: "Silent Spring",
-    author: "Rachel Carson",
-    format: "PDF",
-    year: 1962,
-    status: "Complete",
-    cover: null,
-    tags: [],
-  },
-  {
-    id: "3",
-    title: "The Left Hand of Darkness",
-    author: "Ursula K. Le Guin",
-    format: "EPUB",
-    year: 1969,
-    status: "Needs ISBN",
-    cover: null,
-    tags: [{ id: "t2", name: "To Review", color: "sky" }],
-  },
-  {
-    id: "4",
-    title: "Braiding Sweetgrass",
-    author: "Robin Wall Kimmerer",
-    format: "PDF",
-    year: 2013,
-    status: "Needs Cover",
-    cover: null,
-    tags: [],
-  },
-  {
-    id: "5",
-    title: "The Book of Tea",
-    author: "Kakuzo Okakura",
-    format: "EPUB",
-    year: 1906,
-    status: "Complete",
-    cover: null,
-    tags: [{ id: "t3", name: "Classic", color: "emerald" }],
-  },
-];
-
-
-const sampleTags: Tag[] = [
-  { id: "t1", name: "Favorites", color: "amber" },
-  { id: "t2", name: "To Review", color: "sky" },
-  { id: "t3", name: "Classic", color: "emerald" },
-];
-
-
-const inboxItems = [
-  { id: "i1", title: "Notes on the Synthesis", reason: "Missing author" },
-  { id: "i2", title: "Design of Everyday Things", reason: "Missing ISBN" },
-  { id: "i3", title: "A New Ecology", reason: "Missing cover" },
-];
-
-const duplicateGroups: DuplicateGroup[] = [
-  {
-    id: "d1",
-    kind: "hash",
-    title: "The Shallows",
-    files: ["The Shallows.epub", "The Shallows (1).epub"],
-    file_ids: ["d1-file-1", "d1-file-2"],
-    file_paths: ["/samples/The Shallows.epub", "/samples/The Shallows (1).epub"],
-    file_titles: ["The Shallows", "The Shallows"],
-    file_authors: ["Nicholas Carr", "Nicholas Carr"],
-    file_sizes: [1_048_576, 1_048_576],
-  },
-  {
-    id: "d2",
-    kind: "hash",
-    title: "Silent Spring",
-    files: ["Silent Spring.pdf", "Silent Spring - copy.pdf"],
-    file_ids: ["d2-file-1", "d2-file-2"],
-    file_paths: ["/samples/Silent Spring.pdf", "/samples/Silent Spring - copy.pdf"],
-    file_titles: ["Silent Spring", "Silent Spring"],
-    file_authors: ["Rachel Carson", "Rachel Carson"],
-    file_sizes: [2_097_152, 2_097_152],
-  },
-];
-
-
-
-const sampleFixCandidates: EnrichmentCandidate[] = [
-  {
-    id: "c1",
-    title: "The Left Hand of Darkness",
-    authors: ["Ursula K. Le Guin"],
-    published_year: 1969,
-    identifiers: [],
-    confidence: 0.92,
-    source: "Open Library",
-  },
-  {
-    id: "c2",
-    title: "Left Hand of Darkness",
-    authors: ["U. K. Le Guin"],
-    published_year: 1969,
-    identifiers: [],
-    confidence: 0.86,
-    source: "Google Books",
-  },
-  {
-    id: "c3",
-    title: "The Left Hand of Darkness (Anniversary)",
-    authors: ["Ursula Le Guin"],
-    published_year: 2004,
-    identifiers: [],
-    confidence: 0.74,
-    source: "Open Library",
-  },
-  {
-    id: "c4",
-    title: "The Left Hand of Darkness",
-    authors: ["Ursula K. Le Guin"],
-    published_year: 1976,
-    identifiers: [],
-    confidence: 0.71,
-    source: "Google Books",
-  },
-  {
-    id: "c5",
-    title: "The Left Hand of Darkness",
-    authors: ["Ursula K. LeGuin"],
-    published_year: 1969,
-    identifiers: [],
-    confidence: 0.67,
-    source: "Open Library",
-  },
-];
 
 function App() {
   const [view, setView] = useState<View>("library-books");
@@ -199,6 +65,7 @@ function App() {
   const [editMatchCandidates, setEditMatchCandidates] = useState<EnrichmentCandidate[]>([]);
   const [editMatchApplying, setEditMatchApplying] = useState<string | null>(null);
   const [editDetailsVersion, setEditDetailsVersion] = useState(0);
+  const mainScrollRef = useRef<HTMLElement | null>(null);
 
 
   // Fix View State
@@ -233,7 +100,10 @@ function App() {
   const pendingChangesStatusRef = useRef<"pending" | "applied" | "error">("pending");
   const [applyingChangeIds, setApplyingChangeIds] = useState<Set<string>>(new Set());
   const [changeProgress, setChangeProgress] = useState<OperationProgress | null>(null);
+  const [importProgress, setImportProgress] = useState<OperationProgress | null>(null);
+  const [importingBooks, setImportingBooks] = useState(false);
   const [normalizingDescriptions, setNormalizingDescriptions] = useState(false);
+  const [batchFixingTitles, setBatchFixingTitles] = useState(false);
   const [tags, setTags] = useState<Tag[]>([]);
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0].value);
@@ -323,7 +193,6 @@ function App() {
   const {
     uniqueAuthors,
     uniqueSeries,
-    enrichableCount,
     fixIssues,
     allFixItems,
     filteredBooks,
@@ -717,27 +586,24 @@ function App() {
     }
   }, [refreshLibrary, scanning]);
 
-  const handleEnrichAll = useCallback(async () => {
+  const handleEnrichAll = useCallback(async (itemIds?: string[]) => {
     if (!isTauri()) {
       setScanStatus("Enrich requires the Tauri desktop runtime.");
       return;
     }
     if (enriching) return;
-    const needsEnrichment = libraryItems.some(
-      (item) =>
-        !item.cover_path || item.authors.length === 0 || item.published_year === null
-    );
-    if (!needsEnrichment) {
-      setScanStatus("No items need enrichment.");
+    const targetItemIds = itemIds ?? [];
+    if (targetItemIds.length === 0) {
+      setScanStatus("No items in Needs Fixing to enrich.");
       return;
     }
     setEnriching(true);
     setEnrichProgress(null);
     setEnrichingItems(new Set());
-    setScanStatus("Enriching library...");
+    setScanStatus(`Enriching ${targetItemIds.length} items from Needs Fixing...`);
     try {
       // This returns immediately, progress comes via events
-      await invoke("enrich_all");
+      await invoke("enrich_all", { itemIds: targetItemIds });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error ?? "Enrich failed.");
@@ -745,7 +611,7 @@ function App() {
       setEnriching(false);
       setEnrichingItems(new Set());
     }
-  }, [enriching, libraryItems]);
+  }, [enriching]);
 
   const handleCancelEnrich = useCallback(async () => {
     if (!isTauri()) return;
@@ -809,14 +675,74 @@ function App() {
     }
   }, [normalizingDescriptions, refreshLibrary]);
 
+  const handleBatchFixTitles = useCallback(async () => {
+    if (!isTauri() || batchFixingTitles) return;
+    setBatchFixingTitles(true);
+    try {
+      const result = await invoke<{
+        itemsUpdated: number;
+        titlesCleaned: number;
+        yearsInferred: number;
+        authorsInferred: number;
+        isbnsNormalized: number;
+        isbnsRemoved: number;
+        filesQueued: number;
+      }>("batch_cleanup_titles");
+      await refreshLibrary();
+      if (result.itemsUpdated > 0) {
+        setScanStatus(
+          `Batch title fix: ${result.itemsUpdated} updated, ${result.titlesCleaned} titles cleaned, ${result.yearsInferred} years inferred, ${result.authorsInferred} authors inferred, ${result.isbnsNormalized} ISBNs normalized, ${result.isbnsRemoved} ISBNs removed, ${result.filesQueued} EPUB updates queued.`
+        );
+      } else {
+        setScanStatus("No titles needed batch cleanup.");
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error ?? "Batch title cleanup failed.");
+      setScanStatus(`Could not batch-fix titles: ${message}`);
+    } finally {
+      setBatchFixingTitles(false);
+    }
+  }, [batchFixingTitles, refreshLibrary]);
+
   const handleImportCancel = () => {
     setView("library-books");
   };
 
-  const handleImportComplete = () => {
+  const handleImportStart = useCallback(async (request: ImportRequest) => {
+    if (!isTauri() || importingBooks) return;
+    setImportingBooks(true);
     setView("library-books");
-    refreshLibrary();
-  };
+    setImportProgress({
+      itemId: "import",
+      status: "processing",
+      message: "Starting import...",
+      current: 0,
+      total: request.newBookIds.length + Object.keys(request.duplicateActions).length,
+    });
+    setScanStatus("Importing books...");
+
+    const unlisten = await listen<OperationProgress>("import-progress", (event) => {
+      setImportProgress(event.payload);
+    });
+
+    try {
+      const result = await invoke<OperationStats>("import_books", { request });
+      await refreshLibrary();
+      setScanStatus(
+        `Import complete: ${result.processed} imported, ${result.skipped} skipped, ${result.errors} errors.`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? "Import failed.");
+      setScanStatus(`Import failed: ${message}`);
+    } finally {
+      unlisten();
+      setImportingBooks(false);
+      setTimeout(() => {
+        setImportProgress(null);
+      }, 1200);
+    }
+  }, [importingBooks, refreshLibrary]);
 
   const handleChooseRoot = async () => {
     if (!isTauri()) return;
@@ -906,6 +832,7 @@ function App() {
     if (!isDesktop) return;
     let unlistenProgress: (() => void) | undefined;
     let unlistenComplete: (() => void) | undefined;
+    let unlistenImportScan: (() => void) | undefined;
 
     listen<ScanProgress>("scan-progress", (event) => {
       setScanProgress(event.payload);
@@ -934,6 +861,31 @@ function App() {
       unlistenComplete = stop;
     });
 
+    listen<OperationProgress>("import-scan-progress", (event) => {
+      const { status, current, total, message } = event.payload;
+      if (status === "done") {
+        setScanStatus(message ?? `Import scan complete (${total} files).`);
+        setActivityLog((prev) => [
+          {
+            id: `import-scan-${Date.now()}`,
+            type: "scan",
+            message: message ?? `Import scan complete (${total} files).`,
+            timestamp: Date.now(),
+          },
+          ...prev,
+        ]);
+        return;
+      }
+
+      const progressLabel =
+        total > 0
+          ? `Import scan ${current}/${total}`
+          : "Import scan";
+      setScanStatus(message ? `${progressLabel}: ${message}` : progressLabel);
+    }).then((stop) => {
+      unlistenImportScan = stop;
+    });
+
     let unlistenError: (() => void) | undefined;
     listen<string>("scan-error", (event) => {
       setScanProgress(null);
@@ -955,6 +907,7 @@ function App() {
     return () => {
       if (unlistenProgress) unlistenProgress();
       if (unlistenComplete) unlistenComplete();
+      if (unlistenImportScan) unlistenImportScan();
       if (unlistenError) unlistenError();
     };
   }, [isDesktop, scanStartedAt, scanning]);
@@ -1060,9 +1013,9 @@ function App() {
       );
       // Refresh the pending changes list
       try {
-          const result = await invoke<PendingChange[]>("get_pending_changes", {
-            status: pendingChangesStatusRef.current,
-          });
+        const result = await invoke<PendingChange[]>("get_pending_changes", {
+          status: pendingChangesStatusRef.current,
+        });
         setPendingChanges(result);
         await refreshLibrary();
       } catch {
@@ -1354,6 +1307,12 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    if (mainScrollRef.current) {
+      mainScrollRef.current.scrollTo({ top: 0, behavior: "auto" });
+    }
+  }, [view]);
+
   return (
     <div
       className={
@@ -1362,42 +1321,51 @@ function App() {
           : "grid h-screen grid-cols-[210px_minmax(0,1fr)] overflow-hidden bg-[var(--app-bg)] text-[var(--app-ink)]"
       }
     >
-        <Sidebar
-          view={view}
-          setView={setView}
-          scanning={scanning}
-          handleScan={() => setView("import")}
-          libraryHealth={libraryHealth}
-          pendingChangesCount={pendingChangesStatus === "pending" ? pendingChanges.length : 0}
-          duplicateCount={duplicates.length}
-          missingFilesCount={missingFiles.length}
-          handleClearLibrary={() => void handleClearLibrary()}
-          appVersion={appVersion}
-          ereaderConnected={ereaderDevices.some((d) => d.isConnected)}
-        />
+      <Sidebar
+        view={view}
+        setView={setView}
+        scanning={scanning}
+        handleScan={() => setView("import")}
+        libraryHealth={libraryHealth}
+        pendingChangesCount={pendingChangesStatus === "pending" ? pendingChanges.length : 0}
+        duplicateCount={duplicates.length}
+        missingFilesCount={missingFiles.length}
+        handleClearLibrary={() => void handleClearLibrary()}
+        appVersion={appVersion}
+        ereaderConnected={ereaderDevices.some((d) => d.isConnected)}
+      />
 
-      <main className="flex h-screen flex-col gap-4 overflow-y-auto px-6 py-4">
-        <TopToolbar
-          view={view}
-          checkForUpdates={(silent) => void checkForUpdates(silent)}
-          query={query}
-          setQuery={setQuery}
-          grid={grid}
-          setGrid={setGrid}
-          libraryReady={libraryReady}
-          updateStatus={updateStatus}
-          updateAvailable={updateAvailable}
-          updateVersion={updateVersion}
-          scanStatus={scanStatus}
-          scanProgress={scanProgress}
-          activityLog={activityLog}
-        />
+      <main ref={mainScrollRef} className="flex h-screen flex-col gap-4 overflow-y-auto px-6 py-4">
+        {view !== "edit" && (
+          <TopToolbar
+            view={view}
+            checkForUpdates={(silent) => void checkForUpdates(silent)}
+            query={query}
+            setQuery={setQuery}
+            grid={grid}
+            setGrid={setGrid}
+            libraryReady={libraryReady}
+            updateStatus={updateStatus}
+            updateAvailable={updateAvailable}
+            updateVersion={updateVersion}
+            scanStatus={scanStatus}
+            scanProgress={scanProgress}
+            importProgress={importProgress}
+            activityLog={activityLog}
+          />
+        )}
 
         <ScanProgressBar
           scanning={scanning}
           progress={scanProgress}
           etaLabel={scanEtaLabel}
           variant="accent"
+        />
+        <ProgressBar
+          show={importingBooks}
+          progress={importProgress}
+          label="Importing"
+          variant="blue"
         />
 
         <div className="flex flex-col gap-4">
@@ -1431,13 +1399,12 @@ function App() {
             enriching={enriching}
             enrichingItems={enrichingItems}
             enrichProgress={enrichProgress}
-            enrichableCount={enrichableCount}
             uniqueAuthors={uniqueAuthors}
             uniqueSeries={uniqueSeries}
             inbox={inbox}
-            sampleInboxItems={inboxItems}
+            sampleInboxItems={sampleInboxItems}
             duplicates={duplicates}
-            sampleDuplicateGroups={duplicateGroups}
+            sampleDuplicateGroups={sampleDuplicateGroups}
             titleDuplicates={titleDuplicates}
             fuzzyDuplicates={fuzzyDuplicates}
             duplicateKeepSelection={duplicateKeepSelection}
@@ -1511,10 +1478,12 @@ function App() {
             organizing={organizing}
             organizeLog={organizeLog}
             onImportCancel={handleImportCancel}
-            onImportComplete={handleImportComplete}
+            onImportStart={handleImportStart}
             onChooseRoot={handleChooseRoot}
             onNormalizeDescriptions={handleNormalizeDescriptions}
             normalizingDescriptions={normalizingDescriptions}
+            onBatchFixTitles={handleBatchFixTitles}
+            batchFixingTitles={batchFixingTitles}
             missingFiles={missingFiles}
             onRelinkMissing={handleRelinkMissing}
             onRemoveMissing={handleRemoveMissing}

@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import type { ActivityLogItem, ScanProgress, View } from "../types/library";
+import type { ActivityLogItem, OperationProgress, ScanProgress, View } from "../types/library";
 import { Badge, Button, Input } from "../components/ui";
 import { Download, LayoutGrid, List, Search } from "lucide-react";
 
@@ -16,6 +16,7 @@ type TopToolbarProps = {
   updateVersion: string | null;
   scanStatus: string | null;
   scanProgress: ScanProgress | null;
+  importProgress: OperationProgress | null;
   activityLog: ActivityLogItem[];
 };
 
@@ -32,6 +33,7 @@ export function TopToolbar({
   updateVersion,
   scanStatus,
   scanProgress,
+  importProgress,
   activityLog,
 }: TopToolbarProps) {
   const latestActivity = activityLog[0];
@@ -39,9 +41,11 @@ export function TopToolbar({
   const activityTime = latestActivity
     ? new Date(latestActivity.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : null;
+  const progressCurrent = scanProgress?.processed ?? importProgress?.current ?? null;
+  const progressTotal = scanProgress?.total ?? importProgress?.total ?? null;
   const progressPercent =
-    scanProgress && scanProgress.total > 0
-      ? Math.min(100, Math.round((scanProgress.processed / scanProgress.total) * 100))
+    progressCurrent !== null && progressTotal !== null && progressTotal > 0
+      ? Math.min(100, Math.round((progressCurrent / progressTotal) * 100))
       : null;
   return (
     <>
@@ -76,7 +80,7 @@ export function TopToolbar({
                 <span className="text-[10px] tabular-nums text-app-ink-muted">{activityTime}</span>
               ) : null}
             </div>
-            {scanProgress ? (
+            {(scanProgress || importProgress) ? (
               <div className="flex items-center gap-2">
                 <div className="h-1 w-32 overflow-hidden rounded-full bg-app-border/40">
                   <div
@@ -85,7 +89,7 @@ export function TopToolbar({
                   />
                 </div>
                 <span className="text-[9px] tabular-nums text-app-ink-muted">
-                  {scanProgress.processed}/{scanProgress.total || "?"}
+                  {progressCurrent}/{progressTotal || "?"}
                 </span>
               </div>
             ) : null}

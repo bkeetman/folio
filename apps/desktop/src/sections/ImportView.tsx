@@ -1,20 +1,20 @@
 import { useState, useMemo } from "react";
-import { ArrowLeft, FileUp, FolderUp, Loader2, Check, AlertCircle } from "lucide-react";
+import { ArrowLeft, FileUp, FolderUp, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "../components/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   ImportCandidate,
+  ImportRequest,
   ImportDuplicate,
   ImportScanResult,
   OperationProgress,
-  OperationStats,
 } from "../types/library";
 
 type ImportViewProps = {
   onCancel: () => void;
-  onImportComplete: () => void;
+  onImportStart: (request: ImportRequest) => Promise<void>;
   libraryRoot: string | null;
   template: string;
 };
@@ -24,15 +24,22 @@ type ImportState =
   | "scanning"
   | "reviewing"
   | "confirming"
-  | "importing"
-  | "done"
   | "error";
 
 type ImportMode = "move" | "copy";
 
 type DuplicateAction = "skip" | "replace" | "add-format";
 
-export function ImportView({ onCancel, onImportComplete, libraryRoot, template }: ImportViewProps) {
+function normalizeFormat(value: string): string {
+  return value.trim().toLowerCase().replace(/^\./, "");
+}
+
+function hasSameFormat(dup: ImportDuplicate): boolean {
+  const incoming = normalizeFormat(dup.extension);
+  return dup.existingFormats.some((format) => normalizeFormat(format) === incoming);
+}
+
+export function ImportView({ onCancel, onImportStart, libraryRoot, template }: ImportViewProps) {
   // UI state
   const [state, setState] = useState<ImportState>("selecting");
   const [importMode, setImportMode] = useState<ImportMode>(() => {
@@ -45,6 +52,7 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot, template }
     localStorage.setItem("importMode", newMode);
   };
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [scanProgress, setScanProgress] = useState<OperationProgress | null>(null);
 
   // Scan results
   const [scanResult, setScanResult] = useState<ImportScanResult | null>(null);
@@ -56,16 +64,6 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot, template }
   const [duplicateActions, setDuplicateActions] = useState<Map<string, DuplicateAction>>(
     new Map()
   );
-
-  // Import progress
-  const [importProgress, setImportProgress] = useState<{
-    current: number;
-    total: number;
-    currentFile: string;
-  } | null>(null);
-
-  // Import stats
-  const [importStats, setImportStats] = useState<OperationStats | null>(null);
 
   // Derived state - memoize to avoid recreating on every render
   const newBooks = useMemo(() => scanResult?.newBooks ?? [], [scanResult]);
@@ -90,6 +88,16 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot, template }
   // Helper to scan paths and populate results
   const scanPaths = async (paths: string[]) => {
     setState("scanning");
+    setScanProgress({
+      itemId: "import-scan",
+      status: "pending",
+      message: "Collecting ebook files...",
+      current: 0,
+      total: 0,
+    });
+    const unlisten = await listen<OperationProgress>("import-scan-progress", (event) => {
+      setScanProgress(event.payload);
+    });
     try {
       const result = await invoke<ImportScanResult>("scan_for_import", { paths });
       setScanResult(result);
@@ -100,16 +108,8 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot, template }
       // Set smart defaults for duplicate actions
       const defaultActions = new Map<string, DuplicateAction>();
       for (const dup of result.duplicates) {
-        if (dup.matchType === "hash") {
-          // Exact hash match - skip by default
-          defaultActions.set(dup.id, "skip");
-        } else if (dup.existingFormats.includes(dup.extension)) {
-          // Same format exists - replace by default
-          defaultActions.set(dup.id, "replace");
-        } else {
-          // Different format - add as new format
-          defaultActions.set(dup.id, "add-format");
-        }
+        // Duplicates are never auto-imported; user can opt in per row.
+        defaultActions.set(dup.id, "skip");
       }
       setDuplicateActions(defaultActions);
 
@@ -117,6 +117,8 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot, template }
     } catch (err) {
       setErrorMessage(String(err));
       setState("selecting");
+    } finally {
+      unlisten();
     }
   };
 
@@ -197,18 +199,7 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot, template }
       return;
     }
 
-    setState("importing");
     setErrorMessage(null);
-    setImportProgress({ current: 0, total: importCount, currentFile: "" });
-
-    // Set up progress listener
-    const unlisten = await listen<OperationProgress>("import-progress", (event) => {
-      setImportProgress({
-        current: event.payload.current,
-        total: event.payload.total,
-        currentFile: event.payload.message || "",
-      });
-    });
 
     try {
       // Build candidates list from scanResult
@@ -223,30 +214,17 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot, template }
         duplicateActionsObj[id] = action;
       }
 
-      const result = await invoke<OperationStats>("import_books", {
-        request: {
-          mode: importMode,
-          libraryRoot,
-          template,
-          newBookIds: Array.from(selectedNewBooks),
-          duplicateActions: duplicateActionsObj,
-          candidates: allCandidates,
-        },
+      await onImportStart({
+        mode: importMode,
+        libraryRoot,
+        template,
+        newBookIds: Array.from(selectedNewBooks),
+        duplicateActions: duplicateActionsObj,
+        candidates: allCandidates,
       });
-
-      setImportStats(result);
-      setState("done");
-      setImportProgress(null);
-
-      // Call completion callback after brief delay
-      setTimeout(() => {
-        onImportComplete();
-      }, 2000);
     } catch (err) {
       setErrorMessage(String(err));
       setState("error");
-    } finally {
-      unlisten();
     }
   };
 
@@ -270,10 +248,6 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot, template }
         setErrorMessage(null);
       }
     }
-  };
-
-  const handleDone = () => {
-    onImportComplete();
   };
 
   // Format file size
@@ -329,11 +303,35 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot, template }
   const renderScanningScreen = () => (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
       <Loader2 size={48} className="animate-spin text-app-accent" />
-      <div className="text-center">
+      <div className="w-full max-w-xl text-center">
         <div className="font-medium text-app-ink">Scanning for books...</div>
         <div className="text-sm text-app-ink-muted">
-          Checking files and looking for duplicates
+          {scanProgress?.message
+            ? scanProgress.total > 0
+              ? `Checking ${scanProgress.message}`
+              : scanProgress.message
+            : "Checking files and looking for duplicates"}
         </div>
+        {scanProgress && scanProgress.total > 0 ? (
+          <div className="mt-4">
+            <div className="mb-2 flex items-center justify-between text-xs text-app-ink-muted">
+              <span>
+                {scanProgress.current} / {scanProgress.total}
+              </span>
+              <span>
+                {Math.round((scanProgress.current / Math.max(scanProgress.total, 1)) * 100)}%
+              </span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-app-border">
+              <div
+                className="h-full bg-app-accent transition-all"
+                style={{
+                  width: `${(scanProgress.current / Math.max(scanProgress.total, 1)) * 100}%`,
+                }}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -368,6 +366,7 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot, template }
 
   // Render a single duplicate row
   const renderDuplicateRow = (dup: ImportDuplicate) => {
+    const sameFormatExists = hasSameFormat(dup);
     const action = duplicateActions.get(dup.id) ?? "skip";
 
     return (
@@ -421,16 +420,18 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot, template }
             <span className="text-app-ink">Replace existing</span>
           </label>
 
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <input
-              type="radio"
-              name={`dup-${dup.id}`}
-              checked={action === "add-format"}
-              onChange={() => handleSetDuplicateAction(dup.id, "add-format")}
-              className="text-app-accent focus:ring-app-accent"
-            />
-            <span className="text-app-ink">Add as format</span>
-          </label>
+          {!sameFormatExists ? (
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name={`dup-${dup.id}`}
+                checked={action === "add-format"}
+                onChange={() => handleSetDuplicateAction(dup.id, "add-format")}
+                className="text-app-accent focus:ring-app-accent"
+              />
+              <span className="text-app-ink">Add as format</span>
+            </label>
+          ) : null}
         </div>
       </div>
     );
@@ -587,67 +588,6 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot, template }
     </div>
   );
 
-  // Render importing screen
-  const renderImportingScreen = () => (
-    <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
-      <Loader2 size={48} className="animate-spin text-app-accent" />
-      <div className="text-center">
-        <div className="font-medium text-app-ink">Importing books...</div>
-        {importProgress && (
-          <>
-            <div className="mt-2 text-sm text-app-ink-muted">
-              {importProgress.current} of {importProgress.total}
-            </div>
-            <div className="mx-auto mt-3 h-2 w-64 overflow-hidden rounded-full bg-app-border/40">
-              <div
-                className="h-full rounded-full bg-app-accent transition-all duration-300"
-                style={{
-                  width: `${(importProgress.current / importProgress.total) * 100}%`,
-                }}
-              />
-            </div>
-            {importProgress.currentFile && (
-              <div className="mt-2 max-w-md truncate text-xs text-app-ink-muted">
-                {importProgress.currentFile}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-
-  // Render done screen
-  const renderDoneScreen = () => (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8">
-      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
-        <Check size={32} className="text-green-600" />
-      </div>
-      <div className="text-center">
-        <h2 className="text-xl font-semibold text-app-ink">Import Complete</h2>
-        {importStats && (
-          <div className="mt-2 text-sm text-app-ink-muted">
-            <span className="font-medium text-app-ink">{importStats.processed}</span> books
-            imported
-            {importStats.skipped > 0 && (
-              <span>
-                , <span className="font-medium">{importStats.skipped}</span> skipped
-              </span>
-            )}
-            {importStats.errors > 0 && (
-              <span className="text-red-600">
-                , <span className="font-medium">{importStats.errors}</span> errors
-              </span>
-            )}
-          </div>
-        )}
-      </div>
-      <Button variant="primary" onClick={handleDone}>
-        Done
-      </Button>
-    </div>
-  );
-
   // Render error screen
   const renderErrorScreen = () => (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8">
@@ -677,8 +617,6 @@ export function ImportView({ onCancel, onImportComplete, libraryRoot, template }
       {state === "scanning" && renderScanningScreen()}
       {state === "reviewing" && renderReviewingScreen()}
       {state === "confirming" && renderConfirmingScreen()}
-      {state === "importing" && renderImportingScreen()}
-      {state === "done" && renderDoneScreen()}
       {state === "error" && renderErrorScreen()}
     </section>
   );
