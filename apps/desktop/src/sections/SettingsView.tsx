@@ -13,6 +13,11 @@ export function SettingsView({
   onNormalizeDescriptions,
   normalizingDescriptions,
 }: SettingsViewProps) {
+  const isICloudPath =
+    !!libraryRoot &&
+    (libraryRoot.includes("com~apple~CloudDocs") ||
+      libraryRoot.includes("Mobile Documents"));
+
   return (
     <section className="flex-1 px-6 py-6">
       <div className="mb-6">
@@ -32,6 +37,13 @@ export function SettingsView({
           <p className="text-xs text-app-ink-muted mt-1">
             Default base folder used by organizer and missing-file scans.
           </p>
+          {isICloudPath && (
+            <div className="mt-2 rounded-lg bg-[rgba(201,122,58,0.12)] px-3 py-2 text-xs text-[var(--app-accent-strong)]">
+              <span className="font-semibold">iCloud Drive detected.</span>{" "}
+              macOS may evict files to free up disk space, which can cause read/write errors when the app accesses your library.
+              A local folder is recommended.
+            </div>
+          )}
         </div>
       </div>
 

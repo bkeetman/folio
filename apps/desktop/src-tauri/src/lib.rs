@@ -2376,6 +2376,26 @@ fn save_item_metadata(
   )
   .map_err(|err| err.to_string())?;
 
+  // Register user-edited fields in item_field_sources
+  if metadata.title.is_some() {
+    insert_field_source_with_source(&conn, &item_id, "title", "user", 1.0, now)?;
+  }
+  if metadata.published_year.is_some() {
+    insert_field_source_with_source(&conn, &item_id, "published_year", "user", 1.0, now)?;
+  }
+  if metadata.language.is_some() {
+    insert_field_source_with_source(&conn, &item_id, "language", "user", 1.0, now)?;
+  }
+  if metadata.series.is_some() {
+    insert_field_source_with_source(&conn, &item_id, "series", "user", 1.0, now)?;
+  }
+  if metadata.series_index.is_some() {
+    insert_field_source_with_source(&conn, &item_id, "series_index", "user", 1.0, now)?;
+  }
+  if description.is_some() {
+    insert_field_source_with_source(&conn, &item_id, "description", "user", 1.0, now)?;
+  }
+
   // Update authors
   if !metadata.authors.is_empty() {
     conn
@@ -3479,8 +3499,8 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
       .map(|value| value.replace('_', " "));
 
     conn.execute(
-      "INSERT INTO items (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
-      params![item_id, title_guess, now],
+      "INSERT INTO items (id, title, created_at, updated_at) VALUES (?1, NULL, ?2, ?2)",
+      params![item_id, now],
     )
     .map_err(|err| err.to_string())?;
 
@@ -3501,6 +3521,14 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
     if let Ok(metadata) = extract_metadata(path) {
       apply_metadata(&conn, &item_id, &metadata, now)?;
     }
+
+    // Fallback: if apply_metadata didn't set a title (no embedded metadata), use filename guess
+    conn.execute(
+      "UPDATE items SET title = ?1 WHERE id = ?2 AND title IS NULL",
+      params![title_guess, item_id],
+    )
+    .map_err(|err| err.to_string())?;
+
       if ext == ".epub" {
         match crate::extract_epub_cover(path) {
           Ok(Some((bytes, extension))) => {

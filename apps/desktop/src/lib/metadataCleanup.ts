@@ -23,17 +23,44 @@ function normalizeForCompare(value: string): string {
     .toLowerCase();
 }
 
-function stripAuthorPrefix(title: string, authors: string[]): string {
-  const match = title.match(/^\s*(.+?)\s+(?:-|–|—|:)\s+(.+)$/u);
-  if (!match) return title;
+function matchesWithInitials(candidate: string, author: string): boolean {
+  const candidateParts = candidate.split(/\s+/);
+  const authorParts = author.split(/\s+/);
+  if (candidateParts.length !== authorParts.length) return false;
+  return candidateParts.every((cp, i) => {
+    const ap = authorParts[i];
+    if (cp === ap) return true;
+    // "J." matches "John", "J. R." matches "John Ronald"
+    const initialMatch = cp.match(/^([a-z])\.?$/);
+    if (initialMatch && ap.length > 0 && ap[0] === initialMatch[1]) return true;
+    return false;
+  });
+}
 
-  const [, possibleAuthor, rest] = match;
-  const normalizedPossibleAuthor = normalizeForCompare(possibleAuthor);
-  const isAuthorPrefix = authors.some((author) => normalizeForCompare(author) === normalizedPossibleAuthor);
-  if (isAuthorPrefix) {
-    return rest.trim();
+function authorMatches(candidate: string, author: string): boolean {
+  const normCandidate = normalizeForCompare(candidate);
+  const normAuthor = normalizeForCompare(author);
+  if (normCandidate === normAuthor) return true;
+  return matchesWithInitials(normCandidate, normAuthor);
+}
+
+function stripAuthorPrefix(title: string, authors: string[]): string {
+  let current = title;
+  // Iteratively strip author prefixes (handles "Author1 - Author2 - Title")
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const match = current.match(/^\s*(.+?)\s+(?:-|–|—|:)\s+(.+)$/u);
+    if (!match) break;
+
+    const [, possibleAuthor, rest] = match;
+    const isAuthorPrefix = authors.some((author) => authorMatches(possibleAuthor, author));
+    if (isAuthorPrefix) {
+      current = rest.trim();
+      changed = true;
+    }
   }
-  return title;
+  return current;
 }
 
 function parseYear(rawTitle: string): number | null {
