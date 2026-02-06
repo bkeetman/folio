@@ -8,7 +8,6 @@ import { useLibraryData } from "./hooks/useLibraryData";
 import { useLibrarySelectors } from "./hooks/useLibrarySelectors";
 import { useOrganizer } from "./hooks/useOrganizer";
 import { useUpdater } from "./hooks/useUpdater";
-import { normalizeTitleSnapshot } from "./lib/metadataCleanup";
 import {
   sampleBooks,
   sampleDuplicateGroups,
@@ -82,12 +81,9 @@ function App() {
     includeIssues: true,
   });
   const [selectedFixItemId, setSelectedFixItemId] = useState<string | null>(null);
-  const [fixFormData, setFixFormData] = useState<ItemMetadata | null>(null);
   const [fixSearchQuery, setFixSearchQuery] = useState("");
-  const [fixSaving, setFixSaving] = useState(false);
   const [fixApplyingCandidateId, setFixApplyingCandidateId] = useState<string | null>(null);
-  const [fixApplyingMessage, setFixApplyingMessage] = useState<string | null>(null);
-  const [markingTitleCorrectId, setMarkingTitleCorrectId] = useState<string | null>(null);
+  const fixSearchRequestIdRef = useRef(0);
   const [coverOverrides, setCoverOverrides] = useState<Record<string, string | null>>({});
   const coverOverrideRef = useRef<Record<string, string | null>>({});
   const [duplicateKeepSelection, setDuplicateKeepSelection] = useState<
@@ -137,7 +133,6 @@ function App() {
     titleCleanupIgnoreMap,
     coverRefreshToken,
     refreshLibrary,
-    refreshTitleCleanupIgnores,
     resetLibraryState,
   } = useLibraryData({ setScanStatus });
 
@@ -1041,7 +1036,6 @@ function App() {
       const { message, current, total, step } = event.payload;
       const progressMessage =
         step === "done" ? "Metadata apply complete." : `${message} (${current}/${total})`;
-      setFixApplyingMessage(progressMessage);
       setScanStatus(progressMessage);
     }).then((stop) => {
       unlisten = stop;
@@ -1051,44 +1045,38 @@ function App() {
     };
   }, [isDesktop]);
 
-  const handleFetchCandidatesForItem = async (itemId: string) => {
-    if (!isTauri()) {
-      setFixCandidates([]);
-      return;
-    }
-    setFixLoading(true);
-    try {
-      const candidates = await invoke<EnrichmentCandidate[]>(
-        "get_fix_candidates",
-        { itemId }
-      );
-      setFixCandidates(candidates);
-    } catch {
-      setScanStatus("Could not fetch enrichment candidates.");
-    } finally {
-      setFixLoading(false);
-    }
-  };
+  useEffect(() => {
+    // Invalidate in-flight Fix Metadata searches and clear stale results on selection change.
+    fixSearchRequestIdRef.current += 1;
+    setFixCandidates([]);
+    setFixLoading(false);
+  }, [selectedFixItemId]);
 
   const handleSearchFixWithQuery = async (queryValue: string) => {
     if (!selectedFixItemId || !isTauri()) return;
+    const requestId = ++fixSearchRequestIdRef.current;
+    const itemId = selectedFixItemId;
     setFixLoading(true);
     setScanStatus("Searching metadata...");
     await new Promise((resolve) => setTimeout(resolve, 0));
     try {
       const candidates = await invoke<EnrichmentCandidate[]>("search_candidates", {
         query: queryValue,
-        itemId: selectedFixItemId,
+        itemId,
       });
+      if (fixSearchRequestIdRef.current !== requestId) return;
       setFixCandidates(candidates);
       if (candidates.length === 0) {
         setScanStatus("No metadata matches found.");
       }
     } catch {
+      if (fixSearchRequestIdRef.current !== requestId) return;
       setScanStatus("Could not search metadata sources.");
       setFixCandidates([]);
     } finally {
-      setFixLoading(false);
+      if (fixSearchRequestIdRef.current === requestId) {
+        setFixLoading(false);
+      }
     }
   };
 
@@ -1096,7 +1084,6 @@ function App() {
     if (!selectedFixItemId || !isTauri()) return;
     if (fixApplyingCandidateId) return;
     setFixApplyingCandidateId(candidate.id);
-    setFixApplyingMessage("Applying metadata... (1/4)");
     setScanStatus("Applying metadata...");
     try {
       await invoke("apply_fix_candidate", {
@@ -1117,13 +1104,11 @@ function App() {
       setScanStatus("Could not apply metadata.");
     } finally {
       setFixApplyingCandidateId(null);
-      setFixApplyingMessage(null);
     }
   };
 
   const handleSaveFixMetadata = async (id: string, data: ItemMetadata) => {
     if (!isDesktop) return;
-    setFixSaving(true);
     setScanStatus("Saving metadata...");
     try {
       await invoke("save_item_metadata", { itemId: id, metadata: data });
@@ -1134,8 +1119,6 @@ function App() {
     } catch (e) {
       console.error("Failed to save metadata", e);
       setScanStatus("Could not save metadata.");
-    } finally {
-      setFixSaving(false);
     }
   };
 
@@ -1239,27 +1222,6 @@ function App() {
     setEditMatchQuery(selectedItem?.title ?? "");
     void loadEditMatchCandidates(selectedItemId);
   }, [view, selectedItemId, selectedItem?.title]);
-
-  const handleMarkTitleCorrect = async (itemId: string, title: string) => {
-    if (!isTauri()) return;
-    const snapshot = normalizeTitleSnapshot(title);
-    if (!snapshot) return;
-
-    setMarkingTitleCorrectId(itemId);
-    try {
-      await invoke("set_title_cleanup_ignored", {
-        itemId,
-        titleSnapshot: snapshot,
-        ignored: true,
-      });
-      await refreshTitleCleanupIgnores();
-      setScanStatus("Marked title as correct.");
-    } catch {
-      setScanStatus("Could not mark title as correct.");
-    } finally {
-      setMarkingTitleCorrectId(null);
-    }
-  };
 
   const pickBestDuplicate = useCallback((group: DuplicateGroup) => {
     const scoreFile = (fileName: string, filePath: string) => {
@@ -1508,31 +1470,16 @@ function App() {
             setSelectedFixItemId={setSelectedFixItemId}
             fixFilter={fixFilter}
             setFixFilter={setFixFilter}
-            fixFormData={fixFormData}
-            setFixFormData={setFixFormData}
             fixSearchQuery={fixSearchQuery}
             setFixSearchQuery={setFixSearchQuery}
             fixLoading={fixLoading}
             fixCandidates={fixCandidates}
             fixCoverUrl={selectedFixItemId ? coverOverrides[selectedFixItemId] : null}
             onFetchFixCover={fetchCoverOverride}
-            onSearchFixCandidates={() => {
-              if (!selectedFixItemId) return;
-              handleFetchCandidatesForItem(selectedFixItemId);
-            }}
             onSearchFixWithQuery={handleSearchFixWithQuery}
             onApplyFixCandidate={handleApplyFixCandidate}
             onSaveFixMetadata={handleSaveFixMetadata}
-            onNavigateToEdit={(itemId) => {
-              setSelectedItemId(itemId);
-              setPreviousView("fix");
-              setView("edit");
-            }}
-            onMarkTitleCorrect={handleMarkTitleCorrect}
-            markingTitleCorrectId={markingTitleCorrectId}
-            fixSaving={fixSaving}
             fixApplyingCandidateId={fixApplyingCandidateId}
-            fixApplyingMessage={fixApplyingMessage}
             getCandidateCoverUrl={getCandidateCoverUrl}
             pendingChangesStatus={pendingChangesStatus}
             setPendingChangesStatus={setPendingChangesStatus}

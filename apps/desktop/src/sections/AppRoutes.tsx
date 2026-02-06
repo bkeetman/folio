@@ -88,24 +88,16 @@ type AppRoutesProps = {
   setSelectedFixItemId: Dispatch<SetStateAction<string | null>>;
   fixFilter: FixFilter;
   setFixFilter: Dispatch<SetStateAction<FixFilter>>;
-  fixFormData: ItemMetadata | null;
-  setFixFormData: Dispatch<SetStateAction<ItemMetadata | null>>;
   fixSearchQuery: string;
   setFixSearchQuery: Dispatch<SetStateAction<string>>;
   fixLoading: boolean;
   fixCandidates: EnrichmentCandidate[];
   fixCoverUrl: string | null;
   onFetchFixCover: (itemId: string, force?: boolean) => Promise<void>;
-  onSearchFixCandidates: () => void | Promise<void>;
   onSearchFixWithQuery: (query: string) => Promise<void>;
   onApplyFixCandidate: (candidate: EnrichmentCandidate) => void | Promise<void>;
   onSaveFixMetadata: (id: string, data: ItemMetadata) => Promise<void>;
-  onNavigateToEdit: (itemId: string) => void;
-  onMarkTitleCorrect: (itemId: string, title: string) => Promise<void>;
-  markingTitleCorrectId: string | null;
-  fixSaving: boolean;
   fixApplyingCandidateId: string | null;
-  fixApplyingMessage: string | null;
   getCandidateCoverUrl: (candidate: EnrichmentCandidate) => string | null;
   pendingChangesStatus: "pending" | "applied" | "error";
   setPendingChangesStatus: Dispatch<SetStateAction<"pending" | "applied" | "error">>;
@@ -240,24 +232,16 @@ export function AppRoutes(props: AppRoutesProps) {
     setSelectedFixItemId,
     fixFilter,
     setFixFilter,
-    fixFormData,
-    setFixFormData,
     fixSearchQuery,
     setFixSearchQuery,
     fixLoading,
     fixCandidates,
     fixCoverUrl,
     onFetchFixCover,
-    onSearchFixCandidates,
     onSearchFixWithQuery,
     onApplyFixCandidate,
     onSaveFixMetadata,
-    onNavigateToEdit,
-    onMarkTitleCorrect,
-    markingTitleCorrectId,
-    fixSaving,
     fixApplyingCandidateId,
-    fixApplyingMessage,
     getCandidateCoverUrl,
     pendingChangesStatus,
     setPendingChangesStatus,
@@ -425,26 +409,25 @@ export function AppRoutes(props: AppRoutesProps) {
           setSelectedItemId={setSelectedFixItemId}
           fixFilter={fixFilter}
           setFixFilter={setFixFilter}
-          formData={fixFormData}
-          setFormData={setFixFormData}
           searchQuery={fixSearchQuery}
           setSearchQuery={setFixSearchQuery}
           searchLoading={fixLoading}
           searchCandidates={fixCandidates}
           coverUrl={fixCoverUrl}
           onFetchCover={onFetchFixCover}
-          onSearch={() => void onSearchFixCandidates()}
           onSearchWithQuery={onSearchFixWithQuery}
           onApplyCandidate={(candidate) => void onApplyFixCandidate(candidate)}
           onSaveMetadata={onSaveFixMetadata}
-          onNavigateToEdit={onNavigateToEdit}
-          onMarkTitleCorrect={onMarkTitleCorrect}
-          markingTitleCorrectId={markingTitleCorrectId}
-          saving={fixSaving}
           applyingCandidateId={fixApplyingCandidateId}
-          applyingMessage={fixApplyingMessage}
           getCandidateCoverUrl={getCandidateCoverUrl}
+          onClearCover={clearCoverOverride}
+          onItemUpdate={async () => {
+            await onEditItemUpdate();
+          }}
           isDesktop={isDesktop}
+          onQueueRemoveItem={async (itemId) => {
+            await onQueueRemoveItem(itemId);
+          }}
           onEnrichAll={() => void onEnrichAll(allFixItems.map((item) => item.id))}
           onCancelEnrich={() => void onCancelEnrich()}
           enriching={enriching}

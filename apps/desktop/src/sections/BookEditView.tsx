@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ArrowLeft, Check, Image as ImageIcon, Loader2, Search, Trash2, X } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Input } from "../components/ui";
 import { LANGUAGE_OPTIONS } from "../lib/languageFlags";
 import { cleanupMetadataTitle } from "../lib/metadataCleanup";
@@ -17,10 +17,10 @@ type EmbeddedCoverCandidate = {
 type BookEditViewProps = {
     selectedItemId: string | null;
     libraryItems: LibraryItem[];
-    setView: Dispatch<SetStateAction<View>>;
-    previousView: View;
+    setView?: Dispatch<SetStateAction<View>>;
+    previousView?: View;
     isDesktop: boolean;
-    onItemUpdate: () => Promise<void>;
+    onItemUpdate?: () => Promise<void>;
     coverUrl: string | null;
     onFetchCover: (itemId: string, force?: boolean) => Promise<void>;
     onClearCover: (itemId: string) => void;
@@ -34,6 +34,8 @@ type BookEditViewProps = {
     matchApplyingId: string | null;
     onQueueRemoveItem: (itemId: string) => Promise<void>;
     getCandidateCoverUrl: (candidate: EnrichmentCandidate) => string | null;
+    onSaveMetadata?: (itemId: string, metadata: ItemMetadata) => Promise<void>;
+    embedded?: boolean;
 };
 
 export function BookEditView({
@@ -56,6 +58,8 @@ export function BookEditView({
     matchApplyingId,
     onQueueRemoveItem,
     getCandidateCoverUrl,
+    onSaveMetadata,
+    embedded = false,
 }: BookEditViewProps) {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -65,6 +69,8 @@ export function BookEditView({
     const [isQueueingRemove, setIsQueueingRemove] = useState(false);
     const [isLoadingEmbeddedPreview, setIsLoadingEmbeddedPreview] = useState(false);
     const [embeddedPreviewUrl, setEmbeddedPreviewUrl] = useState<string | null>(null);
+    const [localCoverUrl, setLocalCoverUrl] = useState<string | null>(null);
+    const [infoMessage, setInfoMessage] = useState<string | null>(null);
     const [embeddedCandidates, setEmbeddedCandidates] = useState<EmbeddedCoverCandidate[]>([]);
     const [selectedEmbeddedIndex, setSelectedEmbeddedIndex] = useState(0);
     const [formData, setFormData] = useState<ItemMetadata>({
@@ -79,11 +85,56 @@ export function BookEditView({
     });
 
     const selectedItem = libraryItems.find((item) => item.id === selectedItemId);
+    const displayCoverUrl = coverUrl ?? localCoverUrl;
+    const activeItemIdRef = useRef<string | null>(selectedItemId);
+    const embeddedPreviewUrlRef = useRef<string | null>(null);
+    const localCoverUrlRef = useRef<string | null>(null);
+
+    useEffect(() => {
+        activeItemIdRef.current = selectedItemId;
+        setError(null);
+        setInfoMessage(null);
+        setEmbeddedCandidates([]);
+        setSelectedEmbeddedIndex(0);
+        setEmbeddedPreviewUrl((previous) => {
+            if (previous) URL.revokeObjectURL(previous);
+            return null;
+        });
+        setLocalCoverUrl((previous) => {
+            if (previous) URL.revokeObjectURL(previous);
+            return null;
+        });
+    }, [selectedItemId]);
+
+    const loadLocalCoverBlob = useCallback(async (itemId: string) => {
+        try {
+            if (activeItemIdRef.current !== itemId) return false;
+            const result = await invoke<{ mime: string; bytes: number[] } | null>("get_cover_blob", { itemId });
+            if (activeItemIdRef.current !== itemId) return false;
+            if (!result) {
+                setLocalCoverUrl((previous) => {
+                    if (previous) URL.revokeObjectURL(previous);
+                    return null;
+                });
+                return false;
+            }
+            const blob = new Blob([new Uint8Array(result.bytes)], { type: result.mime });
+            const url = URL.createObjectURL(blob);
+            setLocalCoverUrl((previous) => {
+                if (previous) URL.revokeObjectURL(previous);
+                return url;
+            });
+            return true;
+        } catch {
+            return false;
+        }
+    }, []);
 
     useEffect(() => {
         if (selectedItemId && isDesktop) {
             setIsLoading(true);
             setError(null);
+            setInfoMessage(null);
             invoke<ItemMetadata>("get_item_details", { itemId: selectedItemId })
                 .then((details) => {
                     setFormData(details);
@@ -98,27 +149,56 @@ export function BookEditView({
             // Ensure cover is loaded
             if (selectedItemId && !coverUrl) {
                 void onFetchCover(selectedItemId);
+                void loadLocalCoverBlob(selectedItemId);
             }
         }
-    }, [selectedItemId, isDesktop, coverUrl, onFetchCover, detailsVersion]);
+    }, [
+        selectedItemId,
+        isDesktop,
+        coverUrl,
+        onFetchCover,
+        detailsVersion,
+        loadLocalCoverBlob,
+    ]);
+
+    useEffect(() => {
+        embeddedPreviewUrlRef.current = embeddedPreviewUrl;
+    }, [embeddedPreviewUrl]);
+
+    useEffect(() => {
+        localCoverUrlRef.current = localCoverUrl;
+    }, [localCoverUrl]);
 
     useEffect(() => {
         return () => {
-            if (embeddedPreviewUrl) {
-                URL.revokeObjectURL(embeddedPreviewUrl);
+            if (embeddedPreviewUrlRef.current) {
+                URL.revokeObjectURL(embeddedPreviewUrlRef.current);
+            }
+            if (localCoverUrlRef.current) {
+                URL.revokeObjectURL(localCoverUrlRef.current);
             }
         };
-    }, [embeddedPreviewUrl]);
+    }, []);
 
     const handleSave = async () => {
         if (!selectedItemId) return;
         setIsSaving(true);
         setError(null);
+        setInfoMessage(null);
         try {
-            await invoke("save_item_metadata", { itemId: selectedItemId, metadata: formData });
-            await onItemUpdate();
-            // Fallback to library-books if previousView is somehow edit
-            setView(previousView === "edit" ? "library-books" : previousView);
+            if (onSaveMetadata) {
+                await onSaveMetadata(selectedItemId, formData);
+            } else {
+                await invoke("save_item_metadata", { itemId: selectedItemId, metadata: formData });
+            }
+            if (onItemUpdate) {
+                await onItemUpdate();
+            }
+            if (!embedded && setView) {
+                const fallbackView: View = previousView ?? "library-books";
+                // Fallback to library-books if previousView is somehow edit
+                setView(fallbackView === "edit" ? "library-books" : fallbackView);
+            }
         } catch (err) {
             console.error("Failed to save", err);
             setError(err instanceof Error ? err.message : String(err));
@@ -128,7 +208,9 @@ export function BookEditView({
     };
 
     const handleCancel = () => {
-        setView(previousView === "edit" ? "library-books" : previousView);
+        if (embedded || !setView) return;
+        const fallbackView: View = previousView ?? "library-books";
+        setView(fallbackView === "edit" ? "library-books" : fallbackView);
     };
 
     const handleQueueRemove = async () => {
@@ -145,6 +227,7 @@ export function BookEditView({
 
         setIsQueueingRemove(true);
         setError(null);
+        setInfoMessage(null);
         try {
             await onQueueRemoveItem(selectedItemId);
         } catch (err) {
@@ -174,13 +257,14 @@ export function BookEditView({
 
             if (selected && typeof selected === "string") {
                 setIsUploadingCover(true);
+                setInfoMessage("Applying cover...");
                 await invoke("upload_cover", { itemId: selectedItemId, path: selected });
 
                 // Refresh cover
                 onClearCover(selectedItemId);
                 await onFetchCover(selectedItemId, true);
-
-                await onItemUpdate();
+                await loadLocalCoverBlob(selectedItemId);
+                setInfoMessage("Cover updated.");
                 setIsUploadingCover(false);
             }
         } catch (err) {
@@ -194,6 +278,7 @@ export function BookEditView({
         if (!selectedItemId) return;
         setIsApplyingEmbeddedCover(true);
         setError(null);
+        setInfoMessage("Applying embedded cover...");
         try {
             const selected = embeddedCandidates[selectedEmbeddedIndex];
             if (!selected) {
@@ -207,26 +292,38 @@ export function BookEditView({
             }
             onClearCover(selectedItemId);
             await onFetchCover(selectedItemId, true);
-            await onItemUpdate();
+            const hasLocalCover = await loadLocalCoverBlob(selectedItemId);
+            if (!hasLocalCover) {
+                setError("Embedded cover was selected, but could not be read back from the library database.");
+                setInfoMessage(null);
+                return;
+            }
+            setInfoMessage("Embedded cover applied.");
         } catch (err) {
             console.error("Failed to use embedded cover", err);
             setError(err instanceof Error ? err.message : "Failed to use embedded cover.");
+            setInfoMessage(null);
         } finally {
             setIsApplyingEmbeddedCover(false);
         }
     };
 
-    const handlePreviewEmbeddedCover = async () => {
-        if (!selectedItemId) return;
+    const loadEmbeddedCoverCandidates = useCallback(async (itemId: string) => {
         setIsLoadingEmbeddedPreview(true);
         setError(null);
         try {
             const result = await invoke<EmbeddedCoverCandidate[]>(
                 "list_embedded_cover_candidates",
-                { itemId: selectedItemId }
+                { itemId }
             );
+            if (activeItemIdRef.current !== itemId) return;
             if (!result.length) {
-                setError("No embedded cover found in EPUB.");
+                setEmbeddedCandidates([]);
+                setSelectedEmbeddedIndex(0);
+                setEmbeddedPreviewUrl((previous) => {
+                    if (previous) URL.revokeObjectURL(previous);
+                    return null;
+                });
                 return;
             }
             setEmbeddedCandidates(result);
@@ -239,11 +336,21 @@ export function BookEditView({
             });
         } catch (err) {
             console.error("Failed to load embedded cover preview", err);
-            setError(err instanceof Error ? err.message : "Failed to load embedded cover preview.");
+            if (activeItemIdRef.current === itemId) {
+                setEmbeddedCandidates([]);
+                setSelectedEmbeddedIndex(0);
+                setEmbeddedPreviewUrl((previous) => {
+                    if (previous) URL.revokeObjectURL(previous);
+                    return null;
+                });
+                setError(err instanceof Error ? err.message : "Failed to load embedded cover preview.");
+            }
         } finally {
-            setIsLoadingEmbeddedPreview(false);
+            if (activeItemIdRef.current === itemId) {
+                setIsLoadingEmbeddedPreview(false);
+            }
         }
-    };
+    }, []);
 
     const handleSelectEmbeddedCandidate = (index: number) => {
         const candidate = embeddedCandidates[index];
@@ -256,6 +363,11 @@ export function BookEditView({
         });
         setSelectedEmbeddedIndex(index);
     };
+
+    useEffect(() => {
+        if (!selectedItemId || !isDesktop) return;
+        void loadEmbeddedCoverCandidates(selectedItemId);
+    }, [selectedItemId, isDesktop, loadEmbeddedCoverCandidates]);
 
     if (!selectedItemId || !selectedItem) {
         return (
@@ -276,6 +388,7 @@ export function BookEditView({
     return (
         <div className="flex flex-col gap-6">
             {/* Header */}
+            {!embedded ? (
             <header className="flex items-center justify-between border-b border-app-border pb-3">
                 <div className="flex items-center gap-4">
                     <Button variant="ghost" size="sm" onClick={handleCancel} className="h-10 w-10 rounded-full border border-app-border bg-white shadow-soft hover:bg-white/80">
@@ -312,31 +425,44 @@ export function BookEditView({
                     </Button>
                 </div>
             </header>
+            ) : null}
 
             {/* Content */}
-            <div className="mx-auto w-full max-w-5xl">
+            <div className={embedded ? "w-full" : "mx-auto w-full max-w-5xl"}>
                 {error && (
                     <div className="mb-6 rounded-md bg-red-50 p-4 text-sm text-red-700 border border-red-200">
                         {error}
                     </div>
                 )}
+                {infoMessage && !error ? (
+                    <div className="mb-6 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+                        {infoMessage}
+                    </div>
+                ) : null}
 
-                <div className="grid grid-cols-1 gap-8 md:grid-cols-[280px_1fr_320px]">
+                <div
+                    className={
+                        embedded
+                            ? "grid grid-cols-1 gap-6 2xl:grid-cols-[260px_minmax(420px,1fr)_360px]"
+                            : "grid grid-cols-1 gap-8 md:grid-cols-[280px_1fr_320px]"
+                    }
+                >
                     {/* Left Column: Cover */}
                     <div className="space-y-4">
                         <h2 className="text-sm font-semibold uppercase tracking-wider text-app-ink-muted">
                             Book Cover
                         </h2>
                         <div className="group relative aspect-[3/4] w-full overflow-hidden rounded-lg border border-app-border bg-app-surface shadow-sm">
-                            {coverUrl ? (
+                            {displayCoverUrl ? (
                                 <img
-                                    src={coverUrl}
+                                    src={displayCoverUrl}
                                     alt=""
                                     className="h-full w-full object-cover"
                                     onError={() => {
                                         if (selectedItemId) {
                                             onClearCover(selectedItemId);
                                             void onFetchCover(selectedItemId, true);
+                                            void loadLocalCoverBlob(selectedItemId);
                                         }
                                     }}
                                 />
@@ -366,7 +492,7 @@ export function BookEditView({
                             variant="ghost"
                             className="w-full"
                             onClick={handleUseEmbeddedCover}
-                            disabled={isUploadingCover || isApplyingEmbeddedCover || isSaving}
+                            disabled={isUploadingCover || isApplyingEmbeddedCover || isSaving || isLoadingEmbeddedPreview}
                         >
                             {isApplyingEmbeddedCover ? (
                                 <Loader2 size={14} className="mr-2 animate-spin" />
@@ -378,14 +504,9 @@ export function BookEditView({
                         <div className="rounded-md border border-app-border bg-white p-3">
                             <div className="mb-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-app-ink-muted">
                                 Embedded Cover
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={handlePreviewEmbeddedCover}
-                                    disabled={isLoadingEmbeddedPreview || isApplyingEmbeddedCover || isSaving}
-                                >
-                                    {isLoadingEmbeddedPreview ? "Loading..." : "Preview"}
-                                </Button>
+                                {isLoadingEmbeddedPreview ? (
+                                    <span className="text-[10px] text-app-ink-muted">Loading...</span>
+                                ) : null}
                             </div>
                             {embeddedPreviewUrl ? (
                                 <div className="space-y-2">
@@ -420,7 +541,13 @@ export function BookEditView({
                     </div>
 
                     {/* Right Column: Metadata */}
-                    <div className="rounded-lg border border-app-border bg-white p-6 shadow-sm">
+                    <div
+                        className={
+                            embedded
+                                ? "rounded-lg border border-app-border bg-white p-6 shadow-sm 2xl:col-start-2"
+                                : "rounded-lg border border-app-border bg-white p-6 shadow-sm"
+                        }
+                    >
                         <h2 className="mb-6 text-sm font-semibold uppercase tracking-wider text-app-ink-muted">
                             Metadata details
                         </h2>
@@ -552,11 +679,42 @@ export function BookEditView({
                                     className="flex min-h-[160px] w-full rounded-md border border-app-border bg-white px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                 />
                             </div>
+
+                            {embedded ? (
+                                <div className="flex gap-2 pt-2">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handleQueueRemove}
+                                        disabled={isSaving || isUploadingCover || isQueueingRemove}
+                                        className="border-red-300 text-red-600 hover:bg-red-50"
+                                    >
+                                        {isQueueingRemove ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
+                                        Remove from Library
+                                    </Button>
+                                    <Button
+                                        variant="primary"
+                                        size="sm"
+                                        onClick={handleSave}
+                                        disabled={isSaving || isUploadingCover || isQueueingRemove}
+                                        className="ml-auto"
+                                    >
+                                        {isSaving ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Check size={14} className="mr-2" />}
+                                        Save Changes
+                                    </Button>
+                                </div>
+                            ) : null}
                         </div>
                     </div>
 
                     {/* Right Column: Match/Search */}
-                    <div className="flex flex-col rounded-lg border border-app-border bg-white p-4 shadow-sm">
+                    <div
+                        className={
+                            embedded
+                                ? "flex flex-col rounded-lg border border-app-border bg-white p-4 shadow-sm 2xl:col-start-3"
+                                : "flex flex-col rounded-lg border border-app-border bg-white p-4 shadow-sm"
+                        }
+                    >
                         <div className="mb-3 flex items-center justify-between">
                             <h2 className="text-xs font-semibold uppercase tracking-wider text-app-ink-muted">
                                 Match metadata

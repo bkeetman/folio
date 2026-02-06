@@ -5662,6 +5662,14 @@ fn extract_epub_cover_candidates(
       file.name().to_string()
     };
     let lower = name.to_lowercase();
+    // Skip macOS zip metadata/resource-fork paths that can masquerade as images.
+    if lower.starts_with("__macosx/")
+      || lower.contains("/__macosx/")
+      || lower.starts_with("._")
+      || lower.contains("/._")
+    {
+      continue;
+    }
     let is_image = lower.ends_with(".jpg")
       || lower.ends_with(".jpeg")
       || lower.ends_with(".png")
@@ -5711,16 +5719,9 @@ fn extract_epub_cover_candidates(
             score += 15_000_000;
           }
         }
-        let mime = match std::path::Path::new(&normalized)
-          .extension()
-          .and_then(|ext| ext.to_str())
-          .unwrap_or("jpg")
-          .to_lowercase()
-          .as_str()
-        {
-          "png" => "image/png",
-          "webp" => "image/webp",
-          _ => "image/jpeg",
+        let mime = match detect_image_mime(&bytes) {
+          Some(value) => value,
+          None => continue, // Ignore fake/broken "image" candidates.
         };
         candidates.push(EmbeddedCoverCandidate {
           path: normalized.clone(),
@@ -5735,11 +5736,13 @@ fn extract_epub_cover_candidates(
   if candidates.is_empty() {
     if let Ok(meta) = crate::parser::epub::parse_epub(path) {
       if let Some(cover_image) = meta.cover_image {
-        let mime = if meta.cover_mime.unwrap_or_default().contains("png") {
-          "image/png"
-        } else {
-          "image/jpeg"
-        };
+        let mime = detect_image_mime(&cover_image).unwrap_or_else(|| {
+          if meta.cover_mime.unwrap_or_default().contains("png") {
+            "image/png"
+          } else {
+            "image/jpeg"
+          }
+        });
         candidates.push(EmbeddedCoverCandidate {
           path: "opf:cover".to_string(),
           mime: mime.to_string(),
@@ -5752,6 +5755,34 @@ fn extract_epub_cover_candidates(
 
   candidates.sort_by(|a, b| b.score.cmp(&a.score));
   Ok(candidates)
+}
+
+fn detect_image_mime(bytes: &[u8]) -> Option<&'static str> {
+  if bytes.len() >= 8
+    && bytes[0] == 0x89
+    && bytes[1] == b'P'
+    && bytes[2] == b'N'
+    && bytes[3] == b'G'
+    && bytes[4] == b'\r'
+    && bytes[5] == b'\n'
+    && bytes[6] == 0x1A
+    && bytes[7] == b'\n'
+  {
+    return Some("image/png");
+  }
+  if bytes.len() >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF {
+    return Some("image/jpeg");
+  }
+  if bytes.len() >= 12
+    && &bytes[0..4] == b"RIFF"
+    && &bytes[8..12] == b"WEBP"
+  {
+    return Some("image/webp");
+  }
+  if bytes.len() >= 6 && (&bytes[0..6] == b"GIF87a" || &bytes[0..6] == b"GIF89a") {
+    return Some("image/gif");
+  }
+  None
 }
 
 fn extract_epub_cover(
