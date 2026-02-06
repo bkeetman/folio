@@ -50,7 +50,7 @@ export function OrganizerView({
                 </p>
             </div>
 
-            <div className="flex flex-col gap-4 rounded-xl border border-app-border bg-white p-6 shadow-sm">
+            <div className="flex flex-col gap-4 rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-panel)]/40 p-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="flex flex-col gap-2">
                         <label className="text-xs font-semibold uppercase tracking-wider text-app-ink-muted">Operation Mode</label>
@@ -60,8 +60,8 @@ export function OrganizerView({
                                     key={mode}
                                     onClick={() => setOrganizeMode(mode)}
                                     className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${organizeMode === mode
-                                            ? "bg-app-accent text-white border-app-accent shadow-sm"
-                                            : "bg-white text-app-ink border-app-border hover:border-app-accent/50"
+                                        ? "bg-app-accent text-white border-[var(--app-accent)]"
+                                        : "bg-app-surface/40 text-app-ink border-[var(--app-border-soft)] hover:border-[var(--app-accent)]/50"
                                         }`}
                                 >
                                     {mode.charAt(0).toUpperCase() + mode.slice(1)}
@@ -97,7 +97,7 @@ export function OrganizerView({
                     </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3 mt-2 border-t border-app-border pt-4">
+                <div className="flex flex-wrap items-center gap-3 mt-2 border-t border-[var(--app-border-soft)] pt-4">
                     {organizeStatus && (
                         <span className="flex items-center text-sm text-app-ink-muted">
                             {organizeStatus}
@@ -105,7 +105,7 @@ export function OrganizerView({
                     )}
                     {organizeProgress && (
                         <div className="flex items-center gap-2 text-xs text-app-ink-muted">
-                            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-app-border/40">
+                            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-[var(--app-border-soft)]">
                                 <div
                                     className="h-full rounded-full bg-app-accent transition-[width] duration-300 ease-out"
                                     style={{ width: `${progressPercent}%` }}
@@ -152,7 +152,7 @@ export function OrganizerView({
             </div>
 
             {organizeLog ? (
-                <div className="rounded-xl border border-app-border bg-white p-4 shadow-sm">
+                <div className="rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-panel)]/40 p-4">
                     <div className="flex items-center justify-between">
                         <div>
                             <div className="text-xs font-semibold uppercase tracking-wider text-app-ink-muted">
@@ -169,7 +169,7 @@ export function OrganizerView({
                     {organizeLog.errors > 0 ? (
                         <div className="mt-3 space-y-2">
                             {organizeLog.entries.filter((entry) => entry.error).slice(0, 5).map((entry, index) => (
-                                <div key={`${entry.from}-${index}`} className="rounded-md border border-app-border/60 bg-app-bg/40 px-3 py-2 text-xs text-app-ink">
+                                <div key={`${entry.from}-${index}`} className="rounded-md border border-[var(--app-border-soft)] bg-app-bg/40 px-3 py-2 text-xs text-app-ink">
                                     <div className="font-medium">{entry.error}</div>
                                     <div className="text-[10px] text-app-ink-muted truncate">{entry.from}</div>
                                 </div>
@@ -187,7 +187,7 @@ export function OrganizerView({
                         <h2 className="text-lg font-semibold text-app-ink">Preview ({actionableEntries.length} items)</h2>
                     </div>
 
-                    <div className="rounded-xl border border-app-border bg-white overflow-hidden shadow-sm">
+                    <div className="rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-panel)]/40 overflow-hidden">
                         <table className="w-full text-left text-sm table-fixed">
                             <thead className="bg-app-bg border-b border-app-border text-xs font-semibold uppercase text-app-ink-muted tracking-wider">
                                 <tr>
@@ -196,7 +196,7 @@ export function OrganizerView({
                                     <th className="px-4 py-3 w-[45%]">Target</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-app-border/40">
+                            <tbody className="divide-y divide-[var(--app-border-muted)]">
                                 {actionableEntries.map((entry, i) => {
                                     const sourceParts = entry.source_path.split(/[/\\]/);
                                     const targetParts = entry.target_path.split(/[/\\]/);

@@ -251,7 +251,7 @@ export function SeriesView({
                                 {/* Series index */}
                                 <span className="w-8 shrink-0 text-center">
                                   {book.seriesIndex ? (
-                                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-app-accent/20 text-[10px] font-bold text-app-accent-strong ring-1 ring-app-accent/20">
+                                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-app-accent/20 text-[10px] font-bold text-app-accent-strong ring-1 ring-[var(--app-accent)] ring-opacity-20">
                                       {book.seriesIndex}
                                     </span>
                                   ) : (
@@ -259,7 +259,7 @@ export function SeriesView({
                                   )}
                                 </span>
                                 {/* Cover thumbnail */}
-                                <div className="h-10 w-7 shrink-0 overflow-hidden rounded border border-app-border/20 bg-app-bg/10">
+                                <div className="h-10 w-7 shrink-0 overflow-hidden rounded border border-[var(--app-border-muted)] bg-app-bg/10">
                                   {book.cover ? (
                                     <img src={book.cover} alt="" className="h-full w-full object-cover" />
                                   ) : (
@@ -296,14 +296,14 @@ export function SeriesView({
       </div>
 
       {/* Alphabet index */}
-      <div className="sticky top-4 flex h-fit flex-col items-center gap-0.5 rounded-lg border border-app-border bg-app-surface/60 backdrop-blur-sm px-1 py-2">
+      <div className="sticky top-4 flex h-fit flex-col items-center gap-0.5 rounded-lg border border-[var(--app-border-soft)] bg-app-surface/60 backdrop-blur-sm px-1 py-2">
         {ALPHABET.map((letter) => {
           const isAvailable = availableLetters.has(letter);
           return (
             <button
               key={letter}
               className={`w-6 h-5 text-[11px] font-medium rounded transition ${isAvailable
-                ? "text-app-ink hover:bg-app-accent/20 hover:text-app-accent-strong"
+                ? "text-app-ink hover:bg-app-accent/20 hover:text-[var(--app-accent-strong)]"
                 : "text-app-ink-muted/30 cursor-default"
                 }`}
               onClick={() => isAvailable && scrollToLetter(letter)}

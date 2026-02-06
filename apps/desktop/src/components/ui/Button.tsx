@@ -22,7 +22,7 @@ const buttonVariants = cva(
         ghost:
           "bg-transparent text-app-ink hover:bg-app-ink/5",
         toolbar:
-          "bg-app-surface text-app-ink border border-app-border hover:bg-app-bg shadow-sm",
+          "bg-app-surface/40 text-app-ink border border-transparent hover:bg-app-surface-hover hover:border-[var(--app-border-muted)]",
         outline:
           "bg-transparent text-app-ink border border-app-border hover:bg-app-bg",
         danger:

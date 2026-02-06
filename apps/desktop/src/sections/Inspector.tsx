@@ -103,7 +103,7 @@ export function Inspector({
     setView("library-books");
   };
   return (
-    <aside className="flex h-screen flex-col gap-3 overflow-hidden border-l border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-4">
+    <aside className="flex h-screen flex-col gap-3 overflow-hidden border-l border-[var(--app-border-soft)] bg-[var(--app-surface)] px-3 py-4">
       <div className="flex items-center justify-between">
         <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--app-ink-muted)]">
           {t("inspector.details")}
@@ -115,9 +115,9 @@ export function Inspector({
       <Separator />
       {selectedItem ? (
         <div className="flex h-full flex-col overflow-y-auto pb-4 [&::-webkit-scrollbar]:hidden">
-          <div className="rounded-md border border-app-border bg-app-surface/40 p-3 shadow-inner">
+          <div className="rounded-md border border-[var(--app-border-muted)] bg-app-surface/40 p-3">
             <div className="flex gap-3">
-              <div className="h-28 w-20 flex-none overflow-hidden rounded-md border border-app-border/40 bg-app-bg">
+              <div className="h-28 w-20 flex-none overflow-hidden rounded-md border border-[var(--app-border-muted)] bg-app-bg">
                 {selectedItem.cover ? (
                   <img
                     className="h-full w-full object-cover"
@@ -223,7 +223,7 @@ export function Inspector({
                   selectedTags.map((tag) => (
                     <button
                       key={tag.id}
-                      className={`flex items - center gap - 1 rounded - full border px - 2 py - 0.5 text - [11px] ${getTagColorClass(tag.color)} `}
+                      className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${getTagColorClass(tag.color)}`}
                       onClick={() => handleRemoveTag(tag.id)}
                     >
                       {tag.name}
@@ -272,10 +272,10 @@ export function Inspector({
                     return (
                       <span
                         key={lang}
-                        className={`inline - flex items - center gap - 1 rounded - full border px - 2 py - 0.5 text - [11px] ${isCurrent
-                          ? "border-app-accent/40 bg-app-accent/10"
-                          : "border-app-border bg-app-surface/50"
-                          } `}
+                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${isCurrent
+                          ? "border-[var(--app-accent)] border-opacity-40 bg-app-accent/10"
+                          : "border-[var(--app-border-soft)] bg-app-surface/50"
+                          }`}
                         title={name}
                       >
                         {flag && <span>{flag}</span>}

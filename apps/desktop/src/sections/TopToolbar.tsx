@@ -69,7 +69,7 @@ export function TopToolbar({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-3 rounded-full border border-app-border bg-app-surface/50 px-4 py-1.5 shadow-sm flex-1 min-w-[320px]">
+          <div className="flex items-center gap-3 rounded-full border border-[var(--app-border-soft)] bg-app-surface/50 px-4 py-1.5 shadow-sm flex-1 min-w-[320px]">
             <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-app-ink-muted">
               {t("topbar.activity")}
             </div>
@@ -94,7 +94,7 @@ export function TopToolbar({
             ) : null}
           </div>
 
-          <div className="flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] p-1 shadow-soft">
+          <div className="flex items-center gap-1 rounded-md border border-transparent bg-[var(--app-panel)] p-1">
             {updateAvailable ? (
               <Button variant="toolbar" size="sm" className="hover:bg-white" onClick={() => checkForUpdates(false)}>
                 <Download size={14} />
@@ -113,15 +113,15 @@ export function TopToolbar({
                 className="pl-8"
               />
             </div>
-            <div className="flex items-center rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] p-1">
+            <div className="flex items-center rounded-md border border-transparent bg-[var(--app-panel)] p-1">
               <Button
                 variant="toolbar"
                 size="sm"
                 data-active={grid}
                 className={
                   grid
-                    ? "bg-app-accent/20 text-app-accent shadow-sm border-app-accent/30"
-                    : "hover:bg-app-surface-hover hover:border-app-border"
+                    ? "bg-app-accent/15 text-app-accent border-[var(--app-accent)] border-opacity-20"
+                    : "border-transparent bg-transparent hover:bg-app-surface-hover/50"
                 }
                 onClick={() => setGrid(true)}
               >
@@ -133,8 +133,8 @@ export function TopToolbar({
                 data-active={!grid}
                 className={
                   !grid
-                    ? "bg-app-accent/20 text-app-accent shadow-sm border-app-accent/30"
-                    : "hover:bg-app-surface-hover hover:border-app-border"
+                    ? "bg-app-accent/15 text-app-accent border-[var(--app-accent)] border-opacity-20"
+                    : "border-transparent bg-transparent hover:bg-app-surface-hover/50"
                 }
                 onClick={() => setGrid(false)}
               >

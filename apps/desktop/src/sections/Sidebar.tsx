@@ -64,7 +64,7 @@ export function Sidebar({
               {t("sidebar.calmLibrary")}
             </span>
             {appVersion && (
-              <span className="rounded-full bg-app-border/40 px-1.5 py-0.5 text-[9px] font-bold text-app-ink-muted/80 ring-1 ring-white/5">
+              <span className="rounded-full bg-app-border-soft px-1.5 py-0.5 text-[9px] font-bold text-app-ink-muted/80 ring-1 ring-white/5">
                 v{appVersion}
               </span>
             )}
@@ -211,7 +211,7 @@ export function Sidebar({
             </div>
 
             {/* Progress Bar */}
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-app-border/30 mb-4 ring-1 ring-white/5">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--app-border-muted)] mb-4 ring-1 ring-white/5">
               <div
                 className="h-full bg-gradient-to-r from-app-accent to-app-accent-strong transition-all duration-700 ease-out shadow-[0_0_8px_rgba(234,88,12,0.3)]"
                 style={{
@@ -223,7 +223,7 @@ export function Sidebar({
             </div>
 
             <div className="grid grid-cols-3 gap-1">
-              <div className="flex flex-col items-center justify-center rounded-lg py-2 hover:bg-app-border/30 transition-colors">
+              <div className="flex flex-col items-center justify-center rounded-lg py-2 hover:bg-app-surface-hover transition-colors">
                 <span className="text-app-ink-muted mb-1">
                   <Wrench size={12} strokeWidth={2.5} />
                 </span>
@@ -234,7 +234,7 @@ export function Sidebar({
                   {t("sidebar.noIsbn")}
                 </span>
               </div>
-              <div className="flex flex-col items-center justify-center rounded-lg py-2 hover:bg-app-border/30 transition-colors border-x border-app-border/20">
+              <div className="flex flex-col items-center justify-center rounded-lg py-2 hover:bg-app-surface-hover transition-colors border-x border-[var(--app-border-muted)]">
                 <span className="text-app-ink-muted mb-1">
                   <ImageIcon size={12} strokeWidth={2.5} />
                 </span>
@@ -245,7 +245,7 @@ export function Sidebar({
                   {t("sidebar.noCover")}
                 </span>
               </div>
-              <div className="flex flex-col items-center justify-center rounded-lg py-2 hover:bg-app-border/30 transition-colors">
+              <div className="flex flex-col items-center justify-center rounded-lg py-2 hover:bg-app-surface-hover transition-colors">
                 <span className="text-app-ink-muted mb-1">
                   <Copy size={12} strokeWidth={2.5} />
                 </span>

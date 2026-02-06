@@ -99,7 +99,7 @@ export function BookCard({
 
                 {/* Format / Meta */}
                 <div className="flex items-center gap-2">
-                    <span className="rounded border border-app-border/30 bg-app-bg/50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-app-ink-muted/80">
+                    <span className="rounded border border-[var(--app-border-soft)] bg-app-bg/50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-app-ink-muted/80">
                         {book.format}
                     </span>
                     {languageFlag && (
@@ -118,7 +118,7 @@ export function BookCard({
             className={cn(
                 "group flex cursor-pointer flex-col overflow-hidden rounded-lg border transition-all duration-200",
                 selected
-                    ? "border-app-accent/30 ring-1 ring-app-accent/10 bg-app-accent/5 shadow-none"
+                    ? "border-[var(--app-accent)] border-opacity-40 ring-2 ring-[var(--app-accent)] ring-opacity-10 bg-[var(--app-accent)] bg-opacity-5"
                     : "border-transparent bg-transparent shadow-none hover:bg-app-surface/10"
             )}
             onClick={onSelect}
@@ -167,7 +167,7 @@ export function BookCard({
                 {/* Meta Row (Format, Lang) - NOW BELOW COVER */}
                 <div className="mb-2 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
-                        <span className="inline-flex h-5 items-center rounded border border-app-border/10 bg-app-bg/20 px-1.5 text-[10px] font-bold uppercase tracking-wider text-app-ink-muted/50">
+                        <span className="inline-flex h-5 items-center rounded border border-[var(--app-border-muted)] bg-app-bg/20 px-1.5 text-[10px] font-bold uppercase tracking-wider text-app-ink-muted/50">
                             {book.format}
                         </span>
                         {languageFlag && <span className="text-xs opacity-80 grayscale transition-all group-hover:grayscale-0">{languageFlag}</span>}

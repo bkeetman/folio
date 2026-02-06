@@ -61,13 +61,13 @@ export function LibraryView({
     <>
       {/* Active Filter Bar */}
       {hasActiveFilter && (
-        <div className="flex items-center gap-2 rounded-lg border border-app-accent/20 bg-app-accent/5 px-3 py-2">
+        <div className="flex items-center gap-2 rounded-lg border-[var(--app-accent)] border-opacity-20 bg-app-accent/5 px-3 py-2">
           <Filter size={14} className="text-app-accent" />
           <div className="flex flex-wrap gap-2 text-xs">
             {selectedAuthorNames.map((name) => (
               <span
                 key={name}
-                className="inline-flex items-center gap-1 rounded bg-app-surface/80 px-1.5 py-0.5 shadow-sm border border-app-accent/20 text-app-ink"
+                className="inline-flex items-center gap-1 rounded bg-app-surface/80 px-1.5 py-0.5 shadow-sm border-[var(--app-accent)] border-opacity-20 text-app-ink"
               >
                 <span className="text-app-ink-muted">{t("library.authorPrefix")}</span> {name}
                 <button
@@ -81,7 +81,7 @@ export function LibraryView({
             {selectedSeries.map((name) => (
               <span
                 key={name}
-                className="inline-flex items-center gap-1 rounded bg-app-surface/80 px-1.5 py-0.5 shadow-sm border border-app-accent/20 text-app-ink"
+                className="inline-flex items-center gap-1 rounded bg-app-surface/80 px-1.5 py-0.5 shadow-sm border-[var(--app-accent)] border-opacity-20 text-app-ink"
               >
                 <span className="text-app-ink-muted">{t("library.seriesPrefix")}</span> {name}
                 <button
@@ -107,7 +107,7 @@ export function LibraryView({
 
       {/* Main Toolbar */}
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 bg-app-bg/95 py-2 backdrop-blur-sm transition-all">
-        <div className="flex h-8 items-center rounded-lg border border-app-border bg-app-surface p-1 shadow-sm">
+        <div className="flex h-8 items-center rounded-lg border border-[var(--app-border-muted)] bg-app-surface p-1">
           <FilterOption
             active={libraryFilter === "all"}
             onClick={() => setLibraryFilter("all")}
@@ -126,7 +126,7 @@ export function LibraryView({
           />
         </div>
 
-        <div className="flex h-8 items-center rounded-lg border border-app-border bg-app-surface p-1 shadow-sm ml-auto sm:ml-0">
+        <div className="flex h-8 items-center rounded-lg border border-[var(--app-border-muted)] bg-app-surface p-1 ml-auto sm:ml-0">
           <FilterOption
             active={libraryFilter === "needs-metadata"}
             onClick={() => setLibraryFilter("needs-metadata")}
@@ -141,14 +141,14 @@ export function LibraryView({
           />
         </div>
 
-        <div className="ml-2 flex h-8 items-center gap-2 rounded-lg border border-app-border bg-app-surface px-2 shadow-sm">
+        <div className="ml-2 flex h-8 items-center gap-2 rounded-lg border border-[var(--app-border-muted)] bg-app-surface px-2">
           <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-app-ink-muted">
             {t("library.sort")}
           </span>
           <select
             value={librarySort}
             onChange={(event) => setLibrarySort(event.target.value as LibrarySort)}
-            className="h-7 rounded-md border border-app-border bg-app-surface/80 px-2 text-[11px] text-app-ink focus:outline-none focus:ring-1 focus:ring-app-accent"
+            className="h-7 rounded-md border border-[var(--app-border-muted)] bg-app-surface/80 px-2 text-[11px] text-app-ink focus:outline-none focus:ring-1 focus:ring-app-accent"
           >
             <option value="default">{t("library.sortDefault")}</option>
             <option value="title-asc">{t("library.sortTitleAsc")}</option>

@@ -28,10 +28,12 @@
   --app-panel: #1b1e23;
   --app-ink: #e6edf3;
   --app-ink-muted: #8b949e;
-  --app-border: rgba(48, 54, 61, 0.25);
+  --app-border: rgba(48, 54, 61, 0.45);
+  --app-border-soft: rgba(48, 54, 61, 0.25);
+  --app-border-muted: rgba(48, 54, 61, 0.12);
   --app-accent: #f97316;
   --app-accent-strong: #ea580c;
-  --app-ring: rgba(249, 115, 22, 0.26);
+  --app-ring: rgba(249, 115, 22, 0.3);
   --app-bg-secondary: rgba(110, 118, 129, 0.08);
   --app-bg-tertiary: rgba(110, 118, 129, 0.12);
   --app-surface-hover: rgba(110, 118, 129, 0.15);
