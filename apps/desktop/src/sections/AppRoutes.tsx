@@ -14,6 +14,7 @@ import { SettingsView } from "./SettingsView";
 import { SeriesView } from "./SeriesView";
 import { TagsView } from "./TagsView";
 import type { FilteredBook } from "../hooks/useLibrarySelectors";
+import type { ThemeMode } from "../hooks/useTheme";
 import type {
   DuplicateGroup,
   EnrichmentCandidate,
@@ -178,6 +179,8 @@ type AppRoutesProps = {
   ereaderScanning: boolean;
   ereaderSyncing: boolean;
   ereaderSyncProgress: SyncProgress | null;
+  themeMode: ThemeMode;
+  setThemeMode: Dispatch<SetStateAction<ThemeMode>>;
 };
 
 export function AppRoutes(props: AppRoutesProps) {
@@ -322,6 +325,8 @@ export function AppRoutes(props: AppRoutesProps) {
     ereaderScanning,
     ereaderSyncing,
     ereaderSyncProgress,
+    themeMode,
+    setThemeMode,
   } = props;
 
   return (
@@ -495,6 +500,8 @@ export function AppRoutes(props: AppRoutesProps) {
           normalizingDescriptions={normalizingDescriptions}
           onBatchFixTitles={onBatchFixTitles}
           batchFixingTitles={batchFixingTitles}
+          themeMode={themeMode}
+          setThemeMode={setThemeMode}
         />
       ) : null}
 

@@ -13,11 +13,30 @@
   --app-accent: #ea580c; /* Sharper orange (Tailwind orange-600) for punch */
   --app-accent-strong: #c2410c;
   --app-ring: rgba(234, 88, 12, 0.15); /* Focus ring color */
+  --app-bg-secondary: rgba(26, 22, 20, 0.04);
+  --app-bg-tertiary: rgba(26, 22, 20, 0.07);
   font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+:root[data-theme="dark"] {
+  --app-bg: #090a0c;
+  --app-surface: #111418;
+  --app-panel: #1b1e23;
+  --app-ink: #e6edf3;
+  --app-ink-muted: #8b949e;
+  --app-border: rgba(48, 54, 61, 0.25);
+  --app-accent: #f97316;
+  --app-accent-strong: #ea580c;
+  --app-ring: rgba(249, 115, 22, 0.26);
+  --app-bg-secondary: rgba(110, 118, 129, 0.08);
+  --app-bg-tertiary: rgba(110, 118, 129, 0.12);
+  --app-surface-hover: rgba(110, 118, 129, 0.15);
+  --app-surface-active: rgba(249, 115, 22, 0.12);
+  color-scheme: dark;
 }
 
 * {
@@ -34,6 +53,28 @@ body {
   line-height: 1.45;
 }
 
+:root[data-theme="dark"] body {
+  background:
+    radial-gradient(circle at 0% 0%, rgba(249, 115, 22, 0.05), transparent 40%),
+    radial-gradient(circle at 100% 0%, rgba(59, 130, 246, 0.05), transparent 40%),
+    var(--app-bg);
+}
+
+.surface-gradient {
+  background: linear-gradient(180deg, var(--app-panel) 0%, var(--app-surface) 100%);
+}
+
+.glass-panel {
+  background: rgba(27, 30, 35, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--app-border);
+}
+
+:root[data-theme="dark"] .glass-panel {
+  background: rgba(17, 20, 24, 0.7);
+  box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.2);
+}
+
 #root {
   min-height: 100vh;
 }
@@ -45,6 +86,40 @@ a {
 
 button,
 input,
-select {
+select,
+textarea {
   font-family: inherit;
+}
+
+:root[data-theme="dark"] .bg-white {
+  background-color: var(--app-surface) !important;
+}
+
+:root[data-theme="dark"] .bg-white\/80 {
+  background-color: rgba(31, 37, 44, 0.88) !important;
+}
+
+:root[data-theme="dark"] .bg-white\/70 {
+  background-color: rgba(31, 37, 44, 0.78) !important;
+}
+
+:root[data-theme="dark"] .bg-white\/60 {
+  background-color: rgba(31, 37, 44, 0.66) !important;
+}
+
+:root[data-theme="dark"] .bg-white\/50 {
+  background-color: rgba(31, 37, 44, 0.55) !important;
+}
+
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea {
+  color: var(--app-ink);
+  background-color: var(--app-surface);
+  border-color: var(--app-border);
+}
+
+:root[data-theme="dark"] input::placeholder,
+:root[data-theme="dark"] textarea::placeholder {
+  color: var(--app-ink-muted);
 }

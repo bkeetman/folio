@@ -54,11 +54,9 @@ export function Sidebar({
 }: SidebarProps) {
   const { t } = useTranslation();
   return (
-    <aside className="flex h-screen flex-col overflow-hidden border-r border-app-border bg-app-surface">
-      <div className="flex-none flex items-center gap-3 border-b border-app-border px-4 py-5 bg-app-surface">
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-sm border border-app-border/50">
-          <img src="/folio-icon.png" alt="Folio" className="h-8 w-8" />
-        </div>
+    <aside className="flex h-screen flex-col overflow-hidden border-r border-app-border bg-app-surface shadow-xl">
+      <div className="flex-none flex items-center gap-3 border-b border-app-border px-4 py-5 bg-app-surface/50 backdrop-blur-md">
+        <img src="/folio-icon.png" alt="Folio" className="h-10 w-10 drop-shadow-sm" />
         <div className="flex flex-col justify-center">
           <span className="text-lg font-bold tracking-tight text-app-ink leading-none">Folio</span>
           <div className="flex items-center gap-1.5 mt-1">
@@ -66,7 +64,7 @@ export function Sidebar({
               {t("sidebar.calmLibrary")}
             </span>
             {appVersion && (
-              <span className="rounded-full bg-app-border/50 px-1.5 py-0.5 text-[9px] font-medium text-app-ink-muted">
+              <span className="rounded-full bg-app-border/40 px-1.5 py-0.5 text-[9px] font-bold text-app-ink-muted/80 ring-1 ring-white/5">
                 v{appVersion}
               </span>
             )}
@@ -136,7 +134,7 @@ export function Sidebar({
             <span className="flex flex-1 items-center justify-between gap-2">
               <span>{t("sidebar.duplicates")}</span>
               {duplicateCount > 0 ? (
-                <span className="min-w-[20px] rounded-full bg-app-accent/10 px-2 py-0.5 text-[10px] font-semibold text-app-accent">
+                <span className="min-w-[20px] rounded-full bg-app-accent/15 px-2 py-0.5 text-[10px] font-bold text-app-accent-strong ring-1 ring-app-accent/20">
                   {duplicateCount}
                 </span>
               ) : null}
@@ -213,9 +211,9 @@ export function Sidebar({
             </div>
 
             {/* Progress Bar */}
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-app-border/40 mb-4">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-app-border/30 mb-4 ring-1 ring-white/5">
               <div
-                className="h-full bg-app-accent transition-all duration-500 ease-out"
+                className="h-full bg-gradient-to-r from-app-accent to-app-accent-strong transition-all duration-700 ease-out shadow-[0_0_8px_rgba(234,88,12,0.3)]"
                 style={{
                   width: libraryHealth
                     ? `${(libraryHealth.complete / Math.max(1, libraryHealth.total)) * 100}%`

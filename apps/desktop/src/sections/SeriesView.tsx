@@ -1,9 +1,9 @@
-import { useMemo, useState, useRef } from "react";
+import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
-import type { BookDisplay, View } from "../types/library";
-import { Search, ChevronDown, ChevronRight } from "lucide-react";
-import { getLanguageFlag } from "../lib/languageFlags";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { getLanguageFlag } from "../lib/languageFlags";
+import type { BookDisplay, View } from "../types/library";
 
 type Series = {
   name: string;
@@ -131,9 +131,9 @@ export function SeriesView({
 
   if (series.length === 0) {
     return (
-      <div className="rounded-lg border border-[var(--app-border)] bg-white/70 p-4">
+      <div className="rounded-lg border border-app-border bg-app-surface/70 p-4">
         <div className="text-[13px] font-semibold">{t("series.noneTitle")}</div>
-        <div className="text-xs text-[var(--app-ink-muted)]">
+        <div className="text-xs text-app-ink-muted">
           {t("series.emptyHint")}
         </div>
       </div>
@@ -148,14 +148,14 @@ export function SeriesView({
         <div className="relative">
           <Search
             size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--app-ink-muted)]"
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-app-ink-muted"
           />
           <input
             type="text"
             placeholder={t("series.searchPlaceholder")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-lg border border-[var(--app-border)] bg-white/80 py-2 pl-10 pr-4 text-sm placeholder:text-[var(--app-ink-muted)] focus:border-[rgba(208,138,70,0.6)] focus:outline-none"
+            className="w-full rounded-lg border border-app-border bg-app-surface/50 py-2 pl-10 pr-4 text-sm placeholder:text-app-ink-muted focus:border-app-accent/40 focus:outline-none transition-colors"
           />
           {searchQuery && (
             <button
@@ -176,9 +176,9 @@ export function SeriesView({
 
         {/* Series list grouped by letter */}
         {filteredSeries.length === 0 ? (
-          <div className="rounded-lg border border-[var(--app-border)] bg-white/70 p-4">
+          <div className="rounded-lg border border-app-border bg-app-surface/70 p-4">
             <div className="text-[13px] font-semibold">{t("series.noneTitle")}</div>
-            <div className="text-xs text-[var(--app-ink-muted)]">
+            <div className="text-xs text-app-ink-muted">
               {t("series.noneHint")}
             </div>
           </div>
@@ -207,28 +207,28 @@ export function SeriesView({
                     return (
                       <div
                         key={s.name}
-                        className="rounded-lg border border-[var(--app-border)] bg-white/80 transition"
+                        className="rounded-lg border border-transparent bg-app-surface/10 hover:bg-app-surface/20 transition overflow-hidden"
                       >
                         {/* Series header */}
                         <div className="flex items-center">
                           <button
-                            className="flex flex-1 items-center gap-2 px-3 py-2 text-left text-sm transition hover:bg-[rgba(208,138,70,0.04)]"
+                            className="flex flex-1 items-center gap-2 px-3 py-2.5 text-left text-sm transition hover:bg-app-accent/5 group"
                             onClick={() => toggleExpanded(s.name)}
                           >
                             {isExpanded ? (
-                              <ChevronDown size={16} className="shrink-0 text-[var(--app-ink-muted)]" />
+                              <ChevronDown size={14} className="shrink-0 text-app-ink-muted group-hover:text-app-accent transition-colors" strokeWidth={2.5} />
                             ) : (
-                              <ChevronRight size={16} className="shrink-0 text-[var(--app-ink-muted)]" />
+                              <ChevronRight size={14} className="shrink-0 text-app-ink-muted group-hover:text-app-accent transition-colors" strokeWidth={2.5} />
                             )}
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate font-medium">{s.name}</span>
+                              <span className="block truncate font-semibold text-app-ink">{s.name}</span>
                               {seriesAuthors ? (
-                                <span className="block truncate text-xs text-[var(--app-ink-muted)]">
+                                <span className="block truncate text-[11px] text-app-ink-muted/80">
                                   {seriesAuthors}
                                 </span>
                               ) : null}
                             </span>
-                            <span className="ml-auto shrink-0 text-xs text-[var(--app-ink-muted)]">
+                            <span className="ml-auto shrink-0 text-[10px] font-medium text-app-ink-muted uppercase tracking-wider bg-app-bg-secondary px-1.5 py-0.5 rounded">
                               {t("series.booksCount", { count: s.bookCount })}
                             </span>
                           </button>
@@ -241,31 +241,29 @@ export function SeriesView({
                         </div>
                         {/* Expanded books list */}
                         {isExpanded && seriesBooks.length > 0 && (
-                          <div className="border-t border-[var(--app-border)] bg-[rgba(255,253,249,0.6)]">
-                            {seriesBooks.map((book, i) => (
+                          <div className="border-t border-transparent bg-app-bg/5">
+                            {seriesBooks.map((book) => (
                               <button
                                 key={book.id}
-                                className={`flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition hover:bg-[rgba(208,138,70,0.06)] ${
-                                  i < seriesBooks.length - 1 ? "border-b border-[var(--app-border)]/50" : ""
-                                }`}
+                                className={`flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition hover:bg-app-accent/10`}
                                 onClick={() => onSelectBook(book.id)}
                               >
                                 {/* Series index */}
                                 <span className="w-8 shrink-0 text-center">
                                   {book.seriesIndex ? (
-                                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[rgba(208,138,70,0.15)] text-xs font-semibold text-[var(--app-accent-strong)]">
+                                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-app-accent/20 text-[10px] font-bold text-app-accent-strong ring-1 ring-app-accent/20">
                                       {book.seriesIndex}
                                     </span>
                                   ) : (
-                                    <span className="text-xs text-[var(--app-ink-muted)]">—</span>
+                                    <span className="text-[10px] text-app-ink-muted">—</span>
                                   )}
                                 </span>
                                 {/* Cover thumbnail */}
-                                <div className="h-10 w-7 shrink-0 overflow-hidden rounded border border-[var(--app-border)] bg-[#fffaf4]">
+                                <div className="h-10 w-7 shrink-0 overflow-hidden rounded border border-app-border/20 bg-app-bg/10">
                                   {book.cover ? (
                                     <img src={book.cover} alt="" className="h-full w-full object-cover" />
                                   ) : (
-                                    <div className="flex h-full w-full items-center justify-center text-[6px] text-[var(--app-ink-muted)]">
+                                    <div className="flex h-full w-full items-center justify-center text-[6px] text-app-ink-muted/60">
                                       {book.format}
                                     </div>
                                   )}
@@ -280,7 +278,7 @@ export function SeriesView({
                                   <span className="shrink-0 text-sm">{getLanguageFlag(book.language)}</span>
                                 )}
                                 {/* Format badge */}
-                                <span className="shrink-0 rounded bg-[var(--app-bg)] px-1.5 py-0.5 text-[10px] uppercase text-[var(--app-ink-muted)]">
+                                <span className="shrink-0 rounded bg-app-bg/40 px-1.5 py-0.5 text-[10px] uppercase text-app-ink-muted">
                                   {book.format}
                                 </span>
                               </button>
@@ -298,17 +296,16 @@ export function SeriesView({
       </div>
 
       {/* Alphabet index */}
-      <div className="sticky top-4 flex h-fit flex-col items-center gap-0.5 rounded-lg border border-[var(--app-border)] bg-white/80 px-1 py-2">
+      <div className="sticky top-4 flex h-fit flex-col items-center gap-0.5 rounded-lg border border-app-border bg-app-surface/60 backdrop-blur-sm px-1 py-2">
         {ALPHABET.map((letter) => {
           const isAvailable = availableLetters.has(letter);
           return (
             <button
               key={letter}
-              className={`w-6 h-5 text-[11px] font-medium rounded transition ${
-                isAvailable
-                  ? "text-[var(--app-ink)] hover:bg-[rgba(208,138,70,0.15)] hover:text-[var(--app-accent-strong)]"
-                  : "text-[var(--app-ink-muted)]/40 cursor-default"
-              }`}
+              className={`w-6 h-5 text-[11px] font-medium rounded transition ${isAvailable
+                ? "text-app-ink hover:bg-app-accent/20 hover:text-app-accent-strong"
+                : "text-app-ink-muted/30 cursor-default"
+                }`}
               onClick={() => isAvailable && scrollToLetter(letter)}
               disabled={!isAvailable}
             >

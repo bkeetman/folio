@@ -10,8 +10,8 @@ export function SidebarItem({ active, className, ...props }: SidebarItemProps) {
     <button
       className={cn(
         "flex w-full items-center gap-2 rounded-md border border-transparent px-2.5 py-2 text-left text-[13px] font-medium text-[var(--app-ink)] transition",
-        "hover:bg-white/80 hover:border-[var(--app-border)]",
-        active && "bg-white border-[var(--app-border)] shadow-soft",
+        "hover:bg-[var(--app-surface)] hover:border-[var(--app-border)]",
+        active && "bg-[var(--app-surface)] border-[var(--app-border)] shadow-soft",
         className
       )}
       {...props}

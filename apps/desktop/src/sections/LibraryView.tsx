@@ -67,7 +67,7 @@ export function LibraryView({
             {selectedAuthorNames.map((name) => (
               <span
                 key={name}
-                className="inline-flex items-center gap-1 rounded bg-white px-1.5 py-0.5 shadow-sm border border-app-accent/20 text-app-ink"
+                className="inline-flex items-center gap-1 rounded bg-app-surface/80 px-1.5 py-0.5 shadow-sm border border-app-accent/20 text-app-ink"
               >
                 <span className="text-app-ink-muted">{t("library.authorPrefix")}</span> {name}
                 <button
@@ -81,7 +81,7 @@ export function LibraryView({
             {selectedSeries.map((name) => (
               <span
                 key={name}
-                className="inline-flex items-center gap-1 rounded bg-white px-1.5 py-0.5 shadow-sm border border-app-accent/20 text-app-ink"
+                className="inline-flex items-center gap-1 rounded bg-app-surface/80 px-1.5 py-0.5 shadow-sm border border-app-accent/20 text-app-ink"
               >
                 <span className="text-app-ink-muted">{t("library.seriesPrefix")}</span> {name}
                 <button
@@ -148,7 +148,7 @@ export function LibraryView({
           <select
             value={librarySort}
             onChange={(event) => setLibrarySort(event.target.value as LibrarySort)}
-            className="h-7 rounded-md border border-[var(--app-border)] bg-white px-2 text-[11px]"
+            className="h-7 rounded-md border border-app-border bg-app-surface/80 px-2 text-[11px] text-app-ink focus:outline-none focus:ring-1 focus:ring-app-accent"
           >
             <option value="default">{t("library.sortDefault")}</option>
             <option value="title-asc">{t("library.sortTitleAsc")}</option>
@@ -169,8 +169,8 @@ export function LibraryView({
               className={cn(
                 "flex h-6 items-center rounded-full border px-2.5 text-[10px] font-medium transition-colors",
                 selectedTagIds.length === 0
-                  ? "border-app-ink/20 bg-app-ink/5 text-app-ink"
-                  : "border-transparent text-app-ink-muted hover:bg-black/5"
+                  ? "border-app-ink/20 bg-app-ink/10 text-app-ink"
+                  : "border-transparent text-app-ink-muted hover:bg-app-surface-hover"
               )}
               onClick={() => setSelectedTagIds([])}
             >
@@ -185,7 +185,7 @@ export function LibraryView({
                     "flex h-6 items-center rounded-full border text-[10px] font-medium px-2.5 transition-all",
                     active
                       ? getTagColorClass(tag.color)
-                      : "border-transparent bg-app-surface text-app-ink-muted hover:bg-black/5 hover:text-app-ink"
+                      : "border-transparent bg-app-surface text-app-ink-muted hover:bg-app-surface-hover hover:text-app-ink"
                   )}
                   onClick={() => {
                     setSelectedTagIds((prev) =>
@@ -208,7 +208,8 @@ export function LibraryView({
           <div className="mb-2 text-sm font-semibold text-app-ink">{t("library.empty")}</div>
           <p className="text-xs text-app-ink-muted">{t("library.emptyHint")}</p>
         </div>
-      ) : null}
+      ) : null
+      }
 
       <LibraryGrid
         books={filteredBooks}
@@ -232,9 +233,9 @@ function FilterOption({ active, onClick, label, warning }: { active: boolean; on
         "rounded px-3 py-1 text-[11px] font-medium transition-all",
         active
           ? warning
-            ? "bg-amber-100/50 text-amber-700 shadow-sm"
-            : "bg-app-ink/5 text-app-ink shadow-sm"
-          : "text-app-ink-muted hover:bg-black/5 hover:text-app-ink"
+            ? "bg-amber-100/50 text-amber-700 shadow-sm dark:bg-amber-900/40 dark:text-amber-300"
+            : "bg-app-ink/10 text-app-ink shadow-sm dark:bg-app-accent/20 dark:text-app-accent"
+          : "text-app-ink-muted hover:bg-app-surface-hover hover:text-app-ink"
       )}
     >
       {label}

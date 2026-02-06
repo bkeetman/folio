@@ -1,4 +1,5 @@
 import { Button, Input } from "../components/ui";
+import type { ThemeMode } from "../hooks/useTheme";
 import { useTranslation } from "react-i18next";
 import { i18n } from "../i18n";
 
@@ -9,6 +10,8 @@ type SettingsViewProps = {
   normalizingDescriptions: boolean;
   onBatchFixTitles: () => Promise<void>;
   batchFixingTitles: boolean;
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
 };
 
 export function SettingsView({
@@ -18,6 +21,8 @@ export function SettingsView({
   normalizingDescriptions,
   onBatchFixTitles,
   batchFixingTitles,
+  themeMode,
+  setThemeMode,
 }: SettingsViewProps) {
   const { t } = useTranslation();
   const isICloudPath =
@@ -33,23 +38,44 @@ export function SettingsView({
       </div>
 
       <div className="mb-4 rounded-xl border border-app-border bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-2">
-          <label className="text-xs font-semibold uppercase tracking-wider text-app-ink-muted">
-            {t("settings.language")}
-          </label>
-          <div className="max-w-xs">
-            <select
-              value={i18n.resolvedLanguage?.startsWith("nl") ? "nl" : "en"}
-              onChange={(event) => {
-                void i18n.changeLanguage(event.target.value);
-              }}
-              className="h-10 w-full rounded-md border border-app-border bg-white px-3 text-sm text-app-ink"
-            >
-              <option value="en">English</option>
-              <option value="nl">Nederlands</option>
-            </select>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-app-ink-muted">
+              {t("settings.language")}
+            </label>
+            <div className="max-w-xs">
+              <select
+                value={i18n.resolvedLanguage?.startsWith("nl") ? "nl" : "en"}
+                onChange={(event) => {
+                  void i18n.changeLanguage(event.target.value);
+                }}
+                className="h-10 w-full rounded-md border border-app-border bg-white px-3 text-sm text-app-ink"
+              >
+                <option value="en">English</option>
+                <option value="nl">Nederlands</option>
+              </select>
+            </div>
+            <p className="text-xs text-app-ink-muted mt-1">{t("settings.languageHint")}</p>
           </div>
-          <p className="text-xs text-app-ink-muted mt-1">{t("settings.languageHint")}</p>
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-app-ink-muted">
+              {t("settings.theme")}
+            </label>
+            <div className="max-w-xs">
+              <select
+                value={themeMode}
+                onChange={(event) => {
+                  setThemeMode(event.target.value as ThemeMode);
+                }}
+                className="h-10 w-full rounded-md border border-app-border bg-white px-3 text-sm text-app-ink"
+              >
+                <option value="system">{t("settings.themeSystem")}</option>
+                <option value="light">{t("settings.themeLight")}</option>
+                <option value="dark">{t("settings.themeDark")}</option>
+              </select>
+            </div>
+            <p className="text-xs text-app-ink-muted mt-1">{t("settings.themeHint")}</p>
+          </div>
         </div>
       </div>
 

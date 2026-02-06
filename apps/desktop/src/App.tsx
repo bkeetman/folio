@@ -8,6 +8,7 @@ import { useLibraryData } from "./hooks/useLibraryData";
 import { useLibrarySelectors } from "./hooks/useLibrarySelectors";
 import { useOrganizer } from "./hooks/useOrganizer";
 import { useUpdater } from "./hooks/useUpdater";
+import { useTheme } from "./hooks/useTheme";
 import {
   sampleBooks,
   sampleDuplicateGroups,
@@ -143,6 +144,8 @@ function App() {
     updateVersion,
     checkForUpdates,
   } = useUpdater({ isDesktop });
+
+  const { themeMode, setThemeMode } = useTheme();
 
   const {
     organizePlan,
@@ -1521,6 +1524,8 @@ function App() {
             normalizingDescriptions={normalizingDescriptions}
             onBatchFixTitles={handleBatchFixTitles}
             batchFixingTitles={batchFixingTitles}
+            themeMode={themeMode}
+            setThemeMode={setThemeMode}
             missingFiles={missingFiles}
             onRelinkMissing={handleRelinkMissing}
             onRemoveMissing={handleRemoveMissing}

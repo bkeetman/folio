@@ -34,8 +34,8 @@ export function BookCard({
                 className={cn(
                     "grid cursor-pointer grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr] gap-4 border-b border-app-border px-4 py-3 transition-colors last:border-0",
                     selected
-                        ? "bg-app-accent/5"
-                        : "hover:bg-app-border/30 bg-app-panel"
+                        ? "bg-app-accent/10"
+                        : "hover:bg-app-surface-hover bg-transparent"
                 )}
                 onClick={onSelect}
                 role="button"
@@ -99,7 +99,7 @@ export function BookCard({
 
                 {/* Format / Meta */}
                 <div className="flex items-center gap-2">
-                    <span className="rounded border border-app-border bg-app-bg px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-app-ink-muted">
+                    <span className="rounded border border-app-border/30 bg-app-bg/50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-app-ink-muted/80">
                         {book.format}
                     </span>
                     {languageFlag && (
@@ -118,8 +118,8 @@ export function BookCard({
             className={cn(
                 "group flex cursor-pointer flex-col overflow-hidden rounded-lg border transition-all duration-200",
                 selected
-                    ? "border-app-accent ring-1 ring-app-accent/20 bg-app-surface shadow-md"
-                    : "border-app-border bg-app-surface shadow-sm hover:border-app-accent/50 hover:shadow-md"
+                    ? "border-app-accent/30 ring-1 ring-app-accent/10 bg-app-accent/5 shadow-none"
+                    : "border-transparent bg-transparent shadow-none hover:bg-app-surface/10"
             )}
             onClick={onSelect}
             role="button"
@@ -129,7 +129,7 @@ export function BookCard({
             }}
         >
             {/* Cover Area */}
-            <div className="relative aspect-[2/3] w-full overflow-hidden bg-app-bg border-b border-app-border/50">
+            <div className="relative aspect-[2/3] w-full overflow-hidden bg-app-bg/10">
                 {book.cover ? (
                     <img
                         key={`${book.id}-${coverRefreshToken}-${book.cover ?? "none"}`}
@@ -143,7 +143,7 @@ export function BookCard({
                     />
                 ) : (
                     <div className="flex h-full flex-col items-center justify-center p-4 text-center">
-                        <div className="mb-3 grid h-12 w-12 place-items-center rounded-full bg-app-border/30 text-app-ink-muted">
+                        <div className="mb-3 grid h-12 w-12 place-items-center rounded-full bg-app-bg text-app-ink-muted ring-1 ring-white/5 shadow-sm">
                             <span className="text-lg font-bold">{book.title.slice(0, 1).toUpperCase()}</span>
                         </div>
                         <div className="line-clamp-3 text-sm font-medium leading-snug text-app-ink/80">
@@ -154,7 +154,7 @@ export function BookCard({
 
                 {/* Series Badge (Subtle, top right) */}
                 {book.series && (
-                    <div className="absolute top-2 right-2 max-w-[80%] truncate rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm">
+                    <div className="absolute top-2 right-2 max-w-[80%] truncate rounded bg-black/60 border border-white/10 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-md">
                         {book.series} {book.seriesIndex && `#${book.seriesIndex}`}
                     </div>
                 )}
@@ -167,7 +167,7 @@ export function BookCard({
                 {/* Meta Row (Format, Lang) - NOW BELOW COVER */}
                 <div className="mb-2 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
-                        <span className="inline-flex h-5 items-center rounded border border-app-border bg-app-bg px-1.5 text-[10px] font-bold uppercase tracking-wider text-app-ink-muted/80">
+                        <span className="inline-flex h-5 items-center rounded border border-app-border/10 bg-app-bg/20 px-1.5 text-[10px] font-bold uppercase tracking-wider text-app-ink-muted/50">
                             {book.format}
                         </span>
                         {languageFlag && <span className="text-xs opacity-80 grayscale transition-all group-hover:grayscale-0">{languageFlag}</span>}

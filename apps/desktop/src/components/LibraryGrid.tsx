@@ -26,8 +26,8 @@ export function LibraryGrid({
     const { t } = useTranslation();
     if (viewMode === "list") {
         return (
-            <div className="overflow-hidden rounded-lg border border-[var(--app-border)] bg-[#fffdf9]">
-                <div className="grid grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr] gap-3 bg-[#f9f4ee] px-4 py-2 text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
+            <div className="overflow-hidden rounded-lg border border-app-border bg-app-panel surface-gradient shadow-sm">
+                <div className="grid grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr] gap-3 bg-app-bg-secondary px-4 py-2 text-[10px] uppercase tracking-[0.12em] text-app-ink-muted">
                     <div></div>
                     <div>{t("library.columnTitle")}</div>
                     <div>{t("library.columnAuthor")}</div>
@@ -52,7 +52,7 @@ export function LibraryGrid({
     }
 
     return (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3 rounded-lg bg-[linear-gradient(180deg,rgba(255,255,255,0.45),rgba(255,255,255,0.45)),repeating-linear-gradient(to_bottom,rgba(44,38,33,0.05)_0px,rgba(44,38,33,0.05)_2px,transparent_2px,transparent_190px)] p-3">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3 rounded-lg bg-app-bg/10 p-3 shadow-inner ring-1 ring-white/5">
             {books.map((book) => (
                 <BookCard
                     key={book.id}

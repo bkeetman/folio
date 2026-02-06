@@ -108,16 +108,16 @@ export function Inspector({
         <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--app-ink-muted)]">
           {t("inspector.details")}
         </div>
-        <div className="rounded-full border border-[var(--app-border)] bg-white/70 px-2 py-0.5 text-[10px] text-[var(--app-ink-muted)]">
+        <div className="rounded-full border border-app-border bg-app-surface/50 px-2 py-0.5 text-[10px] text-app-ink-muted">
           {t("inspector.inspector")}
         </div>
       </div>
       <Separator />
       {selectedItem ? (
         <div className="flex h-full flex-col overflow-y-auto pb-4 [&::-webkit-scrollbar]:hidden">
-          <div className="rounded-md border border-[var(--app-border)] bg-white/80 p-3">
+          <div className="rounded-md border border-app-border bg-app-surface/40 p-3 shadow-inner">
             <div className="flex gap-3">
-              <div className="h-28 w-20 flex-none overflow-hidden rounded-md border border-[var(--app-border)] bg-[#fffaf4]">
+              <div className="h-28 w-20 flex-none overflow-hidden rounded-md border border-app-border/40 bg-app-bg">
                 {selectedItem.cover ? (
                   <img
                     className="h-full w-full object-cover"
@@ -189,7 +189,7 @@ export function Inspector({
                 </div>
                 <div className="flex flex-col gap-1">
                   {files.map((file) => (
-                    <div key={file.id} className="group flex items-center justify-between rounded border border-transparent bg-app-bg/50 px-2 py-1.5 hover:border-app-border hover:bg-white">
+                    <div key={file.id} className="group flex items-center justify-between rounded border border-transparent bg-app-bg/30 px-2 py-1.5 hover:border-app-border hover:bg-app-surface">
                       <div className="flex items-center gap-2 overflow-hidden">
                         <FileText size={12} className="text-app-ink-muted flex-none" />
                         <div className="flex flex-col overflow-hidden">
@@ -244,7 +244,7 @@ export function Inspector({
                     availableTags.map((tag) => (
                       <button
                         key={tag.id}
-                        className={`rounded - full border px - 2 py - 0.5 text - [11px] hover: bg - white ${getTagColorClass(tag.color)} `}
+                        className={`rounded-full border px-2 py-0.5 text-[11px] hover:bg-app-surface-hover ${getTagColorClass(tag.color)}`}
                         onClick={() => handleAddTag(tag.id)}
                       >
                         {tag.name}
@@ -273,8 +273,8 @@ export function Inspector({
                       <span
                         key={lang}
                         className={`inline - flex items - center gap - 1 rounded - full border px - 2 py - 0.5 text - [11px] ${isCurrent
-                          ? "border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.12)]"
-                          : "border-[var(--app-border)] bg-white/80"
+                          ? "border-app-accent/40 bg-app-accent/10"
+                          : "border-app-border bg-app-surface/50"
                           } `}
                         title={name}
                       >

@@ -1,8 +1,8 @@
-import type { Dispatch, SetStateAction } from "react";
-import type { ActivityLogItem, OperationProgress, ScanProgress, View } from "../types/library";
-import { Badge, Button, Input } from "../components/ui";
 import { Download, LayoutGrid, List, Search } from "lucide-react";
+import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
+import { Badge, Button, Input } from "../components/ui";
+import type { ActivityLogItem, OperationProgress, ScanProgress, View } from "../types/library";
 
 type TopToolbarProps = {
   view: View;
@@ -69,7 +69,7 @@ export function TopToolbar({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-3 rounded-full border border-[var(--app-border)] bg-white/70 px-4 py-1.5 shadow-soft flex-1 min-w-[320px]">
+          <div className="flex items-center gap-3 rounded-full border border-app-border bg-app-surface/50 px-4 py-1.5 shadow-sm flex-1 min-w-[320px]">
             <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-app-ink-muted">
               {t("topbar.activity")}
             </div>
@@ -114,32 +114,32 @@ export function TopToolbar({
               />
             </div>
             <div className="flex items-center rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] p-1">
-            <Button
-              variant="toolbar"
-              size="sm"
-              data-active={grid}
-              className={
-                grid
-                  ? "bg-white shadow-soft"
-                  : "hover:bg-white/80 hover:border-[var(--app-border)]"
-              }
-              onClick={() => setGrid(true)}
-            >
-              <LayoutGrid size={14} />
-            </Button>
-            <Button
-              variant="toolbar"
-              size="sm"
-              data-active={!grid}
-              className={
-                !grid
-                  ? "bg-white shadow-soft"
-                  : "hover:bg-white/80 hover:border-[var(--app-border)]"
-              }
-              onClick={() => setGrid(false)}
-            >
-              <List size={14} />
-            </Button>
+              <Button
+                variant="toolbar"
+                size="sm"
+                data-active={grid}
+                className={
+                  grid
+                    ? "bg-app-accent/20 text-app-accent shadow-sm border-app-accent/30"
+                    : "hover:bg-app-surface-hover hover:border-app-border"
+                }
+                onClick={() => setGrid(true)}
+              >
+                <LayoutGrid size={14} />
+              </Button>
+              <Button
+                variant="toolbar"
+                size="sm"
+                data-active={!grid}
+                className={
+                  !grid
+                    ? "bg-app-accent/20 text-app-accent shadow-sm border-app-accent/30"
+                    : "hover:bg-app-surface-hover hover:border-app-border"
+                }
+                onClick={() => setGrid(false)}
+              >
+                <List size={14} />
+              </Button>
             </div>
           </div>
 
