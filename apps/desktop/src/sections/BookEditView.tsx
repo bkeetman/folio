@@ -446,16 +446,22 @@ export function BookEditView({
                 <div
                     className={
                         embedded
-                            ? "grid grid-cols-1 gap-6 2xl:grid-cols-[260px_minmax(420px,1fr)_360px]"
+                            ? "grid grid-cols-1 gap-6 xl:grid-cols-[220px_minmax(0,1fr)] 2xl:grid-cols-[220px_minmax(420px,1fr)_340px]"
                             : "grid grid-cols-1 gap-8 md:grid-cols-[280px_1fr_320px]"
                     }
                 >
                     {/* Left Column: Cover */}
-                    <div className="space-y-4">
+                    <div className={embedded ? "order-2 space-y-4 xl:order-1" : "space-y-4"}>
                         <h2 className="text-sm font-semibold uppercase tracking-wider text-app-ink-muted">
                             {t("bookEdit.bookCover")}
                         </h2>
-                        <div className="group relative aspect-[3/4] w-full overflow-hidden rounded-lg border border-app-border bg-app-surface shadow-sm">
+                        <div
+                            className={
+                                embedded
+                                    ? "group relative mx-auto aspect-[3/4] w-full max-w-[220px] overflow-hidden rounded-lg border border-app-border bg-app-surface shadow-sm"
+                                    : "group relative aspect-[3/4] w-full overflow-hidden rounded-lg border border-app-border bg-app-surface shadow-sm"
+                            }
+                        >
                             {displayCoverUrl ? (
                                 <img
                                     src={displayCoverUrl}
@@ -547,7 +553,7 @@ export function BookEditView({
                     <div
                         className={
                             embedded
-                                ? "rounded-lg border border-[var(--app-border-soft)] bg-app-panel p-6 shadow-none 2xl:col-start-2"
+                                ? "order-1 rounded-lg border border-[var(--app-border-soft)] bg-app-panel p-6 shadow-none xl:order-2 xl:col-start-2 2xl:col-start-2"
                                 : "rounded-lg border border-[var(--app-border-soft)] bg-app-panel p-6 shadow-none"
                         }
                     >
@@ -714,7 +720,7 @@ export function BookEditView({
                     <div
                         className={
                             embedded
-                                ? "flex flex-col rounded-lg border border-[var(--app-border-soft)] bg-app-panel p-4 shadow-none 2xl:col-start-3"
+                                ? "order-3 flex flex-col rounded-lg border border-[var(--app-border-soft)] bg-app-panel p-4 shadow-none xl:col-span-2 2xl:col-span-1 2xl:col-start-3"
                                 : "flex flex-col rounded-lg border border-[var(--app-border-soft)] bg-app-panel p-4 shadow-none"
                         }
                     >
