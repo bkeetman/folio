@@ -272,7 +272,7 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
       <div className="flex gap-4">
         <button
           onClick={() => void handleSelectFiles()}
-          className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-app-border bg-white p-8 transition-all hover:border-app-accent hover:bg-app-accent/5"
+          className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-[var(--app-border-soft)] bg-app-panel p-8 transition-all hover:border-app-accent hover:bg-app-accent/5"
         >
           <FileUp size={40} className="text-app-ink-muted" />
           <div className="text-center">
@@ -340,7 +340,7 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
   const renderNewBookRow = (book: ImportCandidate) => (
     <label
       key={book.id}
-      className="flex cursor-pointer items-center gap-3 rounded-lg border border-app-border bg-white px-4 py-3 transition-colors hover:bg-app-bg/50"
+      className="flex cursor-pointer items-center gap-3 rounded-lg border border-[var(--app-border-soft)] bg-app-panel px-4 py-3 transition-colors hover:bg-app-bg/50"
     >
       <input
         type="checkbox"
@@ -372,7 +372,7 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
     return (
       <div
         key={dup.id}
-        className="rounded-lg border border-app-border bg-white px-4 py-3"
+        className="rounded-lg border border-[var(--app-border-soft)] bg-app-panel px-4 py-3"
       >
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
@@ -591,8 +591,8 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
   // Render error screen
   const renderErrorScreen = () => (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8">
-      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-100">
-        <AlertCircle size={32} className="text-red-600" />
+      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500/10 border border-red-500/20">
+        <AlertCircle size={32} className="text-red-500" />
       </div>
       <div className="text-center">
         <h2 className="text-xl font-semibold text-app-ink">Import Failed</h2>

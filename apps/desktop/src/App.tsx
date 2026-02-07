@@ -1,8 +1,9 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { ProgressBar, ScanProgressBar } from "./components/ProgressBar";
 import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
+import { useDebouncedValue } from "./hooks/useDebouncedValue";
 import { useEreader } from "./hooks/useEreader";
 import { useLibraryData } from "./hooks/useLibraryData";
 import { useLibrarySelectors } from "./hooks/useLibrarySelectors";
@@ -46,7 +47,9 @@ function App() {
   const [previousView, setPreviousView] = useState<View>("library-books");
   const [activityLog, setActivityLog] = useState<ActivityLogItem[]>([]); // New State
   const [grid, setGrid] = useState(true);
-  const [query, setQuery] = useState("");
+  const [queryInput, setQueryInput] = useState("");
+  const debouncedQuery = useDebouncedValue(queryInput, 180);
+  const query = useDeferredValue(debouncedQuery);
   const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>("all");
   const [librarySort, setLibrarySort] = useState<LibrarySort>("default");
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
@@ -132,7 +135,6 @@ function App() {
     missingFiles,
     libraryHealth,
     titleCleanupIgnoreMap,
-    coverRefreshToken,
     refreshLibrary,
     resetLibraryState,
   } = useLibraryData({ setScanStatus });
@@ -362,7 +364,19 @@ function App() {
         typeof coverOverrideRef.current[item.id] !== "string"
     );
     if (!itemsToLoad.length) return;
-    void Promise.all(itemsToLoad.map((item) => fetchCoverOverride(item.id)));
+    let cancelled = false;
+    const loadInBatches = async () => {
+      const batchSize = 6;
+      for (let index = 0; index < itemsToLoad.length; index += batchSize) {
+        if (cancelled) return;
+        const batch = itemsToLoad.slice(index, index + batchSize);
+        await Promise.all(batch.map((item) => fetchCoverOverride(item.id)));
+      }
+    };
+    void loadInBatches();
+    return () => {
+      cancelled = true;
+    };
   }, [libraryItems, isDesktop, fetchCoverOverride]);
 
   useEffect(() => {
@@ -1393,8 +1407,8 @@ function App() {
           <TopToolbar
             view={view}
             checkForUpdates={(silent) => void checkForUpdates(silent)}
-            query={query}
-            setQuery={setQuery}
+            query={queryInput}
+            setQuery={setQueryInput}
             grid={grid}
             setGrid={setGrid}
             libraryReady={libraryReady}
@@ -1440,9 +1454,9 @@ function App() {
             selectedTagIds={selectedTagIds}
             setSelectedTagIds={setSelectedTagIds}
             grid={grid}
-            coverRefreshToken={coverRefreshToken}
             fetchCoverOverride={fetchCoverOverride}
             clearCoverOverride={clearCoverOverride}
+            scrollContainerRef={mainScrollRef}
             selectedAuthorNames={selectedAuthorNames}
             setSelectedAuthorNames={setSelectedAuthorNames}
             selectedSeries={selectedSeries}

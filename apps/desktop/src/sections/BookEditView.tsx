@@ -392,53 +392,53 @@ export function BookEditView({
         <div className="flex flex-col gap-6">
             {/* Header */}
             {!embedded ? (
-            <header className="flex items-center justify-between border-b border-app-border pb-3">
-                <div className="flex items-center gap-4">
-                    <Button variant="ghost" size="sm" onClick={handleCancel} className="h-10 w-10 rounded-full border border-app-border bg-white shadow-soft hover:bg-white/80">
-                        <ArrowLeft size={18} />
-                    </Button>
-                    <div className="space-y-0.5">
-                        <h1 className="text-lg font-semibold leading-tight">{t("bookEdit.editBook")}</h1>
-                        <p className="text-[11px] text-app-ink-muted">{selectedItem.title || t("bookEdit.untitled")}</p>
+                <header className="flex items-center justify-between border-b border-app-border pb-3">
+                    <div className="flex items-center gap-4">
+                        <Button variant="ghost" size="sm" onClick={handleCancel} className="h-10 w-10 rounded-full border border-[var(--app-border-soft)] bg-app-surface/60 hover:bg-app-surface-hover transition-colors">
+                            <ArrowLeft size={18} />
+                        </Button>
+                        <div className="space-y-0.5">
+                            <h1 className="text-lg font-semibold leading-tight">{t("bookEdit.editBook")}</h1>
+                            <p className="text-[11px] text-app-ink-muted">{selectedItem.title || t("bookEdit.untitled")}</p>
+                        </div>
                     </div>
-                </div>
-                <div className="flex gap-2 items-center">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleQueueRemove}
-                        disabled={isSaving || isUploadingCover || isQueueingRemove}
-                        className="h-9 px-4 border-red-300 text-red-600 hover:bg-red-50"
-                    >
-                        {isQueueingRemove ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
-                        {t("bookEdit.removeFromLibrary")}
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={handleCancel} disabled={isSaving || isUploadingCover || isQueueingRemove} className="h-9 px-4">
-                        <X size={14} className="mr-2" />
-                        {t("bookEdit.cancel")}
-                    </Button>
-                    <Button
-                        size="sm"
-                        className="h-9 px-4 bg-app-accent hover:bg-app-accent-hover text-white shadow-soft"
-                        onClick={handleSave}
-                        disabled={isSaving || isUploadingCover || isQueueingRemove}
-                    >
-                        {isSaving ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Check size={14} className="mr-2" />}
-                        {t("bookEdit.saveChanges")}
-                    </Button>
-                </div>
-            </header>
+                    <div className="flex gap-2 items-center">
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={handleQueueRemove}
+                            disabled={isSaving || isUploadingCover || isQueueingRemove}
+                            className="h-9 w-9 text-red-500/70 hover:text-red-500 hover:bg-red-500/10"
+                            title={t("bookEdit.removeFromLibrary")}
+                        >
+                            {isQueueingRemove ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={handleCancel} disabled={isSaving || isUploadingCover || isQueueingRemove} className="h-9 px-4 border-[var(--app-border-soft)]">
+                            <X size={14} className="mr-2" />
+                            {t("bookEdit.cancel")}
+                        </Button>
+                        <Button
+                            size="sm"
+                            className="h-9 px-4 bg-app-accent hover:bg-app-accent-hover text-white shadow-soft"
+                            onClick={handleSave}
+                            disabled={isSaving || isUploadingCover || isQueueingRemove}
+                        >
+                            {isSaving ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Check size={14} className="mr-2" />}
+                            {t("bookEdit.saveChanges")}
+                        </Button>
+                    </div>
+                </header>
             ) : null}
 
             {/* Content */}
             <div className={embedded ? "w-full" : "mx-auto w-full max-w-5xl"}>
                 {error && (
-                    <div className="mb-6 rounded-md bg-red-50 p-4 text-sm text-red-700 border border-red-200">
+                    <div className="mb-6 rounded-md bg-red-500/10 p-4 text-sm text-red-500 border border-red-500/20">
                         {error}
                     </div>
                 )}
                 {infoMessage && !error ? (
-                    <div className="mb-6 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+                    <div className="mb-6 rounded-md border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-500 transition-all">
                         {infoMessage}
                     </div>
                 ) : null}
@@ -477,7 +477,7 @@ export function BookEditView({
                             )}
 
                             {isUploadingCover && (
-                                <div className="absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-[2px]">
+                                <div className="absolute inset-0 flex items-center justify-center bg-app-surface/60 backdrop-blur-[2px]">
                                     <Loader2 className="h-8 w-8 animate-spin text-app-accent" />
                                 </div>
                             )}
@@ -504,11 +504,11 @@ export function BookEditView({
                             )}
                             {t("bookEdit.useEmbeddedCover")}
                         </Button>
-                        <div className="rounded-md border border-app-border bg-white p-3">
+                        <div className="rounded-md border border-[var(--app-border-soft)] bg-app-panel p-3">
                             <div className="mb-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-app-ink-muted">
                                 {t("bookEdit.embeddedCover")}
                                 {isLoadingEmbeddedPreview ? (
-                                <span className="text-[10px] text-app-ink-muted">{t("bookEdit.loading")}</span>
+                                    <span className="text-[10px] text-app-ink-muted">{t("bookEdit.loading")}</span>
                                 ) : null}
                             </div>
                             {embeddedPreviewUrl ? (
@@ -520,7 +520,7 @@ export function BookEditView({
                                     />
                                     {embeddedCandidates.length > 1 ? (
                                         <select
-                                            className="h-8 w-full rounded-md border border-app-border bg-white px-2 text-[10px]"
+                                            className="h-8 w-full rounded-md border border-[var(--app-border-soft)] bg-app-surface px-2 text-[10px]"
                                             value={String(selectedEmbeddedIndex)}
                                             onChange={(event) =>
                                                 handleSelectEmbeddedCandidate(parseInt(event.target.value, 10))
@@ -547,8 +547,8 @@ export function BookEditView({
                     <div
                         className={
                             embedded
-                                ? "rounded-lg border border-app-border bg-white p-6 shadow-sm 2xl:col-start-2"
-                                : "rounded-lg border border-app-border bg-white p-6 shadow-sm"
+                                ? "rounded-lg border border-[var(--app-border-soft)] bg-app-panel p-6 shadow-none 2xl:col-start-2"
+                                : "rounded-lg border border-[var(--app-border-soft)] bg-app-panel p-6 shadow-none"
                         }
                     >
                         <h2 className="mb-6 text-sm font-semibold uppercase tracking-wider text-app-ink-muted">
@@ -623,7 +623,7 @@ export function BookEditView({
                                     <select
                                         value={formData.language ?? ""}
                                         onChange={(e) => setFormData({ ...formData, language: e.target.value || null })}
-                                        className="h-10 w-full rounded-md border border-app-border bg-white px-3 text-sm text-app-ink"
+                                        className="h-10 w-full rounded-md border border-[var(--app-border-soft)] bg-app-surface px-3 text-sm text-app-ink"
                                     >
                                         <option value="">{t("bookEdit.select")}</option>
                                         {LANGUAGE_OPTIONS.map((lang) => (
@@ -679,21 +679,21 @@ export function BookEditView({
                                     value={formData.description || ""}
                                     onChange={(e) => setFormData({ ...formData, description: e.target.value || null })}
                                     placeholder={t("bookEdit.descriptionPlaceholder")}
-                                    className="flex min-h-[160px] w-full rounded-md border border-app-border bg-white px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    className="flex min-h-[160px] w-full rounded-md border border-[var(--app-border-soft)] bg-app-surface px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                 />
                             </div>
 
                             {embedded ? (
                                 <div className="flex gap-2 pt-2">
                                     <Button
-                                        variant="outline"
-                                        size="sm"
+                                        variant="ghost"
+                                        size="icon"
                                         onClick={handleQueueRemove}
                                         disabled={isSaving || isUploadingCover || isQueueingRemove}
-                                        className="border-red-300 text-red-600 hover:bg-red-50"
+                                        className="h-9 w-9 text-red-500/70 hover:text-red-500 hover:bg-red-500/10"
+                                        title={t("bookEdit.removeFromLibrary")}
                                     >
-                                        {isQueueingRemove ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
-                                        {t("bookEdit.removeFromLibrary")}
+                                        {isQueueingRemove ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
                                     </Button>
                                     <Button
                                         variant="primary"
@@ -714,8 +714,8 @@ export function BookEditView({
                     <div
                         className={
                             embedded
-                                ? "flex flex-col rounded-lg border border-app-border bg-white p-4 shadow-sm 2xl:col-start-3"
-                                : "flex flex-col rounded-lg border border-app-border bg-white p-4 shadow-sm"
+                                ? "flex flex-col rounded-lg border border-[var(--app-border-soft)] bg-app-panel p-4 shadow-none 2xl:col-start-3"
+                                : "flex flex-col rounded-lg border border-[var(--app-border-soft)] bg-app-panel p-4 shadow-none"
                         }
                     >
                         <div className="mb-3 flex items-center justify-between">
@@ -764,10 +764,10 @@ export function BookEditView({
                                         return (
                                             <div
                                                 key={candidate.id}
-                                                className="rounded-md border border-[var(--app-border)] bg-white p-2"
+                                                className="rounded-md border border-[var(--app-border-soft)] bg-app-surface p-2"
                                             >
                                                 <div className="flex gap-2">
-                                                    <div className="h-16 w-11 flex-shrink-0 overflow-hidden rounded border border-[var(--app-border)] bg-[#fffaf4]">
+                                                    <div className="h-16 w-11 flex-shrink-0 overflow-hidden rounded border border-[var(--app-border-soft)] bg-app-bg/50">
                                                         {coverUrl ? (
                                                             <img
                                                                 src={coverUrl}

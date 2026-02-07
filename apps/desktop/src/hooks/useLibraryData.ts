@@ -27,7 +27,6 @@ export function useLibraryData({ setScanStatus }: UseLibraryDataArgs) {
   const [missingFiles, setMissingFiles] = useState<MissingFileItem[]>([]);
   const [libraryHealth, setLibraryHealth] = useState<LibraryHealth | null>(null);
   const [titleCleanupIgnoreMap, setTitleCleanupIgnoreMap] = useState<Record<string, string>>({});
-  const [coverRefreshToken, setCoverRefreshToken] = useState(0);
 
   const refreshTitleCleanupIgnores = useCallback(async () => {
     if (!isTauri()) return;
@@ -61,7 +60,6 @@ export function useLibraryData({ setScanStatus }: UseLibraryDataArgs) {
       const health = await invoke<LibraryHealth>("get_library_health");
       setLibraryHealth(health);
       await refreshTitleCleanupIgnores();
-      setCoverRefreshToken((value) => value + 1);
     } catch {
       setScanStatus("Could not refresh library data.");
     }
@@ -99,7 +97,6 @@ export function useLibraryData({ setScanStatus }: UseLibraryDataArgs) {
         const health = await invoke<LibraryHealth>("get_library_health");
         setLibraryHealth(health);
         await refreshTitleCleanupIgnores();
-        setCoverRefreshToken((value) => value + 1);
       } catch {
         setScanStatus("Could not load library data.");
       } finally {
@@ -124,7 +121,6 @@ export function useLibraryData({ setScanStatus }: UseLibraryDataArgs) {
     missingFiles,
     libraryHealth,
     titleCleanupIgnoreMap,
-    coverRefreshToken,
     refreshLibrary,
     refreshTitleCleanupIgnores,
     resetLibraryState,

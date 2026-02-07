@@ -1,5 +1,6 @@
 import { Filter, X } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
+import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { LibraryGrid } from "../components/LibraryGrid";
 import { getTagColorClass } from "../lib/tagColors";
@@ -20,9 +21,9 @@ type LibraryViewProps = {
   selectedTagIds: string[];
   setSelectedTagIds: Dispatch<SetStateAction<string[]>>;
   grid: boolean;
-  coverRefreshToken: number;
   fetchCoverOverride: (itemId: string) => void;
   clearCoverOverride: (itemId: string) => void;
+  scrollContainerRef: RefObject<HTMLElement | null>;
   // Active navigation filters
   selectedAuthorNames: string[];
   setSelectedAuthorNames: Dispatch<SetStateAction<string[]>>;
@@ -45,9 +46,9 @@ export function LibraryView({
   selectedTagIds,
   setSelectedTagIds,
   grid,
-  coverRefreshToken,
   fetchCoverOverride,
   clearCoverOverride,
+  scrollContainerRef,
   selectedAuthorNames,
   setSelectedAuthorNames,
   selectedSeries,
@@ -215,11 +216,11 @@ export function LibraryView({
         books={filteredBooks}
         selectedItemId={selectedItemId}
         onSelect={setSelectedItemId}
-        coverRefreshToken={coverRefreshToken}
         fetchCoverOverride={fetchCoverOverride}
         clearCoverOverride={clearCoverOverride}
         viewMode={grid ? "grid" : "list"}
         enrichingItems={enrichingItems}
+        scrollContainerRef={scrollContainerRef}
       />
     </>
   );

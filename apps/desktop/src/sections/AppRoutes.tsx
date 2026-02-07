@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, RefObject, SetStateAction } from "react";
 import { AuthorsView } from "./AuthorsView";
 import { BookEditView } from "./BookEditView";
 import { ChangesView } from "./ChangesView";
@@ -56,9 +56,9 @@ type AppRoutesProps = {
   selectedTagIds: string[];
   setSelectedTagIds: Dispatch<SetStateAction<string[]>>;
   grid: boolean;
-  coverRefreshToken: number;
   fetchCoverOverride: (itemId: string, force?: boolean) => Promise<void>;
   clearCoverOverride: (itemId: string) => void;
+  scrollContainerRef: RefObject<HTMLElement | null>;
   selectedAuthorNames: string[];
   setSelectedAuthorNames: Dispatch<SetStateAction<string[]>>;
   selectedSeries: string[];
@@ -202,9 +202,9 @@ export function AppRoutes(props: AppRoutesProps) {
     selectedTagIds,
     setSelectedTagIds,
     grid,
-    coverRefreshToken,
     fetchCoverOverride,
     clearCoverOverride,
+    scrollContainerRef,
     selectedAuthorNames,
     setSelectedAuthorNames,
     selectedSeries,
@@ -353,9 +353,9 @@ export function AppRoutes(props: AppRoutesProps) {
           selectedTagIds={selectedTagIds}
           setSelectedTagIds={setSelectedTagIds}
           grid={grid}
-          coverRefreshToken={coverRefreshToken}
           fetchCoverOverride={(itemId) => void fetchCoverOverride(itemId)}
           clearCoverOverride={clearCoverOverride}
+          scrollContainerRef={scrollContainerRef}
           selectedAuthorNames={selectedAuthorNames}
           setSelectedAuthorNames={setSelectedAuthorNames}
           selectedSeries={selectedSeries}

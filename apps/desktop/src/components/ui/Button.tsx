@@ -26,7 +26,7 @@ const buttonVariants = cva(
         outline:
           "bg-transparent text-app-ink border border-app-border hover:bg-app-bg",
         danger:
-          "bg-red-50 text-red-600 border border-red-200 hover:bg-red-100",
+          "bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 dark:bg-red-500/10 dark:text-red-500 dark:border-red-500/20 dark:hover:bg-red-500/20",
       },
       size: {
         sm: "h-8 px-3 text-xs",

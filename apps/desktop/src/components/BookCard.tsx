@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { FileText } from "lucide-react";
 import { getLanguageFlag } from "../lib/languageFlags";
 import { getTagColorClass } from "../lib/tagColors";
@@ -8,19 +9,17 @@ import { ProcessingOverlay } from "./ProgressBar";
 type BookCardProps = {
     book: BookDisplay;
     selected: boolean;
-    onSelect: () => void;
-    coverRefreshToken: number;
+    onSelect: (id: string) => void;
     fetchCoverOverride: (id: string) => void;
     clearCoverOverride: (id: string) => void;
     viewMode?: "grid" | "list";
     isEnriching?: boolean;
 };
 
-export function BookCard({
+function BookCardComponent({
     book,
     selected,
     onSelect,
-    coverRefreshToken,
     fetchCoverOverride,
     clearCoverOverride,
     viewMode = "grid",
@@ -37,18 +36,17 @@ export function BookCard({
                         ? "bg-app-accent/10"
                         : "hover:bg-app-surface-hover bg-transparent"
                 )}
-                onClick={onSelect}
+                onClick={() => onSelect(book.id)}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(event) => {
-                    if (event.key === "Enter") onSelect();
+                    if (event.key === "Enter") onSelect(book.id);
                 }}
             >
                 {/* Thumbnail */}
                 <div className="relative grid h-14 w-10 shrink-0 place-items-center overflow-hidden rounded border border-app-border bg-app-bg shadow-sm">
                     {book.cover ? (
                         <img
-                            key={`${book.id}-${coverRefreshToken}-${book.cover ?? "none"}`}
                             className="h-full w-full object-cover"
                             src={book.cover}
                             alt=""
@@ -121,18 +119,17 @@ export function BookCard({
                     ? "border-[var(--app-accent)] border-opacity-40 ring-2 ring-[var(--app-accent)] ring-opacity-10 bg-[var(--app-accent)] bg-opacity-5"
                     : "border-transparent bg-transparent shadow-none hover:bg-app-surface/10"
             )}
-            onClick={onSelect}
+            onClick={() => onSelect(book.id)}
             role="button"
             tabIndex={0}
             onKeyDown={(event) => {
-                if (event.key === "Enter") onSelect();
+                if (event.key === "Enter") onSelect(book.id);
             }}
         >
             {/* Cover Area */}
             <div className="relative aspect-[2/3] w-full overflow-hidden bg-app-bg/10">
                 {book.cover ? (
                     <img
-                        key={`${book.id}-${coverRefreshToken}-${book.cover ?? "none"}`}
                         className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                         src={book.cover}
                         alt={book.title}
@@ -206,3 +203,5 @@ export function BookCard({
         </article>
     );
 }
+
+export const BookCard = memo(BookCardComponent);
