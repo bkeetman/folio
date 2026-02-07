@@ -10,11 +10,15 @@
   --app-ink: #1a1614; /* Sharper black/brown */
   --app-ink-muted: #706860;
   --app-border: rgba(26, 22, 20, 0.08); /* More subtle, precise border */
+  --app-border-soft: rgba(26, 22, 20, 0.10);
+  --app-border-muted: rgba(26, 22, 20, 0.06);
   --app-accent: #ea580c; /* Sharper orange (Tailwind orange-600) for punch */
   --app-accent-strong: #c2410c;
   --app-ring: rgba(234, 88, 12, 0.15); /* Focus ring color */
   --app-bg-secondary: rgba(26, 22, 20, 0.04);
   --app-bg-tertiary: rgba(26, 22, 20, 0.07);
+  --app-surface-hover: rgba(26, 22, 20, 0.04);
+  --app-surface-active: rgba(234, 88, 12, 0.10);
   font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
