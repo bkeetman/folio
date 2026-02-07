@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { RefObject } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import type { RefObject } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { BookDisplay } from "../types/library";
 import { BookCard } from "./BookCard";
@@ -11,6 +11,7 @@ type LibraryGridProps = {
   onSelect: (id: string) => void;
   fetchCoverOverride: (id: string) => void;
   clearCoverOverride: (id: string) => void;
+  onVisibleItemIdsChange: (ids: string[]) => void;
   viewMode: "grid" | "list";
   enrichingItems?: Set<string>;
   scrollContainerRef: RefObject<HTMLElement | null>;
@@ -26,6 +27,7 @@ export function LibraryGrid({
   onSelect,
   fetchCoverOverride,
   clearCoverOverride,
+  onVisibleItemIdsChange,
   viewMode,
   enrichingItems,
   scrollContainerRef,
@@ -80,9 +82,32 @@ export function LibraryGrid({
     enabled: viewMode === "grid",
   });
 
-  if (viewMode === "list") {
-    const virtualRows = listVirtualizer.getVirtualItems();
+  const listVirtualRows = listVirtualizer.getVirtualItems();
+  const gridVirtualRows = gridVirtualizer.getVirtualItems();
 
+  const visibleBookIds = useMemo(() => {
+    if (!books.length) return [];
+    if (viewMode === "list") {
+      return listVirtualRows
+        .map((virtualRow) => books[virtualRow.index]?.id)
+        .filter((id): id is string => Boolean(id));
+    }
+
+    const ids = new Set<string>();
+    gridVirtualRows.forEach((virtualRow) => {
+      const startIndex = virtualRow.index * laneCount;
+      books
+        .slice(startIndex, startIndex + laneCount)
+        .forEach((book) => ids.add(book.id));
+    });
+    return Array.from(ids);
+  }, [books, gridVirtualRows, laneCount, listVirtualRows, viewMode]);
+
+  useEffect(() => {
+    onVisibleItemIdsChange(visibleBookIds);
+  }, [onVisibleItemIdsChange, visibleBookIds]);
+
+  if (viewMode === "list") {
     return (
       <div className="overflow-hidden rounded-lg border border-app-border bg-app-panel surface-gradient shadow-sm">
         <div className="grid grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr] gap-3 bg-app-bg-secondary px-4 py-2 text-[10px] uppercase tracking-[0.12em] text-app-ink-muted">
@@ -94,7 +119,7 @@ export function LibraryGrid({
         </div>
 
         <div className="relative" style={{ height: listVirtualizer.getTotalSize() }}>
-          {virtualRows.map((virtualRow) => {
+          {listVirtualRows.map((virtualRow) => {
             const book = books[virtualRow.index];
             if (!book) return null;
             return (
@@ -120,15 +145,13 @@ export function LibraryGrid({
     );
   }
 
-  const virtualRows = gridVirtualizer.getVirtualItems();
-
   return (
     <div
       ref={gridRef}
-      className="rounded-lg bg-app-bg/10 p-3 shadow-inner ring-1 ring-white/5"
+      className="rounded-lg bg-app-bg/10 p-3 shadow-inner ring-1 ring-[var(--app-border-muted)]"
     >
       <div className="relative" style={{ height: gridVirtualizer.getTotalSize() }}>
-        {virtualRows.map((virtualRow) => {
+        {gridVirtualRows.map((virtualRow) => {
           const startIndex = virtualRow.index * laneCount;
           const rowBooks = books.slice(startIndex, startIndex + laneCount);
 

@@ -5,6 +5,7 @@ type EnrichmentCandidate = {
   title: string | null;
   authors: string[];
   published_year: number | null;
+  language?: string | null;
   identifiers: string[];
   cover_url?: string | null;
   source: string;

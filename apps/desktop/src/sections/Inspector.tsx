@@ -4,7 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Separator } from "../components/ui";
-import { getLanguageFlag, getLanguageName } from "../lib/languageFlags";
+import { getLanguageFlag, getLanguageName, isKnownLanguageCode } from "../lib/languageFlags";
 import { getTagColorClass } from "../lib/tagColors";
 import type { FileItem, Tag, View } from "../types/library";
 
@@ -45,6 +45,7 @@ type InspectorProps = {
   ereaderConnected: boolean;
   ereaderSyncStatus: EReaderSyncStatus | null;
   onQueueEreaderAdd: (itemId: string) => void;
+  width: number;
 };
 
 export function Inspector({
@@ -63,8 +64,11 @@ export function Inspector({
   ereaderSyncStatus,
   onQueueEreaderAdd,
   onNavigateToEdit,
+  width,
 }: InspectorProps) {
   const { t } = useTranslation();
+  const compactLayout = width < 320;
+  const hasKnownItemLanguage = isKnownLanguageCode(selectedItem?.language);
   const [fileState, setFileState] = useState<{ itemId: string | null; files: FileItem[] }>({
     itemId: null,
     files: [],
@@ -116,8 +120,14 @@ export function Inspector({
       {selectedItem ? (
         <div className="flex h-full flex-col overflow-y-auto pb-4 [&::-webkit-scrollbar]:hidden">
           <div className="rounded-md border border-[var(--app-border-muted)] bg-app-surface/40 p-3">
-            <div className="flex gap-3">
-              <div className="h-28 w-20 flex-none overflow-hidden rounded-md border border-[var(--app-border-muted)] bg-app-bg">
+            <div className={compactLayout ? "flex flex-col gap-3" : "flex gap-3"}>
+              <div
+                className={
+                  compactLayout
+                    ? "mx-auto h-36 w-24 flex-none overflow-hidden rounded-md border border-[var(--app-border-muted)] bg-app-bg"
+                    : "h-32 w-24 flex-none overflow-hidden rounded-md border border-[var(--app-border-muted)] bg-app-bg"
+                }
+              >
                 {selectedItem.cover ? (
                   <img
                     className="h-full w-full object-cover"
@@ -135,28 +145,32 @@ export function Inspector({
                 )}
               </div>
 
-              <div className="flex flex-1 flex-col gap-1">
-                <div className="text-[13px] font-semibold leading-tight">{selectedItem.title}</div>
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
+                <div className="break-words text-[15px] font-semibold leading-tight">{selectedItem.title}</div>
                 {selectedItem.authors && selectedItem.authors.length > 0 ? (
-                  <div className="flex flex-wrap gap-1">
+                  <div className="space-y-1">
                     {selectedItem.authors.map((author, i) => (
-                      <span key={author}>
+                      <div key={`${author}-${i}`}>
                         <button
-                          className="text-xs text-[var(--app-accent-strong)] hover:underline"
+                          className="text-left text-sm text-[var(--app-accent-strong)] hover:underline"
                           onClick={() => handleAuthorClick(author)}
                         >
                           {author}
                         </button>
-                        {i < selectedItem.authors!.length - 1 && (
-                          <span className="text-xs text-[var(--app-ink-muted)]">, </span>
-                        )}
-                      </span>
+                      </div>
                     ))}
                   </div>
                 ) : (
                   <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.author}</div>
                 )}
-                <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.year}</div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="rounded-full border border-[var(--app-border-soft)] bg-app-bg/40 px-2 py-0.5 text-[11px] text-[var(--app-ink-muted)]">
+                    {selectedItem.year}
+                  </span>
+                  <span className="rounded-full border border-[var(--app-border-soft)] bg-app-bg/40 px-2 py-0.5 text-[11px] text-[var(--app-ink-muted)]">
+                    {selectedItem.format}
+                  </span>
+                </div>
                 {selectedItem.series && (
                   <button
                     className="flex items-center gap-1 text-left text-xs text-[var(--app-accent-strong)] hover:underline"
@@ -171,13 +185,12 @@ export function Inspector({
                     )}
                   </button>
                 )}
-                {selectedItem.language && (
+                {selectedItem.language && hasKnownItemLanguage && (
                   <div className="flex items-center gap-1.5 text-xs text-[var(--app-ink-muted)]">
                     <span>{getLanguageFlag(selectedItem.language)}</span>
                     <span>{getLanguageName(selectedItem.language)}</span>
                   </div>
                 )}
-                <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.format}</div>
               </div>
             </div>
 
@@ -265,7 +278,7 @@ export function Inspector({
                   {t("inspector.availableLanguages")}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  {availableLanguages.map((lang) => {
+                  {availableLanguages.filter((lang) => isKnownLanguageCode(lang)).map((lang) => {
                     const flag = getLanguageFlag(lang);
                     const name = getLanguageName(lang);
                     const isCurrent = lang === selectedItem.language;

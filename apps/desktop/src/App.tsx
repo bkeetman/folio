@@ -43,6 +43,13 @@ import type {
 } from "./types/library";
 
 function App() {
+  const readInitialInspectorWidth = () => {
+    if (typeof window === "undefined") return 320;
+    const raw = window.localStorage.getItem("folio.inspectorWidth");
+    const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+    if (!Number.isFinite(parsed)) return 320;
+    return Math.min(460, Math.max(260, parsed));
+  };
   const [view, setView] = useState<View>("library-books");
   const [previousView, setPreviousView] = useState<View>("library-books");
   const [activityLog, setActivityLog] = useState<ActivityLogItem[]>([]); // New State
@@ -70,6 +77,8 @@ function App() {
   const [editMatchApplying, setEditMatchApplying] = useState<string | null>(null);
   const [editDetailsVersion, setEditDetailsVersion] = useState(0);
   const mainScrollRef = useRef<HTMLElement | null>(null);
+  const [inspectorWidth, setInspectorWidth] = useState<number>(readInitialInspectorWidth);
+  const [inspectorResizing, setInspectorResizing] = useState(false);
 
 
   // Fix View State
@@ -90,6 +99,10 @@ function App() {
   const fixSearchRequestIdRef = useRef(0);
   const [coverOverrides, setCoverOverrides] = useState<Record<string, string | null>>({});
   const coverOverrideRef = useRef<Record<string, string | null>>({});
+  const coverFetchQueueRef = useRef<string[]>([]);
+  const queuedCoverFetchesRef = useRef<Set<string>>(new Set());
+  const inFlightCoverFetchesRef = useRef<Set<string>>(new Set());
+  const activeCoverFetchesRef = useRef(0);
   const [duplicateKeepSelection, setDuplicateKeepSelection] = useState<
     Record<string, string>
   >({});
@@ -225,6 +238,10 @@ function App() {
     scanStartedAt,
     currentTimeMs,
   });
+  const libraryItemsById = useMemo(
+    () => new Map(libraryItems.map((item) => [item.id, item])),
+    [libraryItems]
+  );
 
   useEffect(() => {
     pendingChangesStatusRef.current = pendingChangesStatus;
@@ -332,6 +349,61 @@ function App() {
     });
   }, []);
 
+  const drainVisibleCoverQueue = useCallback(() => {
+    if (!isTauri()) return;
+    const maxConcurrent = 4;
+    while (
+      activeCoverFetchesRef.current < maxConcurrent &&
+      coverFetchQueueRef.current.length > 0
+    ) {
+      const itemId = coverFetchQueueRef.current.shift();
+      if (!itemId) break;
+      queuedCoverFetchesRef.current.delete(itemId);
+      if (typeof coverOverrideRef.current[itemId] === "string") {
+        continue;
+      }
+      const item = libraryItemsById.get(itemId);
+      if (!item?.cover_path) {
+        continue;
+      }
+      if (inFlightCoverFetchesRef.current.has(itemId)) {
+        continue;
+      }
+      inFlightCoverFetchesRef.current.add(itemId);
+      activeCoverFetchesRef.current += 1;
+      void fetchCoverOverride(itemId).finally(() => {
+        inFlightCoverFetchesRef.current.delete(itemId);
+        activeCoverFetchesRef.current = Math.max(0, activeCoverFetchesRef.current - 1);
+        drainVisibleCoverQueue();
+      });
+    }
+  }, [fetchCoverOverride, libraryItemsById]);
+
+  const handleVisibleItemIdsChange = useCallback(
+    (visibleItemIds: string[]) => {
+      if (!isTauri()) return;
+      visibleItemIds.forEach((itemId) => {
+        if (typeof coverOverrideRef.current[itemId] === "string") {
+          return;
+        }
+        if (
+          queuedCoverFetchesRef.current.has(itemId) ||
+          inFlightCoverFetchesRef.current.has(itemId)
+        ) {
+          return;
+        }
+        const item = libraryItemsById.get(itemId);
+        if (!item?.cover_path) {
+          return;
+        }
+        queuedCoverFetchesRef.current.add(itemId);
+        coverFetchQueueRef.current.push(itemId);
+      });
+      drainVisibleCoverQueue();
+    },
+    [drainVisibleCoverQueue, libraryItemsById]
+  );
+
   useEffect(() => {
     return () => {
       Object.values(coverOverrideRef.current).forEach((url) => {
@@ -358,26 +430,14 @@ function App() {
       return changed ? next : prev;
     });
 
-    const itemsToLoad = libraryItems.filter(
-      (item) =>
-        item.cover_path &&
-        typeof coverOverrideRef.current[item.id] !== "string"
+    coverFetchQueueRef.current = coverFetchQueueRef.current.filter((id) => activeIds.has(id));
+    queuedCoverFetchesRef.current = new Set(
+      Array.from(queuedCoverFetchesRef.current).filter((id) => activeIds.has(id))
     );
-    if (!itemsToLoad.length) return;
-    let cancelled = false;
-    const loadInBatches = async () => {
-      const batchSize = 6;
-      for (let index = 0; index < itemsToLoad.length; index += batchSize) {
-        if (cancelled) return;
-        const batch = itemsToLoad.slice(index, index + batchSize);
-        await Promise.all(batch.map((item) => fetchCoverOverride(item.id)));
-      }
-    };
-    void loadInBatches();
-    return () => {
-      cancelled = true;
-    };
-  }, [libraryItems, isDesktop, fetchCoverOverride]);
+    inFlightCoverFetchesRef.current = new Set(
+      Array.from(inFlightCoverFetchesRef.current).filter((id) => activeIds.has(id))
+    );
+  }, [libraryItems, isDesktop]);
 
   useEffect(() => {
     if (!isDesktop || view !== "changes") return;
@@ -1378,12 +1438,44 @@ function App() {
     }
   }, [view]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("folio.inspectorWidth", String(inspectorWidth));
+  }, [inspectorWidth]);
+
+  useEffect(() => {
+    if (!inspectorResizing || typeof window === "undefined") return;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const nextWidth = Math.min(560, Math.max(260, Math.round(window.innerWidth - event.clientX)));
+      setInspectorWidth(nextWidth);
+    };
+
+    const handleMouseUp = () => {
+      setInspectorResizing(false);
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [inspectorResizing]);
+
   return (
     <div
-      className={
+      className="grid h-screen overflow-hidden bg-[var(--app-bg)] text-[var(--app-ink)]"
+      style={
         view === "library" || view === "library-books" || view === "library-authors" || view === "library-series"
-          ? "grid h-screen grid-cols-[210px_minmax(0,1fr)_240px] overflow-hidden bg-[var(--app-bg)] text-[var(--app-ink)]"
-          : "grid h-screen grid-cols-[210px_minmax(0,1fr)] overflow-hidden bg-[var(--app-bg)] text-[var(--app-ink)]"
+          ? { gridTemplateColumns: `210px minmax(0,1fr) ${inspectorWidth}px` }
+          : { gridTemplateColumns: "210px minmax(0,1fr)" }
       }
     >
       <Sidebar
@@ -1456,6 +1548,7 @@ function App() {
             grid={grid}
             fetchCoverOverride={fetchCoverOverride}
             clearCoverOverride={clearCoverOverride}
+            onVisibleItemIdsChange={handleVisibleItemIdsChange}
             scrollContainerRef={mainScrollRef}
             selectedAuthorNames={selectedAuthorNames}
             setSelectedAuthorNames={setSelectedAuthorNames}
@@ -1604,34 +1697,44 @@ function App() {
       </main>
 
       {(view === "library" || view === "library-books" || view === "library-authors" || view === "library-series") ? (
-        <Inspector
-          selectedItem={selectedItem}
-          availableLanguages={availableLanguages}
-          selectedTags={selectedTags}
-          availableTags={availableTags}
-          handleAddTag={(tagId) => void handleAddTag(tagId)}
-          handleRemoveTag={(tagId) => void handleRemoveTag(tagId)}
-          clearCoverOverride={clearCoverOverride}
-          fetchCoverOverride={(itemId) => void fetchCoverOverride(itemId)}
-          setView={setView}
-          setSelectedAuthorNames={setSelectedAuthorNames}
-          setSelectedSeries={setSelectedSeries}
-          ereaderConnected={ereaderDevices.some((d) => d.isConnected)}
-          ereaderSyncStatus={selectedItem ? (() => {
-            const onDevice = ereaderBooks.find((eb) => eb.matchedItemId === selectedItem.id);
-            const inQueue = ereaderSyncQueue.some((q) => q.itemId === selectedItem.id && q.status === "pending");
-            return {
-              isOnDevice: !!onDevice,
-              isInQueue: inQueue,
-              matchConfidence: (onDevice?.matchConfidence as "exact" | "isbn" | "title" | "fuzzy" | null) ?? null,
-            };
-          })() : null}
-          onQueueEreaderAdd={(itemId) => void handleQueueEreaderAdd(itemId)}
-          onNavigateToEdit={() => {
-            setPreviousView(view);
-            setView("edit");
-          }}
-        />
+        <div className="relative h-screen">
+          <div
+            className="absolute left-0 top-0 z-20 h-full w-1.5 -translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-[var(--app-accent)]/30"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              setInspectorResizing(true);
+            }}
+          />
+          <Inspector
+            selectedItem={selectedItem}
+            availableLanguages={availableLanguages}
+            selectedTags={selectedTags}
+            availableTags={availableTags}
+            handleAddTag={(tagId) => void handleAddTag(tagId)}
+            handleRemoveTag={(tagId) => void handleRemoveTag(tagId)}
+            clearCoverOverride={clearCoverOverride}
+            fetchCoverOverride={(itemId) => void fetchCoverOverride(itemId)}
+            setView={setView}
+            setSelectedAuthorNames={setSelectedAuthorNames}
+            setSelectedSeries={setSelectedSeries}
+            ereaderConnected={ereaderDevices.some((d) => d.isConnected)}
+            ereaderSyncStatus={selectedItem ? (() => {
+              const onDevice = ereaderBooks.find((eb) => eb.matchedItemId === selectedItem.id);
+              const inQueue = ereaderSyncQueue.some((q) => q.itemId === selectedItem.id && q.status === "pending");
+              return {
+                isOnDevice: !!onDevice,
+                isInQueue: inQueue,
+                matchConfidence: (onDevice?.matchConfidence as "exact" | "isbn" | "title" | "fuzzy" | null) ?? null,
+              };
+            })() : null}
+            onQueueEreaderAdd={(itemId) => void handleQueueEreaderAdd(itemId)}
+            onNavigateToEdit={() => {
+              setPreviousView(view);
+              setView("edit");
+            }}
+            width={inspectorWidth}
+          />
+        </div>
       ) : null}
     </div>
   );

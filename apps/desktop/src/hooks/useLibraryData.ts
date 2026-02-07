@@ -13,9 +13,19 @@ type TitleCleanupIgnore = {
   titleSnapshot: string;
 };
 
+type LibraryItemFacet = {
+  itemId: string;
+  tags: LibraryItem["tags"];
+  isbn: string | null;
+};
+
 type UseLibraryDataArgs = {
   setScanStatus: (value: string | null) => void;
 };
+
+function nowMs() {
+  return (typeof performance !== "undefined" ? performance.now() : Date.now());
+}
 
 export function useLibraryData({ setScanStatus }: UseLibraryDataArgs) {
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([]);
@@ -28,42 +38,99 @@ export function useLibraryData({ setScanStatus }: UseLibraryDataArgs) {
   const [libraryHealth, setLibraryHealth] = useState<LibraryHealth | null>(null);
   const [titleCleanupIgnoreMap, setTitleCleanupIgnoreMap] = useState<Record<string, string>>({});
 
-  const refreshTitleCleanupIgnores = useCallback(async () => {
+  const applyTitleCleanupIgnores = useCallback((rows: TitleCleanupIgnore[]) => {
+    const nextMap: Record<string, string> = {};
+    rows.forEach((row) => {
+      nextMap[row.itemId] = row.titleSnapshot;
+    });
+    setTitleCleanupIgnoreMap(nextMap);
+  }, []);
+
+  const hydrateLibraryFacets = useCallback(async () => {
     if (!isTauri()) return;
+    const started = nowMs();
     try {
-      const rows = await invoke<TitleCleanupIgnore[]>("get_title_cleanup_ignores");
-      const nextMap: Record<string, string> = {};
-      rows.forEach((row) => {
-        nextMap[row.itemId] = row.titleSnapshot;
-      });
-      setTitleCleanupIgnoreMap(nextMap);
+      const facets = await invoke<LibraryItemFacet[]>("get_library_item_facets");
+      const byItemId = new Map(facets.map((facet) => [facet.itemId, facet]));
+      setLibraryItems((previous) =>
+        previous.map((item) => {
+          const facet = byItemId.get(item.id);
+          if (!facet) return item;
+          return {
+            ...item,
+            tags: facet.tags ?? [],
+            isbn: facet.isbn ?? null,
+          };
+        })
+      );
+      console.info(
+        `[perf] hydrateLibraryFacets facets=${facets.length} durationMs=${Math.round(nowMs() - started)}`
+      );
     } catch {
-      // ignore
+      // ignore facet hydration errors
     }
   }, []);
 
+  const loadSecondaryLibraryData = useCallback(
+    async (phase: "initialLoad" | "refreshLibrary", isActive?: () => boolean) => {
+      if (!isTauri()) return;
+      const started = nowMs();
+      try {
+        const [
+          inboxItems,
+          duplicateGroups,
+          titleGroups,
+          fuzzyGroups,
+          missing,
+          health,
+          titleCleanupIgnoreRows,
+        ] = await Promise.all([
+          invoke<InboxItem[]>("get_inbox_items"),
+          invoke<DuplicateGroup[]>("get_duplicate_groups"),
+          invoke<DuplicateGroup[]>("get_title_duplicate_groups"),
+          invoke<DuplicateGroup[]>("get_fuzzy_duplicate_groups"),
+          invoke<MissingFileItem[]>("get_missing_files"),
+          invoke<LibraryHealth>("get_library_health"),
+          invoke<TitleCleanupIgnore[]>("get_title_cleanup_ignores"),
+        ]);
+
+        if (isActive && !isActive()) return;
+
+        setInbox(inboxItems);
+        setDuplicates(duplicateGroups);
+        setTitleDuplicates(titleGroups);
+        setFuzzyDuplicates(fuzzyGroups);
+        setMissingFiles(missing);
+        setLibraryHealth(health);
+        applyTitleCleanupIgnores(titleCleanupIgnoreRows);
+
+        console.info(
+          `[perf] ${phase} secondary durationMs=${Math.round(nowMs() - started)}`
+        );
+      } catch {
+        if (phase === "refreshLibrary") {
+          setScanStatus("Could not refresh library data.");
+        }
+      }
+    },
+    [applyTitleCleanupIgnores, setScanStatus]
+  );
+
   const refreshLibrary = useCallback(async () => {
     if (!isTauri()) return;
+    const started = nowMs();
     try {
-      const items = await invoke<LibraryItem[]>("get_library_items");
+      const items = await invoke<LibraryItem[]>("get_library_items_light");
       setLibraryItems(items);
-      const inboxItems = await invoke<InboxItem[]>("get_inbox_items");
-      setInbox(inboxItems);
-      const duplicateGroups = await invoke<DuplicateGroup[]>("get_duplicate_groups");
-      const titleGroups = await invoke<DuplicateGroup[]>("get_title_duplicate_groups");
-      const fuzzyGroups = await invoke<DuplicateGroup[]>("get_fuzzy_duplicate_groups");
-      setDuplicates(duplicateGroups);
-      setTitleDuplicates(titleGroups);
-      setFuzzyDuplicates(fuzzyGroups);
-      const missing = await invoke<MissingFileItem[]>("get_missing_files");
-      setMissingFiles(missing);
-      const health = await invoke<LibraryHealth>("get_library_health");
-      setLibraryHealth(health);
-      await refreshTitleCleanupIgnores();
+      void hydrateLibraryFacets();
+      console.info(
+        `[perf] refreshLibrary quick lightItems=${items.length} durationMs=${Math.round(nowMs() - started)}`
+      );
+      void loadSecondaryLibraryData("refreshLibrary");
     } catch {
       setScanStatus("Could not refresh library data.");
     }
-  }, [refreshTitleCleanupIgnores, setScanStatus]);
+  }, [hydrateLibraryFacets, loadSecondaryLibraryData, setScanStatus]);
 
   const resetLibraryState = useCallback(() => {
     setLibraryItems([]);
@@ -76,27 +143,21 @@ export function useLibraryData({ setScanStatus }: UseLibraryDataArgs) {
   }, []);
 
   useEffect(() => {
+    let active = true;
     const load = async () => {
       if (!isTauri()) {
         setLibraryReady(true);
         return;
       }
+      const started = nowMs();
       try {
-        const items = await invoke<LibraryItem[]>("get_library_items");
+        const items = await invoke<LibraryItem[]>("get_library_items_light");
+        if (!active) return;
         setLibraryItems(items);
-        const inboxItems = await invoke<InboxItem[]>("get_inbox_items");
-        setInbox(inboxItems);
-        const duplicateGroups = await invoke<DuplicateGroup[]>("get_duplicate_groups");
-        const titleGroups = await invoke<DuplicateGroup[]>("get_title_duplicate_groups");
-        const fuzzyGroups = await invoke<DuplicateGroup[]>("get_fuzzy_duplicate_groups");
-        setDuplicates(duplicateGroups);
-        setTitleDuplicates(titleGroups);
-        setFuzzyDuplicates(fuzzyGroups);
-        const missing = await invoke<MissingFileItem[]>("get_missing_files");
-        setMissingFiles(missing);
-        const health = await invoke<LibraryHealth>("get_library_health");
-        setLibraryHealth(health);
-        await refreshTitleCleanupIgnores();
+        void hydrateLibraryFacets();
+        console.info(
+          `[perf] initialLoad quick lightItems=${items.length} durationMs=${Math.round(nowMs() - started)}`
+        );
       } catch {
         setScanStatus("Could not load library data.");
       } finally {
@@ -107,9 +168,13 @@ export function useLibraryData({ setScanStatus }: UseLibraryDataArgs) {
           // Splash screen might not exist (e.g., in dev mode)
         }
       }
+      void loadSecondaryLibraryData("initialLoad", () => active);
     };
     void load();
-  }, [refreshTitleCleanupIgnores, setScanStatus]);
+    return () => {
+      active = false;
+    };
+  }, [hydrateLibraryFacets, loadSecondaryLibraryData, setScanStatus]);
 
   return {
     libraryItems,
@@ -122,7 +187,6 @@ export function useLibraryData({ setScanStatus }: UseLibraryDataArgs) {
     libraryHealth,
     titleCleanupIgnoreMap,
     refreshLibrary,
-    refreshTitleCleanupIgnores,
     resetLibraryState,
   };
 }

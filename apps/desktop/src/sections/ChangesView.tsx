@@ -27,6 +27,54 @@ type ChangesViewProps = {
   changeProgress: OperationProgress | null;
 };
 
+type MetadataField = {
+  key: string;
+  labelKey: string;
+};
+
+const METADATA_FIELDS: MetadataField[] = [
+  { key: "title", labelKey: "changes.fields.title" },
+  { key: "author", labelKey: "changes.fields.author" },
+  { key: "authors", labelKey: "changes.fields.author" },
+  { key: "isbn", labelKey: "changes.fields.isbn" },
+  { key: "description", labelKey: "changes.fields.description" },
+  { key: "language", labelKey: "changes.fields.language" },
+  { key: "publishedYear", labelKey: "changes.fields.year" },
+  { key: "published_year", labelKey: "changes.fields.year" },
+  { key: "series", labelKey: "changes.fields.series" },
+  { key: "seriesIndex", labelKey: "changes.fields.seriesIndex" },
+  { key: "series_index", labelKey: "changes.fields.seriesIndex" },
+];
+
+function parseChangesJson(changesJson: string | null | undefined): Record<string, unknown> | null {
+  if (!changesJson) return null;
+  try {
+    const parsed: unknown = JSON.parse(changesJson);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function formatMetadataValue(value: unknown, t: (key: string) => string): string {
+  if (value === null || value === undefined || value === "") return t("changes.valueCleared");
+  if (Array.isArray(value)) {
+    const items = value
+      .map((item) => String(item).trim())
+      .filter(Boolean);
+    return items.length ? items.join(", ") : t("changes.valueCleared");
+  }
+  if (typeof value === "boolean") return value ? t("changes.yes") : t("changes.no");
+  return String(value);
+}
+
+function formatFileName(path: string | null | undefined): string {
+  if (!path) return "";
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
+
 export function ChangesView({
   pendingChangesStatus,
   setPendingChangesStatus,
@@ -126,6 +174,16 @@ export function ChangesView({
         {pendingChanges.length ? (
           pendingChanges.map((change) => {
             const isApplying = applyingChangeIds.has(change.id);
+            const parsedChanges = parseChangesJson(change.changes_json);
+            const shownMetadataFields = METADATA_FIELDS.filter(({ key }, index, fields) => {
+              if (!parsedChanges) return false;
+              if (!(key in parsedChanges)) return false;
+              if (key === "author" && "authors" in parsedChanges) return false;
+              if (key === "published_year" && "publishedYear" in parsedChanges) return false;
+              if (key === "series_index" && "seriesIndex" in parsedChanges) return false;
+              return fields.findIndex((field) => field.key === key) === index;
+            });
+            const hasMetadataDetails = shownMetadataFields.length > 0;
             return (
               <div
                 key={change.id}
@@ -165,13 +223,41 @@ export function ChangesView({
                           : t("changes.pending")}
                   </div>
                   <div className="text-xs text-[var(--app-ink-muted)]">
-                    {change.from_path ?? ""}
+                    {change.from_path ? formatFileName(change.from_path) : ""}
                   </div>
-                  {change.to_path ? (
-                    <div className="text-xs text-[var(--app-ink-muted)]">→ {change.to_path}</div>
+                  {change.from_path ? (
+                    <div className="text-[11px] text-[var(--app-ink-muted)]">{change.from_path}</div>
                   ) : null}
-                  {change.changes_json ? (
-                    <div className="text-xs text-[var(--app-ink-muted)]">{change.changes_json}</div>
+                  {change.to_path ? (
+                    <>
+                      <div className="text-xs text-[var(--app-ink-muted)]">
+                        {t("changes.newPath")}: {formatFileName(change.to_path)}
+                      </div>
+                      <div className="text-[11px] text-[var(--app-ink-muted)]">{change.to_path}</div>
+                    </>
+                  ) : null}
+                  {hasMetadataDetails ? (
+                    <div className="mt-1 rounded-md border border-[var(--app-border-soft)] bg-[var(--app-bg-secondary)] p-2">
+                      <div className="text-[11px] font-medium text-[var(--app-ink)]">
+                        {t("changes.plannedMetadataUpdates")}
+                      </div>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        {shownMetadataFields.map((field) => (
+                          <div key={field.key} className="rounded-sm border border-[var(--app-border-soft)] bg-[var(--app-surface)] p-2">
+                            <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--app-ink-muted)]">
+                              {t(field.labelKey)}
+                            </div>
+                            <div className="mt-1 text-xs text-[var(--app-ink)]">
+                              {formatMetadataValue(parsedChanges?.[field.key], t)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : change.changes_json ? (
+                    <div className="text-xs text-[var(--app-ink-muted)]">
+                      {t("changes.unreadableMetadata")}
+                    </div>
                   ) : null}
                   {change.error ? (
                     <div className="text-xs text-[var(--app-ink-muted)]">{t("changes.errorLabel")}: {change.error}</div>

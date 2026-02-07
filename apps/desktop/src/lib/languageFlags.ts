@@ -101,6 +101,8 @@ const languageNames: Record<string, string> = {
   tl: "Tagalog",
 };
 
+const unknownLanguageCodes = new Set(["und", "unknown", "unk", "n/a", "na", "none", "null", ""]);
+
 export const LANGUAGE_OPTIONS = Object.entries(languageNames)
   .map(([code, name]) => ({
     code,
@@ -118,6 +120,7 @@ export function getLanguageFlag(languageCode: string | null | undefined): string
 
   // Try exact match first (for regional variants like en-US)
   const normalized = languageCode.toLowerCase().trim();
+  if (unknownLanguageCodes.has(normalized)) return undefined;
   if (languageToFlag[normalized]) {
     return languageToFlag[normalized];
   }
@@ -135,9 +138,18 @@ export function getLanguageName(languageCode: string | null | undefined): string
   if (!languageCode) return "Unknown";
 
   const normalized = languageCode.toLowerCase().trim();
+  if (unknownLanguageCodes.has(normalized)) return "Unknown";
   const baseCode = normalized.split("-")[0].split("_")[0];
 
+  if (unknownLanguageCodes.has(baseCode)) return "Unknown";
   return languageNames[baseCode] ?? languageCode.toUpperCase();
+}
+
+export function isKnownLanguageCode(languageCode: string | null | undefined): boolean {
+  if (!languageCode) return false;
+  const normalized = languageCode.toLowerCase().trim();
+  const baseCode = normalized.split("-")[0].split("_")[0];
+  return !unknownLanguageCodes.has(normalized) && !unknownLanguageCodes.has(baseCode);
 }
 
 /**

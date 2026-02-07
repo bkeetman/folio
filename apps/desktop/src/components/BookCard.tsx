@@ -1,5 +1,5 @@
-import { memo } from "react";
 import { FileText } from "lucide-react";
+import { memo } from "react";
 import { getLanguageFlag } from "../lib/languageFlags";
 import { getTagColorClass } from "../lib/tagColors";
 import { cn } from "../lib/utils"; // Assuming you have a utils file, if not I will handle inline
@@ -116,7 +116,7 @@ function BookCardComponent({
             className={cn(
                 "group flex cursor-pointer flex-col overflow-hidden rounded-lg border transition-all duration-200",
                 selected
-                    ? "border-[var(--app-accent)] border-opacity-40 ring-2 ring-[var(--app-accent)] ring-opacity-10 bg-[var(--app-accent)] bg-opacity-5"
+                    ? "border-[color:color-mix(in_srgb,var(--app-accent),transparent_60%)] ring-2 ring-[color:color-mix(in_srgb,var(--app-accent),transparent_90%)] bg-[color:color-mix(in_srgb,var(--app-accent),transparent_95%)]"
                     : "border-transparent bg-transparent shadow-none hover:bg-app-surface/10"
             )}
             onClick={() => onSelect(book.id)}

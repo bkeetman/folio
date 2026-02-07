@@ -23,6 +23,7 @@ type LibraryViewProps = {
   grid: boolean;
   fetchCoverOverride: (itemId: string) => void;
   clearCoverOverride: (itemId: string) => void;
+  onVisibleItemIdsChange: (ids: string[]) => void;
   scrollContainerRef: RefObject<HTMLElement | null>;
   // Active navigation filters
   selectedAuthorNames: string[];
@@ -48,6 +49,7 @@ export function LibraryView({
   grid,
   fetchCoverOverride,
   clearCoverOverride,
+  onVisibleItemIdsChange,
   scrollContainerRef,
   selectedAuthorNames,
   setSelectedAuthorNames,
@@ -218,6 +220,7 @@ export function LibraryView({
         onSelect={setSelectedItemId}
         fetchCoverOverride={fetchCoverOverride}
         clearCoverOverride={clearCoverOverride}
+        onVisibleItemIdsChange={onVisibleItemIdsChange}
         viewMode={grid ? "grid" : "list"}
         enrichingItems={enrichingItems}
         scrollContainerRef={scrollContainerRef}

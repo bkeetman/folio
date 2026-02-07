@@ -106,9 +106,9 @@ export function FixView({
               variant="outline"
               size="sm"
               onClick={onCancelEnrich}
-              className="gap-2 border-red-300 text-red-600 shadow-sm hover:bg-red-50"
+              className="gap-2 border-[var(--app-border-soft)] bg-[var(--app-bg-secondary)] text-[var(--app-ink)] shadow-sm hover:border-[var(--app-border)] hover:bg-[var(--app-bg-tertiary)]"
             >
-              <X size={14} />
+              <X size={14} className="text-red-400" />
               {t("fixView.cancel")}
             </Button>
           ) : (

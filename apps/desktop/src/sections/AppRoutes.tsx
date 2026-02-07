@@ -58,6 +58,7 @@ type AppRoutesProps = {
   grid: boolean;
   fetchCoverOverride: (itemId: string, force?: boolean) => Promise<void>;
   clearCoverOverride: (itemId: string) => void;
+  onVisibleItemIdsChange: (ids: string[]) => void;
   scrollContainerRef: RefObject<HTMLElement | null>;
   selectedAuthorNames: string[];
   setSelectedAuthorNames: Dispatch<SetStateAction<string[]>>;
@@ -204,6 +205,7 @@ export function AppRoutes(props: AppRoutesProps) {
     grid,
     fetchCoverOverride,
     clearCoverOverride,
+    onVisibleItemIdsChange,
     scrollContainerRef,
     selectedAuthorNames,
     setSelectedAuthorNames,
@@ -355,6 +357,7 @@ export function AppRoutes(props: AppRoutesProps) {
           grid={grid}
           fetchCoverOverride={(itemId) => void fetchCoverOverride(itemId)}
           clearCoverOverride={clearCoverOverride}
+          onVisibleItemIdsChange={onVisibleItemIdsChange}
           scrollContainerRef={scrollContainerRef}
           selectedAuthorNames={selectedAuthorNames}
           setSelectedAuthorNames={setSelectedAuthorNames}

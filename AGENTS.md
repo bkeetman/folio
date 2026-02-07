@@ -42,6 +42,7 @@
 ## Tests
 - No test runner configured in package scripts.
 - If adding tests, document the single-test command here.
+- Apple Books provider tests: `pnpm -C packages/core exec tsx --test src/enrichment/providers/apple-books.test.ts`.
 
 ## Linting and formatting
 - ESLint config: `apps/desktop/eslint.config.js`.

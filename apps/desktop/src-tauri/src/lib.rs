@@ -12,6 +12,7 @@ use std::io::Read;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use uuid::Uuid;
@@ -51,6 +52,9 @@ const MIGRATION_ORGANIZER_LOGS_SQL: &str = include_str!(
 const MIGRATION_TITLE_CLEANUP_IGNORES_SQL: &str = include_str!(
   "../../../../packages/core/drizzle/0007_title_cleanup_ignores.sql"
 );
+const MIGRATION_LIBRARY_QUERY_INDEXES_SQL: &str = include_str!(
+  "../../../../packages/core/drizzle/0008_library_query_indexes.sql"
+);
 
 #[derive(Serialize, Clone)]
 struct Tag {
@@ -73,6 +77,14 @@ struct LibraryItem {
   language: Option<String>,
   series: Option<String>,
   series_index: Option<f64>,
+  isbn: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryItemFacet {
+  item_id: String,
+  tags: Vec<Tag>,
   isbn: Option<String>,
 }
 
@@ -370,6 +382,7 @@ struct EnrichmentCandidate {
   title: Option<String>,
   authors: Vec<String>,
   published_year: Option<i64>,
+  language: Option<String>,
   identifiers: Vec<String>,
   cover_url: Option<String>,
   source: String,
@@ -660,6 +673,7 @@ fn remove_missing_file(app: tauri::AppHandle, file_id: String) -> Result<(), Str
 
 #[tauri::command]
 fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> {
+  let started = Instant::now();
   let conn = open_db(&app)?;
   let mut stmt = conn
     .prepare(
@@ -729,8 +743,135 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
   for row in rows {
     items.push(row.map_err(|err| err.to_string())?);
   }
+  log::info!(
+    "perf:get_library_items count={} duration_ms={}",
+    items.len(),
+    started.elapsed().as_millis()
+  );
 
   Ok(items)
+}
+
+#[tauri::command]
+fn get_library_items_light(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> {
+  let started = Instant::now();
+  let conn = open_db(&app)?;
+  let mut stmt = conn
+    .prepare(
+      "SELECT items.id, items.title, items.published_year, items.created_at, \
+        GROUP_CONCAT(DISTINCT authors.name) as authors, \
+        COUNT(DISTINCT files.id) as file_count, \
+        GROUP_CONCAT(DISTINCT files.extension) as formats, \
+        MAX(covers.local_path) as cover_path, \
+        items.language, items.series, items.series_index \
+       FROM items \
+       LEFT JOIN item_authors ON item_authors.item_id = items.id \
+       LEFT JOIN authors ON authors.id = item_authors.author_id \
+       LEFT JOIN files ON files.item_id = items.id AND files.status = 'active' \
+       LEFT JOIN covers ON covers.item_id = items.id \
+       WHERE EXISTS (SELECT 1 FROM files WHERE item_id = items.id AND status = 'active') \
+       GROUP BY items.id"
+    )
+    .map_err(|err| err.to_string())?;
+
+  let rows = stmt
+    .query_map(params![], |row| {
+      let authors: Option<String> = row.get(4)?;
+      let formats: Option<String> = row.get(6)?;
+      let cover_path: Option<String> = row.get(7)?;
+      Ok(LibraryItem {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        published_year: row.get(2)?,
+        created_at: row.get(3)?,
+        authors: authors
+          .unwrap_or_default()
+          .split(',')
+          .filter(|value| !value.trim().is_empty())
+          .map(|value| value.trim().to_string())
+          .collect(),
+        file_count: row.get(5)?,
+        formats: formats
+          .unwrap_or_default()
+          .split(',')
+          .filter(|value| !value.trim().is_empty())
+          .map(|value| value.trim().to_uppercase())
+          .collect(),
+        cover_path,
+        tags: vec![],
+        language: row.get(8)?,
+        series: row.get(9)?,
+        series_index: row.get(10)?,
+        isbn: None,
+      })
+    })
+    .map_err(|err| err.to_string())?;
+
+  let mut items = Vec::new();
+  for row in rows {
+    items.push(row.map_err(|err| err.to_string())?);
+  }
+  log::info!(
+    "perf:get_library_items_light count={} duration_ms={}",
+    items.len(),
+    started.elapsed().as_millis()
+  );
+
+  Ok(items)
+}
+
+#[tauri::command]
+fn get_library_item_facets(app: tauri::AppHandle) -> Result<Vec<LibraryItemFacet>, String> {
+  let started = Instant::now();
+  let conn = open_db(&app)?;
+  let mut stmt = conn
+    .prepare(
+      "SELECT items.id, \
+        tag_map.tags as tags, \
+        isbn_map.isbn as isbn \
+       FROM items \
+       LEFT JOIN ( \
+         SELECT item_id, GROUP_CONCAT(tag_entry, '||') as tags \
+         FROM ( \
+           SELECT DISTINCT item_tags.item_id as item_id, \
+             tags.id || '|' || tags.name || '|' || IFNULL(tags.color, '') as tag_entry \
+           FROM item_tags \
+           JOIN tags ON tags.id = item_tags.tag_id \
+         ) \
+         GROUP BY item_id \
+       ) as tag_map ON tag_map.item_id = items.id \
+       LEFT JOIN ( \
+         SELECT item_id, MIN(value) as isbn \
+         FROM identifiers \
+         WHERE type IN ('ISBN10', 'ISBN13', 'OTHER', 'isbn10', 'isbn13', 'other') \
+         GROUP BY item_id \
+       ) as isbn_map ON isbn_map.item_id = items.id \
+       WHERE EXISTS (SELECT 1 FROM files WHERE item_id = items.id AND status = 'active')"
+    )
+    .map_err(|err| err.to_string())?;
+
+  let rows = stmt
+    .query_map(params![], |row| {
+      let tags: Option<String> = row.get(1)?;
+      Ok(LibraryItemFacet {
+        item_id: row.get(0)?,
+        tags: parse_tags(tags),
+        isbn: row.get(2)?,
+      })
+    })
+    .map_err(|err| err.to_string())?;
+
+  let mut facets = Vec::new();
+  for row in rows {
+    facets.push(row.map_err(|err| err.to_string())?);
+  }
+  log::info!(
+    "perf:get_library_item_facets count={} duration_ms={}",
+    facets.len(),
+    started.elapsed().as_millis()
+  );
+
+  Ok(facets)
 }
 
 #[tauri::command]
@@ -1988,13 +2129,14 @@ async fn get_fix_candidates(app: tauri::AppHandle, item_id: String) -> Result<Ve
 
 fn get_fix_candidates_sync(app: tauri::AppHandle, item_id: String) -> Result<Vec<EnrichmentCandidate>, String> {
   let conn = open_db(&app)?;
-  let title: Option<String> = conn
+  let (title, language): (Option<String>, Option<String>) = conn
     .query_row(
-      "SELECT title FROM items WHERE id = ?1",
+      "SELECT title, language FROM items WHERE id = ?1",
       params![item_id],
-      |row| row.get(0),
+      |row| Ok((row.get(0)?, row.get(1)?)),
     )
     .optional()
+    .map(|value| value.unwrap_or((None, None)))
     .map_err(|err| err.to_string())?;
 
   let authors: Vec<String> = conn
@@ -2022,6 +2164,7 @@ fn get_fix_candidates_sync(app: tauri::AppHandle, item_id: String) -> Result<Vec
     if candidates.is_empty() {
       candidates.extend(fetch_bol_isbn(&isbn));
     }
+    candidates.extend(fetch_apple_books_isbn(&isbn, language.as_deref()));
     candidates.extend(fetch_google_isbn(&isbn));
   }
 
@@ -2035,12 +2178,18 @@ fn get_fix_candidates_sync(app: tauri::AppHandle, item_id: String) -> Result<Vec
         // First try: search with title + author
         if clean_author.is_some() {
           candidates.extend(fetch_openlibrary_search(&clean_title, clean_author.as_deref()));
+          candidates.extend(fetch_apple_books_search(
+            &clean_title,
+            clean_author.as_deref(),
+            language.as_deref(),
+          ));
           candidates.extend(fetch_google_search(&clean_title, clean_author.as_deref()));
         }
 
         // Fallback: if no results with author, try title only
         if candidates.is_empty() {
           candidates.extend(fetch_openlibrary_search(&clean_title, None));
+          candidates.extend(fetch_apple_books_search(&clean_title, None, language.as_deref()));
           candidates.extend(fetch_google_search(&clean_title, None));
         }
 
@@ -2069,6 +2218,9 @@ fn search_candidates_sync(
   query: String,
   item_id: Option<String>,
 ) -> Result<Vec<EnrichmentCandidate>, String> {
+  let item_language = item_id
+    .as_deref()
+    .and_then(|id| get_item_language(&app, id).ok().flatten());
   let trimmed = query.trim();
   if trimmed.is_empty() {
     if let Some(item_id) = item_id {
@@ -2084,6 +2236,7 @@ fn search_candidates_sync(
     if candidates.is_empty() {
       candidates.extend(fetch_bol_isbn(&isbn));
     }
+    candidates.extend(fetch_apple_books_isbn(&isbn, item_language.as_deref()));
     candidates.extend(fetch_google_isbn(&isbn));
     candidates
       .sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
@@ -2099,17 +2252,35 @@ fn search_candidates_sync(
 
   // Search with title + author if parsed
   candidates.extend(fetch_openlibrary_search(&title, author.as_deref()));
+  candidates.extend(fetch_apple_books_search(
+    &title,
+    author.as_deref(),
+    item_language.as_deref(),
+  ));
   candidates.extend(fetch_google_search(&title, author.as_deref()));
 
   // If no results and we had an author, try without author
   if candidates.is_empty() && author.is_some() {
     candidates.extend(fetch_openlibrary_search(&title, None));
+    candidates.extend(fetch_apple_books_search(&title, None, item_language.as_deref()));
     candidates.extend(fetch_google_search(&title, None));
   }
 
   candidates = score_candidates(candidates, &title, author.as_deref());
   candidates.truncate(5);
   Ok(candidates)
+}
+
+fn get_item_language(app: &tauri::AppHandle, item_id: &str) -> Result<Option<String>, String> {
+  let conn = open_db(app)?;
+  conn
+    .query_row(
+      "SELECT language FROM items WHERE id = ?1",
+      params![item_id],
+      |row| row.get(0),
+    )
+    .optional()
+    .map_err(|err| err.to_string())
 }
 
 // OperationProgress and OperationProgress are replaced by OperationProgress
@@ -2150,6 +2321,7 @@ fn enrich_all_sync(app: &tauri::AppHandle, item_ids: Option<Vec<String>>) -> Res
     .prepare(
       "SELECT DISTINCT items.id, items.title, \
        GROUP_CONCAT(DISTINCT authors.name) as authors, \
+       items.language, \
        (SELECT value FROM identifiers WHERE item_id = items.id AND type IN ('ISBN13', 'ISBN10') LIMIT 1) as isbn, \
        (SELECT COUNT(*) FROM covers WHERE item_id = items.id AND source != 'generated') as real_cover_count, \
        (SELECT COUNT(*) FROM item_authors WHERE item_id = items.id) as author_count \
@@ -2163,13 +2335,14 @@ fn enrich_all_sync(app: &tauri::AppHandle, item_ids: Option<Vec<String>>) -> Res
     )
     .map_err(|err| err.to_string())?;
 
-  let mut items: Vec<(String, Option<String>, Option<String>, Option<String>)> = stmt
+  let mut items: Vec<(String, Option<String>, Option<String>, Option<String>, Option<String>)> = stmt
     .query_map(params![], |row| {
       Ok((
         row.get::<_, String>(0)?,
         row.get::<_, Option<String>>(1)?,
         row.get::<_, Option<String>>(2)?,
         row.get::<_, Option<String>>(3)?,
+        row.get::<_, Option<String>>(4)?,
       ))
     })
     .map_err(|err| err.to_string())?
@@ -2178,7 +2351,7 @@ fn enrich_all_sync(app: &tauri::AppHandle, item_ids: Option<Vec<String>>) -> Res
 
   if let Some(target_ids) = item_ids {
     let allowed: std::collections::HashSet<String> = target_ids.into_iter().collect();
-    items.retain(|(item_id, _, _, _)| allowed.contains(item_id));
+    items.retain(|(item_id, _, _, _, _)| allowed.contains(item_id));
   }
 
   let total = items.len();
@@ -2191,7 +2364,7 @@ fn enrich_all_sync(app: &tauri::AppHandle, item_ids: Option<Vec<String>>) -> Res
 
   log::info!("Starting batch enrichment for {} items", total);
 
-  for (idx, (item_id, title, authors, isbn)) in items.into_iter().enumerate() {
+  for (idx, (item_id, title, authors, isbn, language)) in items.into_iter().enumerate() {
     // Check for cancellation
     if ENRICH_CANCELLED.load(Ordering::SeqCst) {
       log::info!("Enrich operation cancelled at item {}/{}", idx + 1, total);
@@ -2217,6 +2390,7 @@ fn enrich_all_sync(app: &tauri::AppHandle, item_ids: Option<Vec<String>>) -> Res
       if candidates.is_empty() {
         candidates.extend(fetch_bol_isbn(isbn_val));
       }
+      candidates.extend(fetch_apple_books_isbn(isbn_val, language.as_deref()));
       if candidates.is_empty() {
         candidates.extend(fetch_google_isbn(isbn_val));
       }
@@ -2227,6 +2401,11 @@ fn enrich_all_sync(app: &tauri::AppHandle, item_ids: Option<Vec<String>>) -> Res
       if let Some(ref title_val) = title {
         let author = authors.as_ref().and_then(|a| a.split(',').next());
         candidates.extend(fetch_openlibrary_search(title_val, author));
+        candidates.extend(fetch_apple_books_search(
+          title_val,
+          author,
+          language.as_deref(),
+        ));
         if candidates.is_empty() {
           candidates.extend(fetch_google_search(title_val, author));
         }
@@ -5517,6 +5696,7 @@ fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
   apply_migration(&conn, "0005_organizer_settings", MIGRATION_ORGANIZER_SETTINGS_SQL)?;
   apply_migration(&conn, "0006_organizer_logs", MIGRATION_ORGANIZER_LOGS_SQL)?;
   apply_migration(&conn, "0007_title_cleanup_ignores", MIGRATION_TITLE_CLEANUP_IGNORES_SQL)?;
+  apply_migration(&conn, "0008_library_query_indexes", MIGRATION_LIBRARY_QUERY_INDEXES_SQL)?;
   conn.execute_batch("PRAGMA foreign_keys = ON;")
     .map_err(|err| err.to_string())?;
   Ok(conn)
@@ -6768,12 +6948,14 @@ fn fetch_openlibrary_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
       }
     }
   }
+  let language = extract_openlibrary_language(&data);
 
   vec![EnrichmentCandidate {
     id: Uuid::new_v4().to_string(),
     title,
     authors,
     published_year,
+    language,
     identifiers: vec![isbn.to_string()],
     cover_url: Some(format!("https://covers.openlibrary.org/b/isbn/{}-M.jpg", isbn)),
     source: "Open Library".to_string(),
@@ -6824,6 +7006,9 @@ fn fetch_bol_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
   let published_year = json_find_string(&data, "releaseDate")
     .or_else(|| json_find_string(&data, "publicationDate"))
     .and_then(|value| extract_year(&value));
+  let language = json_find_string(&data, "language")
+    .or_else(|| json_find_string(&data, "languages"))
+    .and_then(|value| normalize_language_code(&value));
   let cover_url = json_find_first_image_url(&data);
 
   vec![EnrichmentCandidate {
@@ -6831,6 +7016,7 @@ fn fetch_bol_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
     title,
     authors,
     published_year,
+    language,
     identifiers: vec![ean],
     cover_url,
     source: "Bol.com".to_string(),
@@ -6887,6 +7073,7 @@ fn fetch_google_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
         title,
         authors,
         published_year,
+        language: extract_google_language(&info),
         identifiers,
         cover_url,
         source: "Google Books".to_string(),
@@ -6894,6 +7081,361 @@ fn fetch_google_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
       }
     })
     .collect()
+}
+
+fn fetch_apple_books_isbn(isbn: &str, language: Option<&str>) -> Vec<EnrichmentCandidate> {
+  let mut collected: Vec<EnrichmentCandidate> = vec![];
+  for (idx, country) in apple_country_candidates(language).into_iter().enumerate() {
+    let url = format!(
+      "https://itunes.apple.com/lookup?isbn={}&entity=ebook&country={}&limit=5",
+      urlencoding::encode(isbn),
+      urlencoding::encode(country.trim())
+    );
+    let data = match fetch_json_with_retry(&url) {
+      Some(value) => value,
+      None => continue,
+    };
+    let mut parsed = parse_apple_books_candidates(&data, Some(isbn));
+    if idx > 0 {
+      for candidate in &mut parsed {
+        candidate.confidence = (candidate.confidence - (idx as f64 * 0.02)).max(0.45);
+      }
+    }
+    collected.extend(parsed);
+    if collected.len() >= 5 {
+      break;
+    }
+  }
+  dedupe_enrichment_candidates(collected, 5)
+}
+
+fn fetch_apple_books_search(
+  title: &str,
+  author: Option<&str>,
+  language: Option<&str>,
+) -> Vec<EnrichmentCandidate> {
+  let term = match author {
+    Some(author_val) if !author_val.trim().is_empty() => format!("{} {}", title, author_val),
+    _ => title.to_string(),
+  };
+  let mut collected: Vec<EnrichmentCandidate> = vec![];
+  for (idx, country) in apple_country_candidates(language).into_iter().enumerate() {
+    let url = format!(
+      "https://itunes.apple.com/search?term={}&media=ebook&entity=ebook&country={}&limit=5",
+      urlencoding::encode(term.trim()),
+      urlencoding::encode(country.trim())
+    );
+    let data = match fetch_json_with_retry(&url) {
+      Some(value) => value,
+      None => continue,
+    };
+    let mut parsed = parse_apple_books_candidates(&data, None);
+    if idx > 0 {
+      for candidate in &mut parsed {
+        candidate.confidence = (candidate.confidence - (idx as f64 * 0.02)).max(0.45);
+      }
+    }
+    collected.extend(parsed);
+    if collected.len() >= 5 {
+      break;
+    }
+  }
+  dedupe_enrichment_candidates(collected, 5)
+}
+
+fn fetch_json_with_retry(url: &str) -> Option<serde_json::Value> {
+  let client = reqwest::blocking::Client::builder()
+    .timeout(Duration::from_secs(10))
+    .build()
+    .ok()?;
+
+  for attempt in 0..=2u64 {
+    let response = client
+      .get(url)
+      .header(reqwest::header::ACCEPT, "application/json")
+      .send();
+
+    let response = match response {
+      Ok(value) => value,
+      Err(_) => {
+        if attempt < 2 {
+          std::thread::sleep(Duration::from_millis(350 * (attempt + 1)));
+          continue;
+        }
+        return None;
+      }
+    };
+
+    let status = response.status();
+    if status.is_success() {
+      return response.json::<serde_json::Value>().ok();
+    }
+
+    if (status.as_u16() == 429 || status.is_server_error()) && attempt < 2 {
+      let retry_after_ms = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|value| value * 1000)
+        .unwrap_or(350 * (attempt + 1));
+      std::thread::sleep(Duration::from_millis(retry_after_ms.min(4_000)));
+      continue;
+    }
+
+    return None;
+  }
+
+  None
+}
+
+fn parse_apple_books_candidates(
+  data: &serde_json::Value,
+  isbn: Option<&str>,
+) -> Vec<EnrichmentCandidate> {
+  let items = data
+    .get("results")
+    .and_then(|value| value.as_array())
+    .cloned()
+    .unwrap_or_default();
+
+  items
+    .iter()
+    .filter(|item| {
+      item
+        .get("kind")
+        .and_then(|value| value.as_str())
+        .map(|value| value == "ebook")
+        .unwrap_or(true)
+    })
+    .take(5)
+    .enumerate()
+    .map(|(index, item)| {
+      let title = item
+        .get("trackName")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string());
+      let authors = item
+        .get("artistName")
+        .and_then(|value| value.as_str())
+        .map(|value| vec![value.to_string()])
+        .unwrap_or_default();
+      let published_year = item
+        .get("releaseDate")
+        .and_then(|value| value.as_str())
+        .and_then(extract_year);
+      let identifiers = isbn
+        .map(|value| vec![value.to_string()])
+        .unwrap_or_default();
+      let cover_url = item
+        .get("artworkUrl100")
+        .or_else(|| item.get("artworkUrl60"))
+        .and_then(|value| value.as_str())
+        .map(to_high_res_apple_artwork_url);
+
+      EnrichmentCandidate {
+        id: Uuid::new_v4().to_string(),
+        title,
+        authors,
+        published_year,
+        language: extract_apple_language(item),
+        identifiers,
+        cover_url,
+        source: "Apple Books".to_string(),
+        confidence: if isbn.is_some() {
+          0.93f64 - (index as f64 * 0.03)
+        } else {
+          0.78f64 - (index as f64 * 0.04)
+        },
+      }
+    })
+    .collect()
+}
+
+fn apple_country_candidates(language: Option<&str>) -> Vec<String> {
+  let mut countries: Vec<String> = vec![];
+
+  if let Ok(env_country) = std::env::var("FOLIO_METADATA_COUNTRY") {
+    let trimmed = env_country.trim().to_uppercase();
+    if trimmed.len() == 2 {
+      countries.push(trimmed);
+    }
+  }
+
+  for country in countries_for_language(language) {
+    if !countries.contains(&country) {
+      countries.push(country);
+    }
+  }
+
+  if !countries.contains(&"US".to_string()) {
+    countries.push("US".to_string());
+  }
+  countries
+}
+
+fn countries_for_language(language: Option<&str>) -> Vec<String> {
+  let lang = language.unwrap_or("").trim().to_lowercase();
+  if lang.is_empty() {
+    return vec![];
+  }
+  let primary = lang
+    .split(['-', '_'])
+    .next()
+    .unwrap_or("")
+    .to_string();
+
+  match primary.as_str() {
+    "nl" => vec!["NL".to_string(), "BE".to_string()],
+    "de" => vec!["DE".to_string(), "AT".to_string(), "CH".to_string()],
+    "fr" => vec!["FR".to_string(), "BE".to_string(), "CA".to_string()],
+    "es" => vec!["ES".to_string(), "MX".to_string()],
+    "it" => vec!["IT".to_string()],
+    "pt" => vec!["PT".to_string(), "BR".to_string()],
+    "sv" => vec!["SE".to_string()],
+    "no" | "nb" | "nn" => vec!["NO".to_string()],
+    "da" => vec!["DK".to_string()],
+    "fi" => vec!["FI".to_string()],
+    "pl" => vec!["PL".to_string()],
+    "cs" => vec!["CZ".to_string()],
+    "hu" => vec!["HU".to_string()],
+    "ro" => vec!["RO".to_string()],
+    "tr" => vec!["TR".to_string()],
+    "el" => vec!["GR".to_string()],
+    "ru" => vec!["RU".to_string()],
+    "uk" => vec!["UA".to_string()],
+    "ja" => vec!["JP".to_string()],
+    "ko" => vec!["KR".to_string()],
+    "zh" => vec!["CN".to_string(), "TW".to_string(), "HK".to_string()],
+    "en" => vec!["US".to_string(), "GB".to_string()],
+    _ => vec![],
+  }
+}
+
+fn extract_google_language(info: &serde_json::Value) -> Option<String> {
+  info
+    .get("language")
+    .and_then(|value| value.as_str())
+    .and_then(normalize_language_code)
+}
+
+fn extract_apple_language(item: &serde_json::Value) -> Option<String> {
+  item
+    .get("language")
+    .and_then(|value| value.as_str())
+    .and_then(normalize_language_code)
+}
+
+fn extract_openlibrary_language(item: &serde_json::Value) -> Option<String> {
+  if let Some(value) = item.get("language") {
+    if let Some(code) = parse_openlibrary_language_value(value) {
+      return Some(code);
+    }
+  }
+  if let Some(value) = item.get("languages") {
+    if let Some(code) = parse_openlibrary_language_value(value) {
+      return Some(code);
+    }
+  }
+  None
+}
+
+fn parse_openlibrary_language_value(value: &serde_json::Value) -> Option<String> {
+  match value {
+    serde_json::Value::String(text) => normalize_language_code(text),
+    serde_json::Value::Array(values) => values.iter().find_map(parse_openlibrary_language_value),
+    serde_json::Value::Object(map) => map
+      .get("key")
+      .and_then(|key| key.as_str())
+      .and_then(normalize_language_code),
+    _ => None,
+  }
+}
+
+fn normalize_language_code(raw: &str) -> Option<String> {
+  let trimmed = raw.trim().to_lowercase();
+  if trimmed.is_empty() {
+    return None;
+  }
+
+  let tail = trimmed
+    .rsplit('/')
+    .next()
+    .unwrap_or(trimmed.as_str())
+    .split(['-', '_'])
+    .next()
+    .unwrap_or("")
+    .to_string();
+  if tail.len() == 2 && tail.chars().all(|c| c.is_ascii_alphabetic()) {
+    return Some(tail);
+  }
+
+  let mapped = match tail.as_str() {
+    "eng" => "en",
+    "nld" | "dut" => "nl",
+    "deu" | "ger" => "de",
+    "fra" | "fre" => "fr",
+    "spa" => "es",
+    "ita" => "it",
+    "por" => "pt",
+    "pol" => "pl",
+    "ces" | "cze" => "cs",
+    "hun" => "hu",
+    "ron" | "rum" => "ro",
+    "ell" | "gre" => "el",
+    "tur" => "tr",
+    "rus" => "ru",
+    "ukr" => "uk",
+    "jpn" => "ja",
+    "kor" => "ko",
+    "zho" | "chi" => "zh",
+    "swe" => "sv",
+    "nor" => "no",
+    "dan" => "da",
+    "fin" => "fi",
+    _ => return None,
+  };
+  Some(mapped.to_string())
+}
+
+fn dedupe_enrichment_candidates(
+  candidates: Vec<EnrichmentCandidate>,
+  max_items: usize,
+) -> Vec<EnrichmentCandidate> {
+  let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+  let mut deduped: Vec<EnrichmentCandidate> = vec![];
+  for candidate in candidates {
+    let key = format!(
+      "{}|{}|{}",
+      candidate
+        .title
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_lowercase(),
+      candidate.authors.join(",").trim().to_lowercase(),
+      candidate.published_year.unwrap_or_default()
+    );
+    if seen.insert(key) {
+      deduped.push(candidate);
+      if deduped.len() >= max_items {
+        break;
+      }
+    }
+  }
+  deduped
+}
+
+fn to_high_res_apple_artwork_url(url: &str) -> String {
+  let secure = url.replace("http://", "https://");
+  let upgraded = Regex::new(r"/\d+x\d+bb\.(jpg|png)$")
+    .ok()
+    .map(|re| re.replace(&secure, "/1200x1200bb.$1").to_string())
+    .unwrap_or(secure);
+  Regex::new(r"/source/\d+x\d+bb\.(jpg|png)$")
+    .ok()
+    .map(|re| re.replace(&upgraded, "/source/1200x1200bb.$1").to_string())
+    .unwrap_or(upgraded)
 }
 
 fn get_bol_access_token() -> Option<String> {
@@ -7114,6 +7656,7 @@ fn fetch_openlibrary_search(title: &str, author: Option<&str>) -> Vec<Enrichment
         title,
         authors,
         published_year,
+        language: extract_openlibrary_language(doc),
         identifiers,
         cover_url,
         source: "Open Library".to_string(),
@@ -7210,6 +7753,7 @@ fn fetch_google_search(title: &str, author: Option<&str>) -> Vec<EnrichmentCandi
         title,
         authors,
         published_year,
+        language: extract_google_language(&info),
         identifiers,
         cover_url,
         source: "Google Books".to_string(),
@@ -7270,19 +7814,20 @@ fn apply_enrichment_candidate(
   candidate: &EnrichmentCandidate,
   now: i64,
 ) -> Result<(), String> {
-  let existing: (Option<String>, Option<i64>) = conn
+  let existing: (Option<String>, Option<i64>, Option<String>) = conn
     .query_row(
-      "SELECT title, published_year FROM items WHERE id = ?1",
+      "SELECT title, published_year, language FROM items WHERE id = ?1",
       params![item_id],
-      |row| Ok((row.get(0)?, row.get(1)?)),
+      |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )
     .map_err(|err| err.to_string())?;
 
   let title = candidate.title.clone().or(existing.0);
   let published_year = candidate.published_year.or(existing.1);
+  let language = candidate.language.clone().or(existing.2);
   conn.execute(
-    "UPDATE items SET title = ?1, published_year = ?2, updated_at = ?3 WHERE id = ?4",
-    params![title, published_year, now, item_id],
+    "UPDATE items SET title = ?1, published_year = ?2, language = ?3, updated_at = ?4 WHERE id = ?5",
+    params![title, published_year, language, now, item_id],
   )
   .map_err(|err| err.to_string())?;
 
@@ -7291,6 +7836,9 @@ fn apply_enrichment_candidate(
   }
   if candidate.published_year.is_some() {
     insert_field_source_with_source(conn, item_id, "published_year", &candidate.source, candidate.confidence, now)?;
+  }
+  if candidate.language.is_some() {
+    insert_field_source_with_source(conn, item_id, "language", &candidate.source, candidate.confidence, now)?;
   }
 
   if !candidate.authors.is_empty() {
@@ -8186,6 +8734,8 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
       get_library_items,
+      get_library_items_light,
+      get_library_item_facets,
       get_inbox_items,
       list_tags,
       create_tag,

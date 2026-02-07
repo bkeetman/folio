@@ -10,13 +10,18 @@ import {
   itemFieldSources,
   items,
 } from "../db/schema";
+import { AppleBooksProvider } from "./providers";
+export * from "./providers";
 
-type EnrichmentSourceName = "openlibrary" | "googlebooks";
+type EnrichmentSourceName = "openlibrary" | "googlebooks" | "applebooks";
 
 type EnrichedCandidate = {
   title?: string;
   authors?: string[];
   publishedYear?: number;
+  description?: string;
+  coverUrl?: string;
+  sourceUrl?: string;
   identifiers?: string[];
   source: EnrichmentSourceName;
   confidence: number;
@@ -28,7 +33,10 @@ const cacheTtlMs = 1000 * 60 * 60 * 24 * 30;
 const rateLimiters: Record<EnrichmentSourceName, RateLimiter> = {
   openlibrary: createRateLimiter(1000),
   googlebooks: createRateLimiter(250),
+  applebooks: createRateLimiter(250),
 };
+
+const appleBooksProvider = new AppleBooksProvider();
 
 export async function enrichByIsbn(
   db: FolioDb,
@@ -43,7 +51,7 @@ export async function enrichByIsbn(
     `isbn:${isbn}`,
     () => fetchOpenLibraryIsbn(isbn)
   );
-  if (openLibrary) results.push(openLibrary);
+  results.push(...toCandidateArray(openLibrary));
 
   const google = await fetchWithCache(
     db,
@@ -52,7 +60,16 @@ export async function enrichByIsbn(
     `isbn:${isbn}`,
     () => fetchGoogleBooksIsbn(isbn)
   );
-  if (google) results.push(...google);
+  results.push(...toCandidateArray(google));
+
+  const apple = await fetchWithCache(
+    db,
+    itemId,
+    "applebooks",
+    `isbn:${isbn}`,
+    () => fetchAppleBooksIsbn(isbn)
+  );
+  results.push(...toCandidateArray(apple));
 
   return results;
 }
@@ -80,7 +97,19 @@ export async function enrichByTitleAuthor(
     () => fetchGoogleBooksSearch(title, author)
   );
 
-  const candidates = [...(openLibrary ?? []), ...(google ?? [])];
+  const apple = await fetchWithCache(
+    db,
+    itemId,
+    "applebooks",
+    queryKey,
+    () => fetchAppleBooksSearch(title, author)
+  );
+
+  const candidates = [
+    ...toCandidateArray(openLibrary),
+    ...toCandidateArray(google),
+    ...toCandidateArray(apple),
+  ];
   return candidates
     .map((candidate) => {
       const score = scoreCandidate(candidate, title, author);
@@ -106,6 +135,8 @@ export function applyEnrichmentCandidate(
   if (!item.title && candidate.title) updates.title = candidate.title;
   if (!item.publishedYear && candidate.publishedYear)
     updates.publishedYear = candidate.publishedYear;
+  if (!item.description && candidate.description)
+    updates.description = candidate.description;
   if (Object.keys(updates).length) {
     updates.updatedAt = now;
     db.update(items).set(updates).where(eq(items.id, itemId));
@@ -124,6 +155,16 @@ export function applyEnrichmentCandidate(
         id: randomUUID(),
         itemId,
         field: "published_year",
+        source: candidate.source,
+        confidence: candidate.confidence,
+        createdAt: now,
+      });
+    }
+    if (updates.description) {
+      db.insert(itemFieldSources).values({
+        id: randomUUID(),
+        itemId,
+        field: "description",
         source: candidate.source,
         confidence: candidate.confidence,
         createdAt: now,
@@ -335,6 +376,41 @@ async function fetchGoogleBooksSearch(
   });
 }
 
+async function fetchAppleBooksIsbn(
+  isbn: string
+): Promise<EnrichedCandidate[] | null> {
+  await rateLimiters.applebooks.wait();
+  const results = await appleBooksProvider.fetchByIsbn(isbn);
+  return mapAppleBooks(results);
+}
+
+async function fetchAppleBooksSearch(
+  title: string,
+  author?: string
+): Promise<EnrichedCandidate[] | null> {
+  await rateLimiters.applebooks.wait();
+  const results = await appleBooksProvider.search({ title, author });
+  return mapAppleBooks(results);
+}
+
+function mapAppleBooks(
+  results: Awaited<ReturnType<AppleBooksProvider["search"]>>
+): EnrichedCandidate[] | null {
+  if (!results.length) return null;
+  return results.slice(0, 5).map((entry, index) => ({
+    title: entry.title,
+    authors: entry.authors,
+    publishedYear: entry.publishedYear,
+    description: entry.description,
+    coverUrl: entry.coverUrl,
+    sourceUrl: entry.sourceUrl,
+    identifiers: entry.identifiers,
+    source: "applebooks",
+    confidence: clampConfidence(entry.confidence - index * 0.03),
+    raw: entry.raw,
+  }));
+}
+
 async function getOrCreateSource(db: FolioDb, name: EnrichmentSourceName) {
   const existing = db
     .select()
@@ -347,7 +423,8 @@ async function getOrCreateSource(db: FolioDb, name: EnrichmentSourceName) {
   db.insert(enrichmentSources).values({
     id,
     name,
-    rateLimitPerMin: name === "openlibrary" ? 60 : 240,
+    rateLimitPerMin:
+      name === "openlibrary" ? 60 : name === "googlebooks" ? 240 : 170,
     createdAt: Date.now(),
   });
   return id;
@@ -389,6 +466,17 @@ function tokenize(value: string) {
       .split(/\s+/)
       .filter(Boolean)
   );
+}
+
+function clampConfidence(value: number) {
+  return Math.min(0.99, Math.max(0.2, value));
+}
+
+function toCandidateArray(
+  value: EnrichedCandidate | EnrichedCandidate[] | null
+): EnrichedCandidate[] {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
 }
 
 type RateLimiter = {
