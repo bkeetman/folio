@@ -14,7 +14,7 @@ export type View =
   | "settings"
   | "edit"
   | "import";
-export type LibraryFilter = "all" | "epub" | "pdf" | "needs-metadata" | "tagged";
+export type LibraryFilter = "all" | "epub" | "pdf" | "mobi" | "needs-metadata" | "tagged";
 
 export type LibrarySort =
   | "default"

@@ -1,6 +1,7 @@
 import path from "path";
 import type { ExtractedMetadata } from "./types";
 import { extractEpubMetadata } from "./epub";
+import { extractMobiMetadata } from "./mobi";
 import { extractPdfMetadata } from "./pdf";
 
 export async function extractMetadataForFile(
@@ -9,6 +10,7 @@ export async function extractMetadataForFile(
   const extension = path.extname(filePath).toLowerCase();
   if (extension === ".epub") return extractEpubMetadata(filePath);
   if (extension === ".pdf") return extractPdfMetadata(filePath);
+  if (extension === ".mobi") return extractMobiMetadata(filePath);
   return {};
 }
 

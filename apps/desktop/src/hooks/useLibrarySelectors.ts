@@ -271,6 +271,8 @@ export function useLibrarySelectors({
           return normalizedFormat.includes("epub");
         case "pdf":
           return normalizedFormat.includes("pdf");
+        case "mobi":
+          return normalizedFormat.includes("mobi");
         case "needs-metadata":
           return book.status !== "Complete";
         case "tagged":

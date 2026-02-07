@@ -1305,6 +1305,7 @@ function App() {
       const lowerPath = filePath.toLowerCase();
       let score = 0;
       if (lowerPath.endsWith(".epub")) score += 50;
+      if (lowerPath.endsWith(".mobi")) score += 30;
       if (lowerPath.endsWith(".pdf")) score += 10;
       if (!/(\s\[\d+\]|\s\(\d+\)|\s-\s?copy| copy)/i.test(fileName)) score += 20;
       if (!lowerPath.includes(".trash")) score += 5;

@@ -127,6 +127,11 @@ export function LibraryView({
             onClick={() => setLibraryFilter("pdf")}
             label={t("library.pdf")}
           />
+          <FilterOption
+            active={libraryFilter === "mobi"}
+            onClick={() => setLibraryFilter("mobi")}
+            label={t("library.mobi")}
+          />
         </div>
 
         <div className="flex h-8 items-center rounded-lg border border-[var(--app-border-muted)] bg-app-surface p-1 ml-auto sm:ml-0">

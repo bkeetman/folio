@@ -3940,7 +3940,7 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
     let path = entry.path();
     let ext = path.extension().and_then(|value| value.to_str()).unwrap_or("");
     let ext = format!(".{}", ext).to_lowercase();
-    if ext != ".epub" && ext != ".pdf" {
+    if ext != ".epub" && ext != ".pdf" && ext != ".mobi" {
       continue;
     }
 
@@ -4317,7 +4317,7 @@ fn scan_for_import_sync(app: tauri::AppHandle, paths: Vec<String>) -> Result<Imp
     },
   );
 
-  // Collect all epub/pdf files from paths
+  // Collect all supported ebook files from paths
   let mut files_to_scan: Vec<std::path::PathBuf> = Vec::new();
   for path_str in &paths {
     let path = std::path::Path::new(path_str);
@@ -4327,7 +4327,7 @@ fn scan_for_import_sync(app: tauri::AppHandle, paths: Vec<String>) -> Result<Imp
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_lowercase();
-      if ext == "epub" || ext == "pdf" {
+      if ext == "epub" || ext == "pdf" || ext == "mobi" {
         files_to_scan.push(path.to_path_buf());
       }
     } else if path.is_dir() {
@@ -4339,7 +4339,7 @@ fn scan_for_import_sync(app: tauri::AppHandle, paths: Vec<String>) -> Result<Imp
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_lowercase();
-          if ext == "epub" || ext == "pdf" {
+          if ext == "epub" || ext == "pdf" || ext == "mobi" {
             files_to_scan.push(entry.path().to_path_buf());
           }
         }
@@ -8068,7 +8068,7 @@ fn count_scan_targets(root: &str) -> u64 {
         .and_then(|value| value.to_str())
         .unwrap_or("")
         .to_lowercase();
-      ext == "epub" || ext == "pdf"
+      ext == "epub" || ext == "pdf" || ext == "mobi"
     })
     .count() as u64
 }
@@ -8269,7 +8269,7 @@ fn scan_ereader(app: tauri::AppHandle, device_id: String) -> Result<Vec<EReaderB
     let path = entry.path();
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
 
-    if ext != "epub" && ext != "pdf" {
+    if ext != "epub" && ext != "pdf" && ext != "mobi" {
       continue;
     }
 

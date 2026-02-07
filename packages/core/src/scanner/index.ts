@@ -30,7 +30,7 @@ type ScanStats = {
   missing: number;
 };
 
-const defaultExtensions = [".epub", ".pdf"];
+const defaultExtensions = [".epub", ".pdf", ".mobi"];
 
 export async function scanRoot(
   db: FolioDb,

@@ -6,7 +6,7 @@ pub struct Book {
     pub id: String, // UUID
     pub file_path: String,
     pub file_hash: Option<String>,
-    pub format: String, // "epub", "pdf"
+    pub format: String, // "epub", "pdf", "mobi"
     pub title: Option<String>,
     pub description: Option<String>,
     pub publisher: Option<String>,

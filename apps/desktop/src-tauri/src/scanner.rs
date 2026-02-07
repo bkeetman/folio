@@ -57,7 +57,7 @@ pub fn scan_library(app: AppHandle, root_path: String) -> Result<(), String> {
         let path = entry.path();
         if path.is_file() {
             let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
-            if ext == "epub" || ext == "pdf" {
+            if ext == "epub" || ext == "pdf" || ext == "mobi" {
                 // Determine format
                 let format = ext.clone();
                 let path_str = path.to_string_lossy().to_string();
