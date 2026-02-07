@@ -20,6 +20,7 @@ type LibraryGridProps = {
 const GRID_MIN_CARD_WIDTH = 170;
 const GRID_GAP = 12;
 const GRID_PADDING_X = 24;
+const GRID_CARD_META_HEIGHT = 126;
 
 export function LibraryGrid({
   books,
@@ -64,6 +65,13 @@ export function LibraryGrid({
   }, [gridWidth]);
 
   const rowCount = Math.ceil(books.length / laneCount);
+  const estimatedGridRowHeight = useMemo(() => {
+    const usableWidth = Math.max(0, gridWidth - GRID_PADDING_X);
+    const totalGapWidth = Math.max(0, (laneCount - 1) * GRID_GAP);
+    const columnWidth = Math.max(0, (usableWidth - totalGapWidth) / laneCount);
+    const coverHeight = columnWidth * 1.5; // aspect-[2/3]
+    return Math.max(280, Math.round(coverHeight + GRID_CARD_META_HEIGHT + GRID_GAP));
+  }, [gridWidth, laneCount]);
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const listVirtualizer = useVirtualizer({
@@ -77,10 +85,15 @@ export function LibraryGrid({
   const gridVirtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 360,
+    estimateSize: () => estimatedGridRowHeight,
     overscan: 4,
     enabled: viewMode === "grid",
   });
+
+  useEffect(() => {
+    if (viewMode !== "grid") return;
+    gridVirtualizer.measure();
+  }, [gridVirtualizer, estimatedGridRowHeight, viewMode]);
 
   const listVirtualRows = listVirtualizer.getVirtualItems();
   const gridVirtualRows = gridVirtualizer.getVirtualItems();

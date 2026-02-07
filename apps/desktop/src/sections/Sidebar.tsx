@@ -222,6 +222,15 @@ export function Sidebar({
               />
             </div>
 
+            <div className="mb-3 flex items-center justify-between rounded-md border border-[var(--app-border-soft)] bg-app-bg/40 px-2.5 py-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-app-ink-muted">
+                {t("sidebar.totalBooks")}
+              </span>
+              <span className="text-sm font-bold text-app-ink">
+                {libraryHealth ? libraryHealth.total : "—"}
+              </span>
+            </div>
+
             <div className="grid grid-cols-3 gap-1">
               <div className="flex flex-col items-center justify-center rounded-lg py-2 hover:bg-app-surface-hover transition-colors">
                 <span className="text-app-ink-muted mb-1">

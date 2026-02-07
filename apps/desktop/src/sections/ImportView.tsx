@@ -127,7 +127,12 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
     try {
       const selected = await open({
         multiple: true,
-        filters: [{ name: "Books", extensions: ["epub", "pdf", "mobi"] }],
+        filters: [
+          { name: "All eBooks", extensions: ["epub", "pdf", "mobi", "EPUB", "PDF", "MOBI"] },
+          { name: "EPUB", extensions: ["epub", "EPUB"] },
+          { name: "PDF", extensions: ["pdf", "PDF"] },
+          { name: "MOBI", extensions: ["mobi", "MOBI"] },
+        ],
       });
       if (!selected || (Array.isArray(selected) && selected.length === 0)) return;
 
