@@ -87,6 +87,23 @@ export const enTranslation = {
           "Clean title noise in batch and infer year/author from patterns like \"Author - Title (Year)\".",
         fixing: "Fixing...",
         fixTitlesInBatch: "Fix titles in batch",
+        metadataSources: "Metadata Sources",
+        metadataSourcesHint:
+          "Choose which metadata providers Folio uses for lookup. Open Library, Google Books, and Apple Books are enabled by default. ISFDB can be enabled for extra sci-fi coverage.",
+        metadataSourceOpenLibraryStrength:
+          "Good for broad catalog coverage and ISBN/title matches.",
+        metadataSourceGoogleStrength:
+          "Good for mainstream books, covers, and rich publication metadata.",
+        metadataSourceAppleStrength:
+          "Good for ebook storefront metadata and high-resolution cover art.",
+        metadataSourceIsfdbStrength:
+          "Good for science fiction, fantasy, and genre-specific bibliography data.",
+        metadataSourceArchiveStrength:
+          "Good for older, rare, and out-of-print texts from public archives.",
+        metadataSourceOpenbdStrength:
+          "Good for Japanese ISBN metadata from publisher and ONIX feeds.",
+        metadataSourceGenericStrength:
+          "Good for additional metadata enrichment.",
       },
       bookEdit: {
         removeFromLibraryTitle: "Remove from library",
@@ -148,9 +165,11 @@ export const enTranslation = {
       },
       fixView: {
         needsFixingListCount: "Needs Fixing list: {{count}} items",
+        needsFixingCountShort: "{{count}} items",
         needsFixingListEmpty: "Needs Fixing list is empty",
         metadataEnrichment: "Metadata Enrichment",
         cancel: "Cancel",
+        enrichAction: "Enrich",
         enrichNeedsFixing: "Enrich Needs Fixing",
         enrichingLibrary: "Enriching Library",
         allComplete: "All books have complete metadata!",

@@ -2,6 +2,7 @@ import { Button, Input } from "../components/ui";
 import type { ThemeMode } from "../hooks/useTheme";
 import { useTranslation } from "react-i18next";
 import { APP_LANGUAGE_OPTIONS, i18n } from "../i18n";
+import type { MetadataSourceSetting } from "../types/library";
 
 type SettingsViewProps = {
   libraryRoot: string | null;
@@ -10,6 +11,9 @@ type SettingsViewProps = {
   normalizingDescriptions: boolean;
   onBatchFixTitles: () => Promise<void>;
   batchFixingTitles: boolean;
+  metadataSources: MetadataSourceSetting[];
+  onSetMetadataSourceEnabled: (id: string, enabled: boolean) => Promise<void>;
+  metadataSourcesSaving: boolean;
   themeMode: ThemeMode;
   setThemeMode: (mode: ThemeMode) => void;
 };
@@ -21,6 +25,9 @@ export function SettingsView({
   normalizingDescriptions,
   onBatchFixTitles,
   batchFixingTitles,
+  metadataSources,
+  onSetMetadataSourceEnabled,
+  metadataSourcesSaving,
   themeMode,
   setThemeMode,
 }: SettingsViewProps) {
@@ -32,6 +39,25 @@ export function SettingsView({
     !!libraryRoot &&
     (libraryRoot.includes("com~apple~CloudDocs") ||
       libraryRoot.includes("Mobile Documents"));
+
+  const sourceStrengthLabel = (sourceId: string) => {
+    switch (sourceId) {
+      case "open-library":
+        return t("settings.metadataSourceOpenLibraryStrength");
+      case "google-books":
+        return t("settings.metadataSourceGoogleStrength");
+      case "apple-books":
+        return t("settings.metadataSourceAppleStrength");
+      case "isfdb":
+        return t("settings.metadataSourceIsfdbStrength");
+      case "internet-archive":
+        return t("settings.metadataSourceArchiveStrength");
+      case "openbd":
+        return t("settings.metadataSourceOpenbdStrength");
+      default:
+        return t("settings.metadataSourceGenericStrength");
+    }
+  };
 
   return (
     <section className="flex-1 px-6 py-6">
@@ -103,6 +129,40 @@ export function SettingsView({
               {t("settings.icloudWarning")}
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-app-border bg-white p-5 shadow-sm">
+        <div className="mb-3">
+          <div className="text-xs font-semibold uppercase tracking-wider text-app-ink-muted">
+            {t("settings.metadataSources")}
+          </div>
+          <p className="mt-1 text-xs text-app-ink-muted">{t("settings.metadataSourcesHint")}</p>
+        </div>
+        <div className="space-y-3">
+          {metadataSources.map((source) => (
+            <label
+              key={source.id}
+              className="flex items-start justify-between gap-3 rounded-lg border border-app-border px-3 py-2"
+            >
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-app-ink">{source.label}</div>
+                <div className="text-xs text-app-ink-muted">{sourceStrengthLabel(source.id)}</div>
+                {source.endpoint ? (
+                  <div className="truncate text-xs text-app-ink-muted">{source.endpoint}</div>
+                ) : null}
+              </div>
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 accent-[var(--app-accent)]"
+                checked={source.enabled}
+                onChange={(event) => {
+                  void onSetMetadataSourceEnabled(source.id, event.target.checked);
+                }}
+                disabled={metadataSourcesSaving}
+              />
+            </label>
+          ))}
         </div>
       </div>
 

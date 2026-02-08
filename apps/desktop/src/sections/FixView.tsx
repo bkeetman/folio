@@ -87,7 +87,7 @@ export function FixView({
   const { t } = useTranslation();
   const enrichLabel =
     items.length > 0
-      ? t("fixView.needsFixingListCount", { count: items.length })
+      ? t("fixView.needsFixingCountShort", { count: items.length })
       : t("fixView.needsFixingListEmpty");
 
   const renderEnrichToolbar = () => {
@@ -211,7 +211,6 @@ export function FixView({
 
   return (
     <section className="flex flex-col gap-4">
-      {renderEnrichToolbar()}
       <ProgressBar
         progress={enrichProgress}
         label={t("fixView.enrichingLibrary")}
@@ -227,6 +226,35 @@ export function FixView({
             </span>
             <FilterDropdown filter={fixFilter} setFilter={setFixFilter} />
           </div>
+          {isDesktop ? (
+            <div className="flex items-center justify-between gap-2 border-b border-[var(--app-border)] px-3 py-2 bg-[var(--app-bg)]/35">
+              <span className="truncate text-[10px] text-[var(--app-ink-muted)]">
+                {enrichLabel}
+              </span>
+              {enriching ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onCancelEnrich}
+                  className="h-7 gap-1 px-2 text-[11px] border-[var(--app-border-soft)] bg-[var(--app-bg-secondary)] text-[var(--app-ink)] hover:border-[var(--app-border)] hover:bg-[var(--app-bg-tertiary)]"
+                >
+                  <X size={12} className="text-red-400" />
+                  {t("fixView.cancel")}
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onEnrichAll}
+                  className="h-7 gap-1 px-2 text-[11px]"
+                  disabled={items.length === 0}
+                >
+                  <Sparkles size={12} />
+                  {t("fixView.enrichAction")}
+                </Button>
+              )}
+            </div>
+          ) : null}
           <div className="flex-1 overflow-y-auto">
             {items.map((item) => {
               const issueReason = getIssueReason(item, inboxItems);

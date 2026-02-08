@@ -87,6 +87,23 @@ export const nlTranslation = {
           "Maak titels in bulk schoon en leid jaar/auteur af uit patronen zoals \"Auteur - Titel (Jaar)\".",
         fixing: "Bezig...",
         fixTitlesInBatch: "Titels in batch herstellen",
+        metadataSources: "Metadata-bronnen",
+        metadataSourcesHint:
+          "Kies welke metadata-providers Folio gebruikt. Open Library, Google Books en Apple Books staan standaard aan. ISFDB kun je optioneel inschakelen voor extra sci-fi resultaten.",
+        metadataSourceOpenLibraryStrength:
+          "Sterk in brede catalogusdekking en ISBN/titel-matches.",
+        metadataSourceGoogleStrength:
+          "Sterk in gangbare boeken, covers en rijke publicatie-metadata.",
+        metadataSourceAppleStrength:
+          "Sterk in ebook-store metadata en hoge-resolutie coverafbeeldingen.",
+        metadataSourceIsfdbStrength:
+          "Sterk in sciencefiction, fantasy en genrespecifieke bibliografische data.",
+        metadataSourceArchiveStrength:
+          "Sterk in oudere, zeldzame en uitverkochte titels uit publieke archieven.",
+        metadataSourceOpenbdStrength:
+          "Sterk in Japanse ISBN-metadata uit uitgevers- en ONIX-feeds.",
+        metadataSourceGenericStrength:
+          "Sterk als extra bron voor metadata-verrijking.",
       },
       bookEdit: {
         removeFromLibraryTitle: "Verwijder uit bibliotheek",
@@ -148,9 +165,11 @@ export const nlTranslation = {
       },
       fixView: {
         needsFixingListCount: "Needs Fixing-lijst: {{count}} items",
+        needsFixingCountShort: "{{count}} items",
         needsFixingListEmpty: "Needs Fixing-lijst is leeg",
         metadataEnrichment: "Metadata-verrijking",
         cancel: "Annuleren",
+        enrichAction: "Verrijk",
         enrichNeedsFixing: "Needs Fixing verrijken",
         enrichingLibrary: "Bibliotheek verrijken",
         allComplete: "Alle boeken hebben complete metadata!",

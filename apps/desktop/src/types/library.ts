@@ -102,6 +102,18 @@ export type OrganizerSettings = {
   template: string;
 };
 
+export type MetadataSourceSetting = {
+  id: string;
+  label: string;
+  enabled: boolean;
+  sourceType: string;
+  endpoint: string | null;
+};
+
+export type MetadataLookupSettings = {
+  sources: MetadataSourceSetting[];
+};
+
 export type OrganizerLogEntry = {
   action: string;
   from: string;

@@ -33,6 +33,8 @@ import type {
   ItemMetadata,
   LibraryFilter,
   LibrarySort,
+  MetadataLookupSettings,
+  MetadataSourceSetting,
   OperationProgress,
   OperationStats,
   PendingChange,
@@ -41,6 +43,51 @@ import type {
   Tag,
   View,
 } from "./types/library";
+
+const DEFAULT_METADATA_SOURCES: MetadataSourceSetting[] = [
+  {
+    id: "open-library",
+    label: "Open Library",
+    enabled: true,
+    sourceType: "builtin",
+    endpoint: "https://openlibrary.org",
+  },
+  {
+    id: "google-books",
+    label: "Google Books",
+    enabled: true,
+    sourceType: "builtin",
+    endpoint: "https://www.googleapis.com/books/v1",
+  },
+  {
+    id: "apple-books",
+    label: "Apple Books",
+    enabled: true,
+    sourceType: "builtin",
+    endpoint: "https://itunes.apple.com",
+  },
+  {
+    id: "isfdb",
+    label: "ISFDB",
+    enabled: false,
+    sourceType: "isfdb",
+    endpoint: "https://www.isfdb.org/cgi-bin/se.cgi",
+  },
+  {
+    id: "internet-archive",
+    label: "Internet Archive",
+    enabled: false,
+    sourceType: "builtin",
+    endpoint: "https://archive.org/advancedsearch.php",
+  },
+  {
+    id: "openbd",
+    label: "OpenBD (Japan)",
+    enabled: false,
+    sourceType: "builtin",
+    endpoint: "https://api.openbd.jp/v1/get",
+  },
+];
 
 function App() {
   const readInitialInspectorWidth = () => {
@@ -120,6 +167,9 @@ function App() {
   const [importingBooks, setImportingBooks] = useState(false);
   const [normalizingDescriptions, setNormalizingDescriptions] = useState(false);
   const [batchFixingTitles, setBatchFixingTitles] = useState(false);
+  const [metadataSources, setMetadataSources] =
+    useState<MetadataSourceSetting[]>(DEFAULT_METADATA_SOURCES);
+  const [metadataSourcesSaving, setMetadataSourcesSaving] = useState(false);
   const [tags, setTags] = useState<Tag[]>([]);
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0].value);
@@ -779,6 +829,56 @@ function App() {
       setBatchFixingTitles(false);
     }
   }, [batchFixingTitles, refreshLibrary]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let cancelled = false;
+    void invoke<MetadataLookupSettings>("get_metadata_lookup_settings")
+      .then((settings) => {
+        if (cancelled) return;
+        if (Array.isArray(settings.sources) && settings.sources.length > 0) {
+          setMetadataSources(settings.sources);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMetadataSources(DEFAULT_METADATA_SOURCES);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const persistMetadataSources = useCallback(
+    async (sources: MetadataSourceSetting[], successMessage: string) => {
+      if (!isTauri()) return;
+      setMetadataSourcesSaving(true);
+      try {
+        await invoke("set_metadata_lookup_settings", {
+          settings: { sources },
+        });
+        setScanStatus(successMessage);
+      } catch {
+        setScanStatus("Could not save metadata source settings.");
+      } finally {
+        setMetadataSourcesSaving(false);
+      }
+    },
+    []
+  );
+
+  const handleSetMetadataSourceEnabled = useCallback(
+    async (id: string, enabled: boolean) => {
+      setMetadataSources((current) => {
+        const next = current.map((source) =>
+          source.id === id ? { ...source, enabled } : source
+        );
+        void persistMetadataSources(next, "Metadata source settings saved.");
+        return next;
+      });
+    },
+    [persistMetadataSources]
+  );
 
   const handleImportCancel = () => {
     setView("library-books");
@@ -1639,6 +1739,9 @@ function App() {
             normalizingDescriptions={normalizingDescriptions}
             onBatchFixTitles={handleBatchFixTitles}
             batchFixingTitles={batchFixingTitles}
+            metadataSources={metadataSources}
+            onSetMetadataSourceEnabled={handleSetMetadataSourceEnabled}
+            metadataSourcesSaving={metadataSourcesSaving}
             themeMode={themeMode}
             setThemeMode={setThemeMode}
             missingFiles={missingFiles}

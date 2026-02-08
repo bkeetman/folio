@@ -24,6 +24,7 @@ import type {
   LibraryFilter,
   LibraryItem,
   LibrarySort,
+  MetadataSourceSetting,
   MissingFileItem,
   OperationProgress,
   ImportRequest,
@@ -141,6 +142,9 @@ type AppRoutesProps = {
   normalizingDescriptions: boolean;
   onBatchFixTitles: () => Promise<void>;
   batchFixingTitles: boolean;
+  metadataSources: MetadataSourceSetting[];
+  onSetMetadataSourceEnabled: (id: string, enabled: boolean) => Promise<void>;
+  metadataSourcesSaving: boolean;
   missingFiles: MissingFileItem[];
   onRelinkMissing: (fileId: string) => void | Promise<void>;
   onRemoveMissing: (fileId: string) => void | Promise<void>;
@@ -288,6 +292,9 @@ export function AppRoutes(props: AppRoutesProps) {
     normalizingDescriptions,
     onBatchFixTitles,
     batchFixingTitles,
+    metadataSources,
+    onSetMetadataSourceEnabled,
+    metadataSourcesSaving,
     missingFiles,
     onRelinkMissing,
     onRemoveMissing,
@@ -503,6 +510,9 @@ export function AppRoutes(props: AppRoutesProps) {
           normalizingDescriptions={normalizingDescriptions}
           onBatchFixTitles={onBatchFixTitles}
           batchFixingTitles={batchFixingTitles}
+          metadataSources={metadataSources}
+          onSetMetadataSourceEnabled={onSetMetadataSourceEnabled}
+          metadataSourcesSaving={metadataSourcesSaving}
           themeMode={themeMode}
           setThemeMode={setThemeMode}
         />
