@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Button, Input } from "../components/ui";
 import { LANGUAGE_OPTIONS } from "../lib/languageFlags";
 import { cleanupMetadataTitle } from "../lib/metadataCleanup";
+import { PREDEFINED_BOOK_CATEGORIES } from "../lib/categories";
 import type { EnrichmentCandidate, ItemMetadata, LibraryItem, View } from "../types/library";
 
 type EmbeddedCoverCandidate = {
@@ -75,6 +76,7 @@ export function BookEditView({
     const [infoMessage, setInfoMessage] = useState<string | null>(null);
     const [embeddedCandidates, setEmbeddedCandidates] = useState<EmbeddedCoverCandidate[]>([]);
     const [selectedEmbeddedIndex, setSelectedEmbeddedIndex] = useState(0);
+    const [selectedCategoryToAdd, setSelectedCategoryToAdd] = useState("");
     const [formData, setFormData] = useState<ItemMetadata>({
         title: "",
         authors: [],
@@ -84,7 +86,15 @@ export function BookEditView({
         series: null,
         seriesIndex: null,
         description: null,
+        genres: [],
     });
+    const visibleGenres = (formData.genres ?? []).filter((value, index, array) => {
+        const trimmed = value.trim();
+        return trimmed.length > 0 && array.findIndex((entry) => entry.trim() === trimmed) === index;
+    });
+    const availableCategoryOptions = PREDEFINED_BOOK_CATEGORIES.filter(
+        (category) => !visibleGenres.some((genre) => genre.localeCompare(category, undefined, { sensitivity: "base" }) === 0),
+    );
 
     const selectedItem = libraryItems.find((item) => item.id === selectedItemId);
     const displayCoverUrl = coverUrl ?? localCoverUrl;
@@ -139,7 +149,7 @@ export function BookEditView({
             setInfoMessage(null);
             invoke<ItemMetadata>("get_item_details", { itemId: selectedItemId })
                 .then((details) => {
-                    setFormData(details);
+                    setFormData({ ...details, genres: details.genres ?? [] });
                     setIsLoading(false);
                 })
                 .catch((err) => {
@@ -680,6 +690,65 @@ export function BookEditView({
 
                             {/* Description */}
                             <div>
+                                <label className="mb-1.5 block text-sm font-medium text-app-ink">{t("bookEdit.categories")}</label>
+                                <div className="mb-2 flex gap-2">
+                                    <select
+                                        value={selectedCategoryToAdd}
+                                        onChange={(event) => setSelectedCategoryToAdd(event.target.value)}
+                                        className="h-9 w-full rounded-md border border-[var(--app-border-soft)] bg-app-surface px-3 text-sm text-app-ink"
+                                    >
+                                        <option value="">{t("bookEdit.selectCategory")}</option>
+                                        {availableCategoryOptions.map((category) => (
+                                            <option key={category} value={category}>
+                                                {category}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={!selectedCategoryToAdd}
+                                        onClick={() => {
+                                            if (!selectedCategoryToAdd) return;
+                                            setFormData((current) => ({
+                                                ...current,
+                                                genres: [...(current.genres ?? []), selectedCategoryToAdd],
+                                            }));
+                                            setSelectedCategoryToAdd("");
+                                        }}
+                                    >
+                                        {t("bookEdit.addCategory")}
+                                    </Button>
+                                </div>
+                                {visibleGenres.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {visibleGenres.map((genre) => (
+                                            <button
+                                                key={genre}
+                                                type="button"
+                                                onClick={() =>
+                                                    setFormData((current) => ({
+                                                        ...current,
+                                                        genres: (current.genres ?? []).filter(
+                                                            (value) => value.localeCompare(genre, undefined, { sensitivity: "base" }) !== 0,
+                                                        ),
+                                                    }))
+                                                }
+                                                className="inline-flex items-center rounded-full border border-[var(--app-border-soft)] bg-[var(--app-bg-secondary)] px-2 py-0.5 text-[11px] text-app-ink-muted hover:border-[var(--app-accent)] hover:text-[var(--app-accent-strong)]"
+                                            >
+                                                {genre}
+                                                <span className="ml-1 text-[10px]">×</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-app-ink-muted">{t("bookEdit.noCategoriesYet")}</p>
+                                )}
+                                <p className="mt-1 text-xs text-app-ink-muted">{t("bookEdit.categoriesHint")}</p>
+                            </div>
+
+                            {/* Description */}
+                            <div>
                                 <label className="mb-1.5 block text-sm font-medium text-app-ink">{t("bookEdit.description")}</label>
                                 <textarea
                                     value={formData.description || ""}
@@ -805,6 +874,23 @@ export function BookEditView({
                                                         <div className="text-[10px] text-[var(--app-ink-muted)]">
                                                             {candidate.published_year ?? t("bookEdit.unknownYear")}
                                                         </div>
+                                                        {(candidate.genres ?? []).length > 0 ? (
+                                                            <div className="mt-1 flex flex-wrap gap-1">
+                                                                {(candidate.genres ?? []).slice(0, 3).map((genre) => (
+                                                                    <span
+                                                                        key={`${candidate.id}-${genre}`}
+                                                                        className="inline-flex items-center rounded-full border border-[var(--app-border-soft)] bg-[var(--app-bg)] px-1.5 py-0.5 text-[9px] text-[var(--app-ink-muted)]"
+                                                                    >
+                                                                        {genre}
+                                                                    </span>
+                                                                ))}
+                                                                {(candidate.genres ?? []).length > 3 ? (
+                                                                    <span className="text-[9px] text-[var(--app-ink-muted)]">
+                                                                        +{(candidate.genres ?? []).length - 3}
+                                                                    </span>
+                                                                ) : null}
+                                                            </div>
+                                                        ) : null}
                                                     </div>
                                                 </div>
                                                 <Button

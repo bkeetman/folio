@@ -38,6 +38,7 @@ type SeriesViewProps = {
   series: Series[];
   books: BookDisplay[];
   setSelectedSeries: Dispatch<SetStateAction<string[]>>;
+  setSelectedGenres: Dispatch<SetStateAction<string[]>>;
   setView: Dispatch<SetStateAction<View>>;
   onSelectBook: (bookId: string) => void;
 };
@@ -48,6 +49,7 @@ export function SeriesView({
   series,
   books,
   setSelectedSeries,
+  setSelectedGenres,
   setView,
   onSelectBook,
 }: SeriesViewProps) {
@@ -119,6 +121,7 @@ export function SeriesView({
 
   const handleSeriesClick = (seriesName: string) => {
     setSelectedSeries([seriesName]);
+    setSelectedGenres([]);
     setView("library-books");
   };
 

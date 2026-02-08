@@ -7,12 +7,14 @@ type MissingFilesViewProps = {
   items: MissingFileItem[];
   onRelink: (fileId: string) => Promise<void>;
   onRemove: (fileId: string) => Promise<void>;
+  onRemoveAll: () => Promise<void>;
   onRescan: () => Promise<void>;
   libraryRoot: string | null;
 };
 
-export function MissingFilesView({ items, onRelink, onRemove, onRescan, libraryRoot }: MissingFilesViewProps) {
+export function MissingFilesView({ items, onRelink, onRemove, onRemoveAll, onRescan, libraryRoot }: MissingFilesViewProps) {
   const [workingId, setWorkingId] = useState<string | null>(null);
+  const [removingAll, setRemovingAll] = useState(false);
   return (
     <section className="flex-1 px-6 py-6">
       <div className="mb-6">
@@ -30,6 +32,19 @@ export function MissingFilesView({ items, onRelink, onRemove, onRescan, libraryR
           </div>
           <Button variant="outline" onClick={onRescan}>
             Rescan folder
+          </Button>
+          <Button
+            variant="ghost"
+            className="text-red-600 hover:text-red-700"
+            disabled={items.length === 0 || removingAll || workingId !== null}
+            onClick={async () => {
+              setRemovingAll(true);
+              await onRemoveAll();
+              setRemovingAll(false);
+            }}
+          >
+            <Trash2 size={14} />
+            Remove all
           </Button>
         </div>
       </div>

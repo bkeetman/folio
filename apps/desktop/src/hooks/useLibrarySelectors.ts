@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { cleanupMetadataTitle, normalizeTitleSnapshot } from "../lib/metadataCleanup";
 import type {
   Author,
+  Category,
   InboxItem,
   ItemMetadata,
   LibraryFilter,
@@ -24,6 +25,7 @@ export type FilteredBook = {
   language: string | null;
   series: string | null;
   seriesIndex: number | null;
+  genres: string[];
   createdAt: number;
 };
 
@@ -47,6 +49,7 @@ type UseLibrarySelectorsArgs = {
   selectedTagIds: string[];
   selectedAuthorNames: string[];
   selectedSeries: string[];
+  selectedGenres: string[];
   query: string;
   isDesktop: boolean;
   sampleBooks: Array<{
@@ -90,6 +93,7 @@ export function useLibrarySelectors({
   selectedTagIds,
   selectedAuthorNames,
   selectedSeries,
+  selectedGenres,
   query,
   isDesktop,
   sampleBooks,
@@ -141,6 +145,23 @@ export function useLibrarySelectors({
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [libraryItems]);
 
+  const uniqueCategories = useMemo((): Category[] => {
+    const counts = new Map<string, number>();
+    libraryItems.forEach((item) => {
+      (item.genres ?? []).forEach((genre) => {
+        const normalized = genre.trim();
+        if (!normalized) return;
+        counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+      });
+    });
+    return Array.from(counts.entries())
+      .map(([name, bookCount]) => ({ name, bookCount }))
+      .sort((a, b) => {
+        if (b.bookCount !== a.bookCount) return b.bookCount - a.bookCount;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      });
+  }, [libraryItems]);
+
   const booksNeedingFix = useMemo(() => {
     return libraryItems.filter((item) => {
       const hasCover = Boolean(item.cover_path) || typeof coverOverrides[item.id] === "string";
@@ -177,6 +198,7 @@ export function useLibrarySelectors({
           series: item.series ?? null,
           seriesIndex: item.series_index ?? null,
           description: null,
+          genres: item.genres ?? [],
         };
         const cleaned = cleanupMetadataTitle(metadata);
         if (!cleaned.changed || !item.title) return null;
@@ -246,6 +268,7 @@ export function useLibrarySelectors({
           language: item.language ?? null,
           series: item.series ?? null,
           seriesIndex: item.series_index ?? null,
+          genres: item.genres ?? [],
           createdAt: item.created_at,
         }))
       : sampleBooks.map((book, index) => ({
@@ -254,6 +277,7 @@ export function useLibrarySelectors({
           language: null as string | null,
           series: null as string | null,
           seriesIndex: null as number | null,
+          genres: [] as string[],
           createdAt: 1_000_000 - index * 1000,
         }));
     return base;
@@ -277,6 +301,8 @@ export function useLibrarySelectors({
           return book.status !== "Complete";
         case "tagged":
           return (book.tags ?? []).length > 0;
+        case "categorized":
+          return (book.genres ?? []).length > 0;
         default:
           return true;
       }
@@ -307,12 +333,24 @@ export function useLibrarySelectors({
         })()
       : filteredByAuthors;
 
-    if (!query) return filteredBySeries;
+    const filteredByGenres = selectedGenres.length
+      ? filteredBySeries.filter((book) =>
+          selectedGenres.some((genre) =>
+            (book.genres ?? []).some(
+              (bookGenre) =>
+                bookGenre.localeCompare(genre, undefined, { sensitivity: "base" }) === 0,
+            ),
+          ),
+        )
+      : filteredBySeries;
+
+    if (!query) return filteredByGenres;
     const lowered = query.toLowerCase();
-    return filteredBySeries.filter(
+    return filteredByGenres.filter(
       (book) =>
         book.title.toLowerCase().includes(lowered) ||
-        book.author.toLowerCase().includes(lowered)
+        book.author.toLowerCase().includes(lowered) ||
+        (book.genres ?? []).some((genre) => genre.toLowerCase().includes(lowered))
     );
   }, [
     query,
@@ -321,6 +359,7 @@ export function useLibrarySelectors({
     selectedTagIds,
     selectedAuthorNames,
     selectedSeries,
+    selectedGenres,
   ]);
 
   const sortedBooks = useMemo(() => {
@@ -428,6 +467,7 @@ export function useLibrarySelectors({
   return {
     uniqueAuthors,
     uniqueSeries,
+    uniqueCategories,
     booksNeedingFix,
     enrichableCount,
     titleIssueItems,

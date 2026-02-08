@@ -3,6 +3,7 @@ export type View =
   | "library-books"
   | "library-authors"
   | "library-series"
+  | "library-categories"
   | "inbox"
   | "duplicates"
   | "fix"
@@ -14,7 +15,14 @@ export type View =
   | "settings"
   | "edit"
   | "import";
-export type LibraryFilter = "all" | "epub" | "pdf" | "mobi" | "needs-metadata" | "tagged";
+export type LibraryFilter =
+  | "all"
+  | "epub"
+  | "pdf"
+  | "mobi"
+  | "needs-metadata"
+  | "tagged"
+  | "categorized";
 
 export type LibrarySort =
   | "default"
@@ -46,11 +54,17 @@ export type ItemMetadata = {
   series: string | null;
   seriesIndex: number | null;
   description: string | null;
+  genres?: string[];
 };
 
 export type Tag = { id: string; name: string; color?: string | null };
 
 export type Author = {
+  name: string;
+  bookCount: number;
+};
+
+export type Category = {
   name: string;
   bookCount: number;
 };
@@ -69,6 +83,7 @@ export type LibraryItem = {
   series?: string | null;
   series_index?: number | null;
   isbn?: string | null;
+  genres?: string[];
 };
 
 export type MissingFileItem = {
@@ -93,6 +108,7 @@ export type BookDisplay = {
   language?: string | null;
   series?: string | null;
   seriesIndex?: number | null;
+  genres?: string[];
   createdAt: number;
 };
 
@@ -200,6 +216,7 @@ export type EnrichmentCandidate = {
   cover_url?: string | null;
   source: string;
   confidence: number;
+  genres?: string[];
 };
 
 export type OrganizePlan = {

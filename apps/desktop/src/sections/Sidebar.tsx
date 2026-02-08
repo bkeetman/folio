@@ -8,6 +8,7 @@ import {
   HardDrive,
   ImageIcon,
   Library,
+  Shapes,
   Sparkles,
   Tag,
   User,
@@ -97,6 +98,13 @@ export function Sidebar({
           >
             <Library size={16} />
             <span className="min-w-0 truncate">{t("sidebar.series")}</span>
+          </SidebarItem>
+          <SidebarItem
+            active={view === "library-categories"}
+            onClick={() => setView("library-categories")}
+          >
+            <Shapes size={16} />
+            <span className="min-w-0 truncate">{t("sidebar.categories")}</span>
           </SidebarItem>
           <SidebarItem active={view === "tags"} onClick={() => setView("tags")}>
             <Tag size={16} />

@@ -182,6 +182,7 @@ function App() {
   // Navigation filter states (for linking from Authors/Series views)
   const [selectedAuthorNames, setSelectedAuthorNames] = useState<string[]>([]);
   const [selectedSeries, setSelectedSeries] = useState<string[]>([]);
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
 
   const isDesktop =
     isTauri() ||
@@ -259,6 +260,7 @@ function App() {
   const {
     uniqueAuthors,
     uniqueSeries,
+    uniqueCategories,
     fixIssues,
     allFixItems,
     allBooks,
@@ -278,6 +280,7 @@ function App() {
     selectedTagIds,
     selectedAuthorNames,
     selectedSeries,
+    selectedGenres,
     query,
     isDesktop,
     sampleBooks,
@@ -365,6 +368,21 @@ function App() {
       return;
     }
   }, [newTagName, newTagColor, refreshTags]);
+
+  const handleUpdateTag = useCallback(async (tagId: string, name: string, color: string) => {
+    if (!isTauri()) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    try {
+      await invoke<Tag>("update_tag", { tagId, name: trimmed, color });
+      await refreshTags();
+      setScanStatus("Tag updated.");
+    } catch (error) {
+      console.error("Failed to update tag", error);
+      const message = error instanceof Error ? error.message : String(error);
+      setScanStatus(`Could not update tag: ${message}`);
+    }
+  }, [refreshTags]);
 
   const fetchCoverOverride = useCallback(async (itemId: string, force = false) => {
     if (!isTauri()) return;
@@ -957,6 +975,29 @@ function App() {
     }
   };
 
+  const handleRemoveAllMissing = async () => {
+    if (!isTauri()) return;
+    const { confirm } = await import("@tauri-apps/plugin-dialog");
+    const ok = await confirm(
+      "This will remove all missing-file entries from your library records. Continue?",
+      {
+        title: "Remove all missing files",
+        kind: "warning",
+      }
+    );
+    if (!ok) return;
+    try {
+      const removed = await invoke<number>("remove_all_missing_files");
+      await refreshLibrary();
+      setScanStatus(
+        removed > 0 ? `Removed ${removed} missing file entries.` : "No missing file entries to remove."
+      );
+    } catch (err) {
+      console.error("Failed to remove all missing files", err);
+      setScanStatus("Could not remove all missing files.");
+    }
+  };
+
   const handleRescanMissing = async () => {
     if (!isTauri()) return;
     try {
@@ -1277,8 +1318,10 @@ function App() {
       clearCoverOverride(selectedFixItemId);
       await fetchCoverOverride(selectedFixItemId, true);
       setFixCandidates([]);
-    } catch {
-      setScanStatus("Could not apply metadata.");
+    } catch (error) {
+      console.error("Failed to apply metadata candidate", error);
+      const message = error instanceof Error ? error.message : String(error);
+      setScanStatus(`Could not apply metadata: ${message}`);
     } finally {
       setFixApplyingCandidateId(null);
     }
@@ -1364,8 +1407,10 @@ function App() {
       await fetchCoverOverride(selectedItemId);
       await refreshLibrary();
       setEditDetailsVersion((value) => value + 1);
-    } catch {
-      setScanStatus("Could not apply metadata.");
+    } catch (error) {
+      console.error("Failed to apply metadata candidate (edit view)", error);
+      const message = error instanceof Error ? error.message : String(error);
+      setScanStatus(`Could not apply metadata: ${message}`);
     } finally {
       setEditMatchApplying(null);
     }
@@ -1581,7 +1626,11 @@ function App() {
     <div
       className="grid h-screen overflow-hidden bg-[var(--app-bg)] text-[var(--app-ink)]"
       style={
-        view === "library" || view === "library-books" || view === "library-authors" || view === "library-series"
+        view === "library" ||
+        view === "library-books" ||
+        view === "library-authors" ||
+        view === "library-series" ||
+        view === "library-categories"
           ? { gridTemplateColumns: `210px minmax(0,1fr) ${inspectorWidth}px` }
           : { gridTemplateColumns: "210px minmax(0,1fr)" }
       }
@@ -1662,6 +1711,8 @@ function App() {
             setSelectedAuthorNames={setSelectedAuthorNames}
             selectedSeries={selectedSeries}
             setSelectedSeries={setSelectedSeries}
+            selectedGenres={selectedGenres}
+            setSelectedGenres={setSelectedGenres}
             onEnrichAll={handleEnrichAll}
             onCancelEnrich={handleCancelEnrich}
             enriching={enriching}
@@ -1669,6 +1720,7 @@ function App() {
             enrichProgress={enrichProgress}
             uniqueAuthors={uniqueAuthors}
             uniqueSeries={uniqueSeries}
+            uniqueCategories={uniqueCategories}
             inbox={inbox}
             sampleInboxItems={sampleInboxItems}
             duplicates={duplicates}
@@ -1747,6 +1799,7 @@ function App() {
             missingFiles={missingFiles}
             onRelinkMissing={handleRelinkMissing}
             onRemoveMissing={handleRemoveMissing}
+            onRemoveAllMissing={handleRemoveAllMissing}
             onRescanMissing={handleRescanMissing}
             libraryItems={libraryItems}
             previousView={previousView}
@@ -1766,6 +1819,7 @@ function App() {
             newTagColor={newTagColor}
             setNewTagColor={setNewTagColor}
             handleCreateTag={handleCreateTag}
+            handleUpdateTag={handleUpdateTag}
             ereaderDevices={ereaderDevices}
             selectedEreaderDeviceId={selectedEreaderDeviceId}
             setSelectedEreaderDeviceId={setSelectedEreaderDeviceId}
@@ -1807,7 +1861,11 @@ function App() {
         />
       </main>
 
-      {(view === "library" || view === "library-books" || view === "library-authors" || view === "library-series") ? (
+      {(view === "library" ||
+        view === "library-books" ||
+        view === "library-authors" ||
+        view === "library-series" ||
+        view === "library-categories") ? (
         <div className="relative h-screen">
           <div
             className="absolute left-0 top-0 z-20 h-full w-1.5 -translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-[var(--app-accent)]/30"
@@ -1828,6 +1886,7 @@ function App() {
             setView={setView}
             setSelectedAuthorNames={setSelectedAuthorNames}
             setSelectedSeries={setSelectedSeries}
+            setSelectedGenres={setSelectedGenres}
             ereaderConnected={ereaderDevices.some((d) => d.isConnected)}
             ereaderSyncStatus={selectedItem ? (() => {
               const onDevice = ereaderBooks.find((eb) => eb.matchedItemId === selectedItem.id);

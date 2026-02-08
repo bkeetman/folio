@@ -30,6 +30,8 @@ type LibraryViewProps = {
   setSelectedAuthorNames: Dispatch<SetStateAction<string[]>>;
   selectedSeries: string[];
   setSelectedSeries: Dispatch<SetStateAction<string[]>>;
+  selectedGenres: string[];
+  setSelectedGenres: Dispatch<SetStateAction<string[]>>;
   enrichingItems: Set<string>;
 };
 
@@ -55,10 +57,13 @@ export function LibraryView({
   setSelectedAuthorNames,
   selectedSeries,
   setSelectedSeries,
+  selectedGenres,
+  setSelectedGenres,
   enrichingItems,
 }: LibraryViewProps) {
   const { t } = useTranslation();
-  const hasActiveFilter = selectedAuthorNames.length > 0 || selectedSeries.length > 0;
+  const hasActiveFilter =
+    selectedAuthorNames.length > 0 || selectedSeries.length > 0 || selectedGenres.length > 0;
 
   return (
     <>
@@ -95,11 +100,26 @@ export function LibraryView({
                 </button>
               </span>
             ))}
+            {selectedGenres.map((name) => (
+              <span
+                key={name}
+                className="inline-flex items-center gap-1 rounded bg-app-surface/80 px-1.5 py-0.5 shadow-sm border-[var(--app-accent)] border-opacity-20 text-app-ink"
+              >
+                <span className="text-app-ink-muted">{t("library.categoryPrefix")}</span> {name}
+                <button
+                  className="ml-0.5 text-app-accent hover:text-app-accent-strong"
+                  onClick={() => setSelectedGenres((prev) => prev.filter((n) => n !== name))}
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
             <button
               className="ml-2 text-app-ink-muted hover:text-app-accent underline decoration-dotted underline-offset-2"
               onClick={() => {
                 setSelectedAuthorNames([]);
                 setSelectedSeries([]);
+                setSelectedGenres([]);
               }}
             >
               {t("library.clearAll")}
@@ -146,6 +166,11 @@ export function LibraryView({
             active={libraryFilter === "tagged"}
             onClick={() => setLibraryFilter("tagged")}
             label={t("library.tagged")}
+          />
+          <FilterOption
+            active={libraryFilter === "categorized"}
+            onClick={() => setLibraryFilter("categorized")}
+            label={t("library.categorized")}
           />
         </div>
 

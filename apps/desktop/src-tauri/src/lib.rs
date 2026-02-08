@@ -50,6 +50,7 @@ const MIGRATION_LIBRARY_QUERY_INDEXES_SQL: &str =
     include_str!("../../../../packages/core/drizzle/0008_library_query_indexes.sql");
 const MIGRATION_METADATA_LOOKUP_SETTINGS_SQL: &str =
     include_str!("../../../../packages/core/drizzle/0009_metadata_lookup_settings.sql");
+const MIGRATION_ITEM_GENRES_SQL: &str = include_str!("../../../../packages/core/drizzle/0010_item_genres.sql");
 
 #[derive(Serialize, Clone)]
 struct Tag {
@@ -73,6 +74,7 @@ struct LibraryItem {
     series: Option<String>,
     series_index: Option<f64>,
     isbn: Option<String>,
+    genres: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -163,6 +165,91 @@ fn parse_tags(raw: Option<String>) -> Vec<Tag> {
             })
         })
         .collect()
+}
+
+fn parse_csv_values(raw: Option<String>) -> Vec<String> {
+    raw.unwrap_or_default()
+        .split(',')
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .collect()
+}
+
+const STRICT_BOOK_GENRES: [&str; 11] = [
+    "Science Fiction",
+    "Fantasy",
+    "Horror",
+    "Mystery & Thriller",
+    "Romance",
+    "Historical",
+    "Young Adult",
+    "Children",
+    "Poetry",
+    "Biography & Memoir",
+    "Nonfiction",
+];
+
+fn normalize_genre_label(raw: &str) -> Option<String> {
+    let normalized = raw.trim().to_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    let compact = normalized
+        .replace('&', " and ")
+        .replace('/', " ")
+        .replace('-', " ");
+    let mapped = if compact.contains("science fiction")
+        || compact.contains("sci fi")
+        || compact == "sf"
+    {
+        "Science Fiction"
+    } else if compact.contains("fantasy") {
+        "Fantasy"
+    } else if compact.contains("horror") {
+        "Horror"
+    } else if compact.contains("mystery")
+        || compact.contains("detective")
+        || compact.contains("crime")
+        || compact.contains("thriller")
+    {
+        "Mystery & Thriller"
+    } else if compact.contains("romance") {
+        "Romance"
+    } else if compact.contains("historical") {
+        "Historical"
+    } else if compact.contains("young adult") || compact == "ya" {
+        "Young Adult"
+    } else if compact.contains("children") || compact.contains("juvenile") {
+        "Children"
+    } else if compact.contains("poetry") {
+        "Poetry"
+    } else if compact.contains("biography") || compact.contains("memoir") {
+        "Biography & Memoir"
+    } else if compact.contains("essay")
+        || compact.contains("reference")
+        || compact.contains("nonfiction")
+        || compact.contains("non fiction")
+    {
+        "Nonfiction"
+    } else {
+        return None;
+    };
+    if STRICT_BOOK_GENRES.contains(&mapped) {
+        Some(mapped.to_string())
+    } else {
+        None
+    }
+}
+
+fn normalize_genre_values(values: &[String]) -> Vec<(String, String)> {
+    let mut seen: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    for raw in values {
+        if let Some(genre) = normalize_genre_label(raw) {
+            seen.entry(genre).or_insert_with(|| raw.trim().to_string());
+        }
+    }
+    seen.into_iter().collect()
 }
 
 #[derive(Serialize)]
@@ -397,6 +484,8 @@ struct EnrichmentCandidate {
     cover_url: Option<String>,
     source: String,
     confidence: f64,
+    #[serde(default)]
+    genres: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -538,10 +627,11 @@ fn reveal_file(path: String) -> Result<(), String> {
 #[tauri::command]
 fn get_item_details(app: tauri::AppHandle, item_id: String) -> Result<ItemMetadata, String> {
     let conn = open_db(&app)?;
-    let (title, published_year, language, series, series_index, description, isbn) = conn
+    let (title, published_year, language, series, series_index, description, isbn, genres_raw) = conn
     .query_row(
-       "SELECT title, published_year, language, series, series_index, description, \
-        (SELECT value FROM identifiers WHERE item_id = items.id AND type IN ('ISBN10', 'ISBN13', 'OTHER', 'isbn10', 'isbn13', 'other') LIMIT 1) as isbn \
+      "SELECT title, published_year, language, series, series_index, description, \
+        (SELECT value FROM identifiers WHERE item_id = items.id AND type IN ('ISBN10', 'ISBN13', 'OTHER', 'isbn10', 'isbn13', 'other') LIMIT 1) as isbn, \
+        (SELECT GROUP_CONCAT(DISTINCT genre) FROM item_genres WHERE item_id = items.id) as genres \
         FROM items WHERE id = ?1",
       params![item_id],
       |row| {
@@ -553,6 +643,7 @@ fn get_item_details(app: tauri::AppHandle, item_id: String) -> Result<ItemMetada
           row.get(4)?,
           row.get(5)?,
           row.get(6)?,
+          row.get(7)?,
         ))
       },
     )
@@ -585,6 +676,7 @@ fn get_item_details(app: tauri::AppHandle, item_id: String) -> Result<ItemMetada
         series,
         series_index,
         description: normalize_optional_description(description),
+        genres: parse_csv_values(genres_raw),
     })
 }
 
@@ -690,6 +782,18 @@ fn remove_missing_file(app: tauri::AppHandle, file_id: String) -> Result<(), Str
 }
 
 #[tauri::command]
+fn remove_all_missing_files(app: tauri::AppHandle) -> Result<i64, String> {
+    let conn = open_db(&app)?;
+    let affected = conn
+        .execute(
+            "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE status = 'missing'",
+            params![chrono::Utc::now().timestamp_millis()],
+        )
+        .map_err(|err| err.to_string())?;
+    Ok(affected as i64)
+}
+
+#[tauri::command]
 fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> {
     let started = Instant::now();
     let conn = open_db(&app)?;
@@ -702,7 +806,8 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
         MAX(covers.local_path) as cover_path, \
         tag_map.tags as tags, \
         items.language, items.series, items.series_index, \
-        (SELECT value FROM identifiers WHERE item_id = items.id AND type IN ('ISBN10', 'ISBN13', 'OTHER', 'isbn10', 'isbn13', 'other') LIMIT 1) as isbn \
+        (SELECT value FROM identifiers WHERE item_id = items.id AND type IN ('ISBN10', 'ISBN13', 'OTHER', 'isbn10', 'isbn13', 'other') LIMIT 1) as isbn, \
+        (SELECT GROUP_CONCAT(DISTINCT genre) FROM item_genres WHERE item_id = items.id) as genres \
        FROM items \
        LEFT JOIN item_authors ON item_authors.item_id = items.id \
        LEFT JOIN authors ON authors.id = item_authors.author_id \
@@ -753,6 +858,7 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
                 series: row.get(10)?,
                 series_index: row.get(11)?,
                 isbn: row.get(12)?,
+                genres: parse_csv_values(row.get(13)?),
             })
         })
         .map_err(|err| err.to_string())?;
@@ -781,7 +887,8 @@ fn get_library_items_light(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, St
         COUNT(DISTINCT files.id) as file_count, \
         GROUP_CONCAT(DISTINCT files.extension) as formats, \
         MAX(covers.local_path) as cover_path, \
-        items.language, items.series, items.series_index \
+        items.language, items.series, items.series_index, \
+        (SELECT GROUP_CONCAT(DISTINCT genre) FROM item_genres WHERE item_id = items.id) as genres \
        FROM items \
        LEFT JOIN item_authors ON item_authors.item_id = items.id \
        LEFT JOIN authors ON authors.id = item_authors.author_id \
@@ -821,6 +928,7 @@ fn get_library_items_light(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, St
                 series: row.get(9)?,
                 series_index: row.get(10)?,
                 isbn: None,
+                genres: parse_csv_values(row.get(11)?),
             })
         })
         .map_err(|err| err.to_string())?;
@@ -1030,6 +1138,58 @@ fn create_tag(app: tauri::AppHandle, name: String, color: Option<String>) -> Res
     .map_err(|err| err.to_string())?;
     Ok(Tag {
         id,
+        name: trimmed.to_string(),
+        color,
+    })
+}
+
+#[tauri::command]
+fn update_tag(
+    app: tauri::AppHandle,
+    tag_id: String,
+    name: String,
+    color: Option<String>,
+) -> Result<Tag, String> {
+    let conn = open_db(&app)?;
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Tag name cannot be empty".to_string());
+    }
+    if trimmed.contains('|') {
+        return Err("Tag name cannot contain |".to_string());
+    }
+    if let Some(value) = color.as_deref() {
+        let allowed = ["amber", "rose", "sky", "emerald", "violet", "slate"];
+        if !allowed.contains(&value) {
+            return Err("Unsupported tag color".to_string());
+        }
+    }
+
+    let normalized = trimmed.to_lowercase();
+    let conflict: Option<String> = conn
+        .query_row(
+            "SELECT id FROM tags WHERE normalized = ?1 AND id != ?2 LIMIT 1",
+            params![normalized, tag_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+    if conflict.is_some() {
+        return Err("A tag with this name already exists".to_string());
+    }
+
+    let changed = conn
+        .execute(
+            "UPDATE tags SET name = ?1, normalized = ?2, color = ?3 WHERE id = ?4",
+            params![trimmed, normalized, color, tag_id],
+        )
+        .map_err(|err| err.to_string())?;
+    if changed == 0 {
+        return Err("Tag not found".to_string());
+    }
+
+    Ok(Tag {
+        id: tag_id,
         name: trimmed.to_string(),
         color,
     })
@@ -2917,6 +3077,8 @@ struct ItemMetadata {
     series: Option<String>,
     series_index: Option<f64>,
     description: Option<String>,
+    #[serde(default)]
+    genres: Vec<String>,
 }
 
 #[tauri::command]
@@ -3099,6 +3261,8 @@ fn save_item_metadata_sync(
     if description.is_some() {
         insert_field_source_with_source(&conn, &item_id, "description", "user", 1.0, now)?;
     }
+    replace_item_genres(&conn, &item_id, &metadata.genres, "user", 1.0, now)?;
+    insert_field_source_with_source(&conn, &item_id, "genres", "user", 1.0, now)?;
 
     // Update authors
     if !metadata.authors.is_empty() {
@@ -3860,6 +4024,7 @@ fn clear_library(app: tauri::AppHandle) -> Result<(), String> {
      DELETE FROM enrichment_results;\n\
      DELETE FROM enrichment_sources;\n\
      DELETE FROM identifiers;\n\
+     DELETE FROM item_genres;\n\
      DELETE FROM item_tags;\n\
      DELETE FROM tags;\n\
      DELETE FROM item_authors;\n\
@@ -6473,14 +6638,79 @@ fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
         "0008_library_query_indexes",
         MIGRATION_LIBRARY_QUERY_INDEXES_SQL,
     )?;
-    apply_migration(
-        &conn,
-        "0009_metadata_lookup_settings",
-        MIGRATION_METADATA_LOOKUP_SETTINGS_SQL,
-    )?;
+  apply_migration(
+    &conn,
+    "0009_metadata_lookup_settings",
+    MIGRATION_METADATA_LOOKUP_SETTINGS_SQL,
+  )?;
+    apply_migration(&conn, "0010_item_genres", MIGRATION_ITEM_GENRES_SQL)?;
+    normalize_item_genres_to_strict_set(&conn)?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(|err| err.to_string())?;
     Ok(conn)
+}
+
+fn normalize_item_genres_to_strict_set(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare("SELECT id, item_id, genre, raw_value, source, confidence, created_at FROM item_genres")
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(params![], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, f64>(5)?,
+                row.get::<_, i64>(6)?,
+            ))
+        })
+        .map_err(|err| err.to_string())?;
+
+    let mut updates = 0usize;
+    let mut deletes = 0usize;
+    let now = chrono::Utc::now().timestamp_millis();
+
+    for row in rows {
+        let (id, item_id, genre, raw_value, source, confidence, created_at) =
+            row.map_err(|err| err.to_string())?;
+        let source_value = raw_value.as_deref().unwrap_or(genre.as_str());
+        let normalized = normalize_genre_label(source_value);
+
+        let Some(target_genre) = normalized else {
+            conn.execute("DELETE FROM item_genres WHERE id = ?1", params![id])
+                .map_err(|err| err.to_string())?;
+            deletes += 1;
+            continue;
+        };
+
+        if target_genre == genre {
+            continue;
+        }
+
+        conn.execute(
+          "INSERT INTO item_genres (id, item_id, genre, raw_value, source, confidence, created_at, updated_at) \
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+           ON CONFLICT(item_id, genre, source) DO UPDATE SET \
+             confidence = MAX(item_genres.confidence, excluded.confidence), \
+             updated_at = excluded.updated_at",
+          params![Uuid::new_v4().to_string(), item_id, target_genre, raw_value, source, confidence, created_at, now],
+        )
+        .map_err(|err| err.to_string())?;
+        conn.execute("DELETE FROM item_genres WHERE id = ?1", params![id])
+            .map_err(|err| err.to_string())?;
+        updates += 1;
+    }
+
+    if updates > 0 || deletes > 0 {
+        log::info!(
+            "normalized item genres to strict set: updated={} deleted={}",
+            updates,
+            deletes
+        );
+    }
+    Ok(())
 }
 
 fn apply_migration(conn: &Connection, id: &str, sql: &str) -> Result<(), String> {
@@ -7795,6 +8025,7 @@ fn fetch_openlibrary_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
         }
     }
     let language = extract_openlibrary_language(&data);
+    let genres = extract_openlibrary_subjects(&data);
 
     vec![EnrichmentCandidate {
         id: Uuid::new_v4().to_string(),
@@ -7809,6 +8040,7 @@ fn fetch_openlibrary_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
         )),
         source: "Open Library".to_string(),
         confidence: 0.9,
+        genres,
     }]
 }
 
@@ -7863,6 +8095,7 @@ fn fetch_bol_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
         .or_else(|| json_find_string(&data, "languages"))
         .and_then(|value| normalize_language_code(&value));
     let cover_url = json_find_first_image_url(&data);
+    let genres = json_collect_strings(&data, &["genre", "genres", "subject"], 12);
 
     vec![EnrichmentCandidate {
         id: Uuid::new_v4().to_string(),
@@ -7874,6 +8107,7 @@ fn fetch_bol_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
         cover_url,
         source: "Bol.com".to_string(),
         confidence: 0.82,
+        genres,
     }]
 }
 
@@ -7958,6 +8192,7 @@ fn fetch_google_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
                 cover_url,
                 source: "Google Books".to_string(),
                 confidence: if index == 0 { 0.85 } else { 0.7 },
+                genres: extract_google_genres(&info),
             }
         })
         .collect()
@@ -8126,6 +8361,7 @@ fn parse_apple_books_candidates(
                 } else {
                     0.78f64 - (index as f64 * 0.04)
                 },
+                genres: extract_apple_genres(item),
             }
         })
         .collect()
@@ -8199,6 +8435,32 @@ fn extract_apple_language(item: &serde_json::Value) -> Option<String> {
         .and_then(normalize_language_code)
 }
 
+fn extract_google_genres(info: &serde_json::Value) -> Vec<String> {
+    let mut genres = json_collect_strings(info, &["categories"], 12);
+    if let Some(main) = info.get("mainCategory").and_then(|value| value.as_str()) {
+        let trimmed = main.trim();
+        if !trimmed.is_empty() {
+            genres.push(trimmed.to_string());
+        }
+    }
+    genres.sort();
+    genres.dedup();
+    genres
+}
+
+fn extract_apple_genres(item: &serde_json::Value) -> Vec<String> {
+    let mut genres = json_collect_strings(item, &["genres"], 12);
+    if let Some(primary) = item.get("primaryGenreName").and_then(|value| value.as_str()) {
+        let trimmed = primary.trim();
+        if !trimmed.is_empty() {
+            genres.push(trimmed.to_string());
+        }
+    }
+    genres.sort();
+    genres.dedup();
+    genres
+}
+
 fn extract_openlibrary_language(item: &serde_json::Value) -> Option<String> {
     if let Some(value) = item.get("language") {
         if let Some(code) = parse_openlibrary_language_value(value) {
@@ -8211,6 +8473,13 @@ fn extract_openlibrary_language(item: &serde_json::Value) -> Option<String> {
         }
     }
     None
+}
+
+fn extract_openlibrary_subjects(item: &serde_json::Value) -> Vec<String> {
+    let mut subjects = json_collect_strings(item, &["subject", "subjects"], 12);
+    subjects.sort();
+    subjects.dedup();
+    subjects
 }
 
 fn parse_openlibrary_language_value(value: &serde_json::Value) -> Option<String> {
@@ -8492,7 +8761,7 @@ fn fetch_archive_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
     };
     let query = format!("isbn:({}) AND mediatype:(texts)", normalized_target);
     let url = format!(
-        "https://archive.org/advancedsearch.php?q={}&fl[]=title&fl[]=creator&fl[]=year&fl[]=isbn&rows=20&page=1&output=json",
+        "https://archive.org/advancedsearch.php?q={}&fl[]=title&fl[]=creator&fl[]=year&fl[]=isbn&fl[]=subject&rows=20&page=1&output=json",
         urlencoding::encode(&query)
     );
     let data = match fetch_json_with_retry(&url) {
@@ -8523,6 +8792,7 @@ fn fetch_archive_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
             cover_url: None,
             source: "Internet Archive".to_string(),
             confidence: 0.68f64 - (index as f64 * 0.02),
+            genres: json_collect_strings(doc, &["subject"], 12),
         });
         if candidates.len() >= MAX_METADATA_CANDIDATES {
             break;
@@ -8593,6 +8863,7 @@ fn fetch_openbd_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
         cover_url,
         source: "OpenBD".to_string(),
         confidence: 0.74,
+        genres: vec![],
     }]
 }
 
@@ -8640,7 +8911,7 @@ fn fetch_archive_search(title: &str, author: Option<&str>) -> Vec<EnrichmentCand
     terms.push("mediatype:(texts)".to_string());
     let query = terms.join(" AND ");
     let url = format!(
-        "https://archive.org/advancedsearch.php?q={}&fl[]=title&fl[]=creator&fl[]=year&fl[]=isbn&rows=10&page=1&output=json",
+        "https://archive.org/advancedsearch.php?q={}&fl[]=title&fl[]=creator&fl[]=year&fl[]=isbn&fl[]=subject&rows=10&page=1&output=json",
         urlencoding::encode(&query)
     );
     let data = match fetch_json_with_retry(&url) {
@@ -8671,6 +8942,7 @@ fn fetch_archive_search(title: &str, author: Option<&str>) -> Vec<EnrichmentCand
             cover_url: None,
             source: "Internet Archive".to_string(),
             confidence: 0.58f64 - (index as f64 * 0.02),
+            genres: json_collect_strings(doc, &["subject"], 12),
         });
         if candidates.len() >= MAX_METADATA_CANDIDATES {
             break;
@@ -8832,6 +9104,7 @@ fn parse_isfdb_publications(html: &str, fallback_isbn: &str) -> Vec<EnrichmentCa
             cover_url: None,
             source: "ISFDB".to_string(),
             confidence: 0.72f64 - (index as f64 * 0.03),
+            genres: vec![],
         });
         if candidates.len() >= 5 {
             break;
@@ -8910,6 +9183,7 @@ fn parse_isfdb_titles(html: &str) -> Vec<EnrichmentCandidate> {
             .map(|value| value.trim().to_string())
             .filter(|value| language_regex.is_match(value))
             .and_then(|value| normalize_language_name(&value));
+        let genres = parse_isfdb_genres(cells.get(5).map(|value| value.as_str()).unwrap_or(""));
 
         candidates.push(EnrichmentCandidate {
             id: Uuid::new_v4().to_string(),
@@ -8921,6 +9195,7 @@ fn parse_isfdb_titles(html: &str) -> Vec<EnrichmentCandidate> {
             cover_url: None,
             source: "ISFDB".to_string(),
             confidence: 0.62f64 - (index as f64 * 0.03),
+            genres,
         });
         if candidates.len() >= 5 {
             break;
@@ -9027,6 +9302,16 @@ fn normalize_language_name(value: &str) -> Option<String> {
     }
 }
 
+fn parse_isfdb_genres(value: &str) -> Vec<String> {
+    value
+        .split(|ch| [',', ';', '|', '/'].contains(&ch))
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty() && *part != "&nbsp;")
+        .take(12)
+        .map(|part| part.to_string())
+        .collect()
+}
+
 fn non_empty(value: String) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -9111,6 +9396,7 @@ fn fetch_openlibrary_search(title: &str, author: Option<&str>) -> Vec<Enrichment
                 cover_url,
                 source: "Open Library".to_string(),
                 confidence: 0.7 - index as f64 * 0.05,
+                genres: extract_openlibrary_subjects(doc),
             }
         })
         .collect()
@@ -9232,6 +9518,7 @@ fn fetch_google_search(title: &str, author: Option<&str>) -> Vec<EnrichmentCandi
                 cover_url,
                 source: "Google Books".to_string(),
                 confidence: 0.75 - index as f64 * 0.05,
+                genres: extract_google_genres(&info),
             }
         })
         .collect()
@@ -9493,6 +9780,25 @@ fn apply_enrichment_candidate(
         }
     }
 
+    if !candidate.genres.is_empty() {
+        replace_item_genres(
+            conn,
+            item_id,
+            &candidate.genres,
+            &candidate.source,
+            candidate.confidence,
+            now,
+        )?;
+        insert_field_source_with_source(
+            conn,
+            item_id,
+            "genres",
+            &candidate.source,
+            candidate.confidence,
+            now,
+        )?;
+    }
+
     for raw in &candidate.identifiers {
         let normalized = normalize_isbn(raw);
         let value = normalized.unwrap_or_else(|| raw.to_string());
@@ -9512,6 +9818,32 @@ fn apply_enrichment_candidate(
     }
 
     // Cover fetching is handled separately in apply_fix_candidate with proper error handling
+    Ok(())
+}
+
+fn replace_item_genres(
+    conn: &Connection,
+    item_id: &str,
+    values: &[String],
+    source: &str,
+    confidence: f64,
+    now: i64,
+) -> Result<(), String> {
+    let normalized = normalize_genre_values(values);
+    conn.execute("DELETE FROM item_genres WHERE item_id = ?1", params![item_id])
+        .map_err(|err| err.to_string())?;
+    for (genre, raw_value) in normalized {
+        conn.execute(
+      "INSERT INTO item_genres (id, item_id, genre, raw_value, source, confidence, created_at, updated_at) \
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7) \
+       ON CONFLICT(item_id, genre, source) DO UPDATE SET \
+         raw_value = excluded.raw_value, \
+         confidence = excluded.confidence, \
+         updated_at = excluded.updated_at",
+      params![Uuid::new_v4().to_string(), item_id, genre, raw_value, source, confidence, now],
+    )
+    .map_err(|err| err.to_string())?;
+    }
     Ok(())
 }
 
@@ -10423,6 +10755,7 @@ pub fn run() {
             get_inbox_items,
             list_tags,
             create_tag,
+            update_tag,
             add_tag_to_item,
             remove_tag_from_item,
             get_cover_blob,
@@ -10476,6 +10809,7 @@ pub fn run() {
             get_missing_files,
             relink_missing_file,
             remove_missing_file,
+            remove_all_missing_files,
             upload_cover,
             get_embedded_cover_preview,
             list_embedded_cover_candidates,

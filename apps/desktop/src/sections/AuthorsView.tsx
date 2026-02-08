@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 type AuthorsViewProps = {
   authors: Author[];
   setSelectedAuthorNames: Dispatch<SetStateAction<string[]>>;
+  setSelectedGenres: Dispatch<SetStateAction<string[]>>;
   setView: Dispatch<SetStateAction<View>>;
 };
 
@@ -15,6 +16,7 @@ const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("");
 export function AuthorsView({
   authors,
   setSelectedAuthorNames,
+  setSelectedGenres,
   setView,
 }: AuthorsViewProps) {
   const { t } = useTranslation();
@@ -56,6 +58,7 @@ export function AuthorsView({
 
   const handleAuthorClick = (authorName: string) => {
     setSelectedAuthorNames([authorName]);
+    setSelectedGenres([]);
     setView("library-books");
   };
 

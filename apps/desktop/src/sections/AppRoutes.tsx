@@ -1,6 +1,7 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { AuthorsView } from "./AuthorsView";
 import { BookEditView } from "./BookEditView";
+import { CategoriesView } from "./CategoriesView";
 import { ChangesView } from "./ChangesView";
 import { DuplicatesView } from "./DuplicatesView";
 import { EReaderView } from "./EReaderView";
@@ -24,6 +25,7 @@ import type {
   LibraryFilter,
   LibraryItem,
   LibrarySort,
+  Category,
   MetadataSourceSetting,
   MissingFileItem,
   OperationProgress,
@@ -65,6 +67,8 @@ type AppRoutesProps = {
   setSelectedAuthorNames: Dispatch<SetStateAction<string[]>>;
   selectedSeries: string[];
   setSelectedSeries: Dispatch<SetStateAction<string[]>>;
+  selectedGenres: string[];
+  setSelectedGenres: Dispatch<SetStateAction<string[]>>;
   onEnrichAll: (itemIds?: string[]) => void | Promise<void>;
   onCancelEnrich: () => void | Promise<void>;
   enriching: boolean;
@@ -72,6 +76,7 @@ type AppRoutesProps = {
   enrichProgress: OperationProgress | null;
   uniqueAuthors: Array<{ name: string; bookCount: number }>;
   uniqueSeries: Array<{ name: string; bookCount: number }>;
+  uniqueCategories: Category[];
   inbox: InboxItem[];
   sampleInboxItems: InboxItem[];
   duplicates: DuplicateGroup[];
@@ -148,6 +153,7 @@ type AppRoutesProps = {
   missingFiles: MissingFileItem[];
   onRelinkMissing: (fileId: string) => void | Promise<void>;
   onRemoveMissing: (fileId: string) => void | Promise<void>;
+  onRemoveAllMissing: () => void | Promise<void>;
   onRescanMissing: () => void | Promise<void>;
   libraryItems: LibraryItem[];
   previousView: View;
@@ -167,6 +173,7 @@ type AppRoutesProps = {
   newTagColor: string;
   setNewTagColor: Dispatch<SetStateAction<string>>;
   handleCreateTag: () => void | Promise<void>;
+  handleUpdateTag: (tagId: string, name: string, color: string) => void | Promise<void>;
   ereaderDevices: EReaderDevice[];
   selectedEreaderDeviceId: string | null;
   setSelectedEreaderDeviceId: Dispatch<SetStateAction<string | null>>;
@@ -215,6 +222,8 @@ export function AppRoutes(props: AppRoutesProps) {
     setSelectedAuthorNames,
     selectedSeries,
     setSelectedSeries,
+    selectedGenres,
+    setSelectedGenres,
     onEnrichAll,
     onCancelEnrich,
     enriching,
@@ -222,6 +231,7 @@ export function AppRoutes(props: AppRoutesProps) {
     enrichProgress,
     uniqueAuthors,
     uniqueSeries,
+    uniqueCategories,
     inbox,
     sampleInboxItems,
     duplicates,
@@ -298,6 +308,7 @@ export function AppRoutes(props: AppRoutesProps) {
     missingFiles,
     onRelinkMissing,
     onRemoveMissing,
+    onRemoveAllMissing,
     onRescanMissing,
     libraryItems,
     previousView,
@@ -317,6 +328,7 @@ export function AppRoutes(props: AppRoutesProps) {
     newTagColor,
     setNewTagColor,
     handleCreateTag,
+    handleUpdateTag,
     ereaderDevices,
     selectedEreaderDeviceId,
     setSelectedEreaderDeviceId,
@@ -370,6 +382,8 @@ export function AppRoutes(props: AppRoutesProps) {
           setSelectedAuthorNames={setSelectedAuthorNames}
           selectedSeries={selectedSeries}
           setSelectedSeries={setSelectedSeries}
+          selectedGenres={selectedGenres}
+          setSelectedGenres={setSelectedGenres}
           enrichingItems={enrichingItems}
         />
       ) : null}
@@ -378,6 +392,7 @@ export function AppRoutes(props: AppRoutesProps) {
         <AuthorsView
           authors={uniqueAuthors}
           setSelectedAuthorNames={setSelectedAuthorNames}
+          setSelectedGenres={setSelectedGenres}
           setView={setView}
         />
       ) : null}
@@ -387,11 +402,20 @@ export function AppRoutes(props: AppRoutesProps) {
           series={uniqueSeries}
           books={allBooks}
           setSelectedSeries={setSelectedSeries}
+          setSelectedGenres={setSelectedGenres}
           setView={setView}
           onSelectBook={(bookId) => {
             setSelectedItemId(bookId);
             setView("library-books");
           }}
+        />
+      ) : null}
+
+      {view === "library-categories" ? (
+        <CategoriesView
+          categories={uniqueCategories}
+          setSelectedGenres={setSelectedGenres}
+          setView={setView}
         />
       ) : null}
 
@@ -528,6 +552,9 @@ export function AppRoutes(props: AppRoutesProps) {
           onRemove={async (fileId) => {
             await onRemoveMissing(fileId);
           }}
+          onRemoveAll={async () => {
+            await onRemoveAllMissing();
+          }}
           onRescan={async () => {
             await onRescanMissing();
           }}
@@ -570,6 +597,7 @@ export function AppRoutes(props: AppRoutesProps) {
           newTagColor={newTagColor}
           setNewTagColor={setNewTagColor}
           handleCreateTag={() => void handleCreateTag()}
+          handleUpdateTag={(tagId, name, color) => void handleUpdateTag(tagId, name, color)}
         />
       ) : null}
 

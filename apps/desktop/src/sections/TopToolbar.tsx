@@ -50,7 +50,15 @@ export function TopToolbar({
       ? Math.min(100, Math.round((progressCurrent / progressTotal) * 100))
       : null;
   const viewCopy = (() => {
-    if (view === "library") return { title: t("topbar.views.library.title"), subtitle: t("topbar.views.library.subtitle") };
+    if (
+      view === "library" ||
+      view === "library-books" ||
+      view === "library-authors" ||
+      view === "library-series" ||
+      view === "library-categories"
+    ) {
+      return { title: t("topbar.views.library.title"), subtitle: t("topbar.views.library.subtitle") };
+    }
     if (view === "tags") return { title: t("topbar.views.tags.title"), subtitle: t("topbar.views.tags.subtitle") };
     if (view === "inbox") return { title: t("topbar.views.inbox.title"), subtitle: t("topbar.views.inbox.subtitle") };
     if (view === "duplicates")
@@ -145,7 +153,7 @@ export function TopToolbar({
             </div>
           </div>
 
-          {view === "library" && !libraryReady ? <Badge variant="muted">{t("topbar.loading")}</Badge> : null}
+          {(view === "library" || view === "library-books") && !libraryReady ? <Badge variant="muted">{t("topbar.loading")}</Badge> : null}
         </div>
       </header>
       {updateStatus ? (

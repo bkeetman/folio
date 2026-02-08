@@ -71,6 +71,18 @@ function BookCardComponent({
                             {book.series}{book.seriesIndex ? ` #${book.seriesIndex}` : ""}
                         </div>
                     )}
+                    {(book.genres ?? []).length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-0.5">
+                            {(book.genres ?? []).slice(0, 2).map((genre) => (
+                                <span
+                                    key={`${book.id}-${genre}`}
+                                    className="inline-flex items-center rounded-full border border-[var(--app-border-soft)] bg-app-bg/40 px-1.5 py-0.5 text-[9px] text-app-ink-muted"
+                                >
+                                    {genre}
+                                </span>
+                            ))}
+                        </div>
+                    )}
                     {(book.tags ?? []).length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-0.5">
                             {(book.tags ?? []).slice(0, 3).map((tag) => (
@@ -183,6 +195,19 @@ function BookCardComponent({
                 <div className="mb-2 line-clamp-1 text-[12px] text-app-ink-muted">
                     {book.author}
                 </div>
+
+                {(book.genres ?? []).length > 0 ? (
+                    <div className="flex flex-wrap gap-1 pb-1">
+                        {(book.genres ?? []).slice(0, 2).map((genre) => (
+                            <span
+                                key={`${book.id}-grid-${genre}`}
+                                className="inline-flex items-center rounded-full border border-[var(--app-border-soft)] bg-app-bg/40 px-1.5 py-0.5 text-[9px] text-app-ink-muted"
+                            >
+                                {genre}
+                            </span>
+                        ))}
+                    </div>
+                ) : null}
 
                 {/* Tags (Bottom) */}
                 {(book.tags ?? []).length > 0 && (

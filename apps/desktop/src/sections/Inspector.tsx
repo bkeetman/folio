@@ -27,6 +27,7 @@ type InspectorProps = {
     series?: string | null;
     seriesIndex?: number | null;
     language?: string | null;
+    genres?: string[];
   } | null;
   // Available languages for this book (other editions in different languages)
   availableLanguages?: string[];
@@ -40,6 +41,7 @@ type InspectorProps = {
   setView: Dispatch<SetStateAction<View>>;
   setSelectedAuthorNames: Dispatch<SetStateAction<string[]>>;
   setSelectedSeries: Dispatch<SetStateAction<string[]>>;
+  setSelectedGenres: Dispatch<SetStateAction<string[]>>;
   onNavigateToEdit: () => void;
   // eReader sync
   ereaderConnected: boolean;
@@ -60,6 +62,7 @@ export function Inspector({
   setView,
   setSelectedAuthorNames,
   setSelectedSeries,
+  setSelectedGenres,
   ereaderConnected,
   ereaderSyncStatus,
   onQueueEreaderAdd,
@@ -98,12 +101,21 @@ export function Inspector({
   const handleAuthorClick = (authorName: string) => {
     setSelectedAuthorNames([authorName]);
     setSelectedSeries([]);
+    setSelectedGenres([]);
     setView("library-books");
   };
 
   const handleSeriesClick = (seriesName: string) => {
     setSelectedSeries([seriesName]);
     setSelectedAuthorNames([]);
+    setSelectedGenres([]);
+    setView("library-books");
+  };
+
+  const handleGenreClick = (genre: string) => {
+    setSelectedGenres([genre]);
+    setSelectedAuthorNames([]);
+    setSelectedSeries([]);
     setView("library-books");
   };
   return (
@@ -191,6 +203,24 @@ export function Inspector({
                     <span>{getLanguageName(selectedItem.language)}</span>
                   </div>
                 )}
+                {(selectedItem.genres ?? []).length > 0 ? (
+                  <div className="space-y-1">
+                    <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
+                      {t("inspector.categories")}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                    {(selectedItem.genres ?? []).slice(0, 6).map((genre) => (
+                      <button
+                        key={genre}
+                        className="rounded-full border border-[var(--app-border-soft)] bg-app-bg/40 px-2 py-0.5 text-[10px] text-[var(--app-ink-muted)] hover:border-[var(--app-accent)] hover:text-[var(--app-accent-strong)]"
+                        onClick={() => handleGenreClick(genre)}
+                      >
+                        {genre}
+                      </button>
+                    ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
 
