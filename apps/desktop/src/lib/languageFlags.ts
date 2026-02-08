@@ -16,6 +16,9 @@ const languageToFlag: Record<string, string> = {
   ja: "🇯🇵", // Japanese -> Japan
   ko: "🇰🇷", // Korean -> South Korea
   ar: "🇸🇦", // Arabic -> Saudi Arabia
+  fa: "🇮🇷", // Persian (Farsi)
+  ur: "🇵🇰", // Urdu
+  bn: "🇧🇩", // Bengali
 
   // European languages
   pl: "🇵🇱", // Polish
@@ -32,6 +35,18 @@ const languageToFlag: Record<string, string> = {
   hr: "🇭🇷", // Croatian
   sk: "🇸🇰", // Slovak
   sl: "🇸🇮", // Slovenian
+  sr: "🇷🇸", // Serbian
+  mk: "🇲🇰", // Macedonian
+  sq: "🇦🇱", // Albanian
+  bs: "🇧🇦", // Bosnian
+  ca: "🇪🇸", // Catalan
+  eu: "🇪🇸", // Basque
+  gl: "🇪🇸", // Galician
+  ga: "🇮🇪", // Irish
+  cy: "🇬🇧", // Welsh
+  is: "🇮🇸", // Icelandic
+  mt: "🇲🇹", // Maltese
+  lb: "🇱🇺", // Luxembourgish
   lt: "🇱🇹", // Lithuanian
   lv: "🇱🇻", // Latvian
   et: "🇪🇪", // Estonian
@@ -45,6 +60,20 @@ const languageToFlag: Record<string, string> = {
   id: "🇮🇩", // Indonesian
   ms: "🇲🇾", // Malay
   tl: "🇵🇭", // Tagalog/Filipino
+  sw: "🇹🇿", // Swahili
+  af: "🇿🇦", // Afrikaans
+  ta: "🇮🇳", // Tamil
+  te: "🇮🇳", // Telugu
+  ml: "🇮🇳", // Malayalam
+  mr: "🇮🇳", // Marathi
+  gu: "🇮🇳", // Gujarati
+  pa: "🇮🇳", // Punjabi
+  kk: "🇰🇿", // Kazakh
+  uz: "🇺🇿", // Uzbek
+  be: "🇧🇾", // Belarusian
+  ka: "🇬🇪", // Georgian
+  hy: "🇦🇲", // Armenian
+  az: "🇦🇿", // Azerbaijani
 
   // Regional variants
   "en-US": "🇺🇸",
@@ -74,6 +103,9 @@ const languageNames: Record<string, string> = {
   ja: "日本語",
   ko: "한국어",
   ar: "العربية",
+  fa: "فارسی",
+  ur: "اردو",
+  bn: "বাংলা",
   pl: "Polski",
   cs: "Čeština",
   sv: "Svenska",
@@ -88,6 +120,18 @@ const languageNames: Record<string, string> = {
   hr: "Hrvatski",
   sk: "Slovenčina",
   sl: "Slovenščina",
+  sr: "Srpski",
+  mk: "Македонски",
+  sq: "Shqip",
+  bs: "Bosanski",
+  ca: "Català",
+  eu: "Euskara",
+  gl: "Galego",
+  ga: "Gaeilge",
+  cy: "Cymraeg",
+  is: "Íslenska",
+  mt: "Malti",
+  lb: "Lëtzebuergesch",
   lt: "Lietuvių",
   lv: "Latviešu",
   et: "Eesti",
@@ -99,6 +143,20 @@ const languageNames: Record<string, string> = {
   id: "Bahasa Indonesia",
   ms: "Bahasa Melayu",
   tl: "Tagalog",
+  sw: "Kiswahili",
+  af: "Afrikaans",
+  ta: "தமிழ்",
+  te: "తెలుగు",
+  ml: "മലയാളം",
+  mr: "मराठी",
+  gu: "ગુજરાતી",
+  pa: "ਪੰਜਾਬੀ",
+  kk: "Қазақша",
+  uz: "O'zbek",
+  be: "Беларуская",
+  ka: "ქართული",
+  hy: "Հայերեն",
+  az: "Azərbaycan dili",
 };
 
 const unknownLanguageCodes = new Set(["und", "unknown", "unk", "n/a", "na", "none", "null", ""]);

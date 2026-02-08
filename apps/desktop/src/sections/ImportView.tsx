@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AlertCircle, ArrowLeft, FileUp, FolderUp, Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../components/ui";
 import type {
   ImportCandidate,
@@ -40,6 +41,7 @@ function hasSameFormat(dup: ImportDuplicate): boolean {
 }
 
 export function ImportView({ onCancel, onImportStart, libraryRoot, template }: ImportViewProps) {
+  const { t } = useTranslation();
   // UI state
   const [state, setState] = useState<ImportState>("selecting");
   const [importMode, setImportMode] = useState<ImportMode>(() => {
@@ -91,7 +93,7 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
     setScanProgress({
       itemId: "import-scan",
       status: "pending",
-      message: "Collecting ebook files...",
+      message: t("importView.collectingFiles"),
       current: 0,
       total: 0,
     });
@@ -128,10 +130,10 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
       const selected = await open({
         multiple: true,
         filters: [
-          { name: "All eBooks", extensions: ["epub", "pdf", "mobi", "EPUB", "PDF", "MOBI"] },
-          { name: "EPUB", extensions: ["epub", "EPUB"] },
-          { name: "PDF", extensions: ["pdf", "PDF"] },
-          { name: "MOBI", extensions: ["mobi", "MOBI"] },
+          { name: t("importView.filterAllEbooks"), extensions: ["epub", "pdf", "mobi", "EPUB", "PDF", "MOBI"] },
+          { name: t("importView.filterEpub"), extensions: ["epub", "EPUB"] },
+          { name: t("importView.filterPdf"), extensions: ["pdf", "PDF"] },
+          { name: t("importView.filterMobi"), extensions: ["mobi", "MOBI"] },
         ],
       });
       if (!selected || (Array.isArray(selected) && selected.length === 0)) return;
@@ -193,13 +195,13 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
 
   const handleConfirmImport = async () => {
     if (!libraryRoot) {
-      setErrorMessage("Library root not configured. Please set it in Settings.");
+      setErrorMessage(t("importView.libraryRootNotConfigured"));
       setState("error");
       return;
     }
 
     if (!scanResult) {
-      setErrorMessage("No scan results available.");
+      setErrorMessage(t("importView.noScanResults"));
       setState("error");
       return;
     }
@@ -268,9 +270,9 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
   const renderSelectingScreen = () => (
     <div className="flex flex-1 flex-col items-center justify-center gap-8 p-8">
       <div className="text-center">
-        <h2 className="text-2xl font-semibold text-app-ink">Import Books</h2>
+        <h2 className="text-2xl font-semibold text-app-ink">{t("importView.title")}</h2>
         <p className="mt-2 text-sm text-app-ink-muted">
-          Add books to your library by selecting files or a folder
+          {t("importView.subtitle")}
         </p>
       </div>
 
@@ -281,8 +283,8 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
         >
           <FileUp size={40} className="text-app-ink-muted" />
           <div className="text-center">
-            <div className="font-medium text-app-ink">Select Files</div>
-            <div className="text-xs text-app-ink-muted">Choose one or more ebooks</div>
+            <div className="font-medium text-app-ink">{t("importView.selectFiles")}</div>
+            <div className="text-xs text-app-ink-muted">{t("importView.selectFilesHint")}</div>
           </div>
         </button>
 
@@ -292,14 +294,14 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
         >
           <FolderUp size={40} className="text-app-ink-muted" />
           <div className="text-center">
-            <div className="font-medium text-app-ink">Select Folder</div>
-            <div className="text-xs text-app-ink-muted">Scan a folder for ebooks</div>
+            <div className="font-medium text-app-ink">{t("importView.selectFolder")}</div>
+            <div className="text-xs text-app-ink-muted">{t("importView.selectFolderHint")}</div>
           </div>
         </button>
       </div>
 
       <Button variant="ghost" onClick={onCancel}>
-        Cancel
+        {t("importView.cancel")}
       </Button>
     </div>
   );
@@ -309,13 +311,13 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
       <Loader2 size={48} className="animate-spin text-app-accent" />
       <div className="w-full max-w-xl text-center">
-        <div className="font-medium text-app-ink">Scanning for books...</div>
+        <div className="font-medium text-app-ink">{t("importView.scanningTitle")}</div>
         <div className="text-sm text-app-ink-muted">
           {scanProgress?.message
             ? scanProgress.total > 0
-              ? `Checking ${scanProgress.message}`
+              ? t("importView.scanningChecking", { item: scanProgress.message })
               : scanProgress.message
-            : "Checking files and looking for duplicates"}
+            : t("importView.scanningFallback")}
         </div>
         {scanProgress && scanProgress.total > 0 ? (
           <div className="mt-4">
@@ -392,10 +394,15 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
               <span>{formatBytes(dup.sizeBytes)}</span>
             </div>
             <div className="mt-1 text-xs text-amber-600">
-              {dup.matchType === "hash" ? "Exact match" : "Metadata match"} with "{dup.matchedItemTitle}"
+              {dup.matchType === "hash"
+                ? t("importView.duplicateExactMatch")
+                : t("importView.duplicateMetadataMatch")}{" "}
+              "{dup.matchedItemTitle}"
               {dup.existingFormats.length > 0 && (
                 <span className="ml-1 text-app-ink-muted">
-                  (has {dup.existingFormats.join(", ").toUpperCase()})
+                  {t("importView.duplicateHasFormats", {
+                    formats: dup.existingFormats.join(", ").toUpperCase(),
+                  })}
                 </span>
               )}
             </div>
@@ -411,7 +418,7 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
               onChange={() => handleSetDuplicateAction(dup.id, "skip")}
               className="text-app-accent focus:ring-app-accent"
             />
-            <span className="text-app-ink">Skip</span>
+            <span className="text-app-ink">{t("importView.skip")}</span>
           </label>
 
           <label className="flex cursor-pointer items-center gap-2 text-sm">
@@ -422,7 +429,7 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
               onChange={() => handleSetDuplicateAction(dup.id, "replace")}
               className="text-app-accent focus:ring-app-accent"
             />
-            <span className="text-app-ink">Replace existing</span>
+            <span className="text-app-ink">{t("importView.replaceExisting")}</span>
           </label>
 
           {!sameFormatExists ? (
@@ -434,7 +441,7 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
                 onChange={() => handleSetDuplicateAction(dup.id, "add-format")}
                 className="text-app-accent focus:ring-app-accent"
               />
-              <span className="text-app-ink">Add as format</span>
+              <span className="text-app-ink">{t("importView.addAsFormat")}</span>
             </label>
           ) : null}
         </div>
@@ -454,9 +461,12 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
           <ArrowLeft size={20} />
         </button>
         <div>
-          <h2 className="text-lg font-semibold text-app-ink">Review Import</h2>
+          <h2 className="text-lg font-semibold text-app-ink">{t("importView.reviewTitle")}</h2>
           <p className="text-sm text-app-ink-muted">
-            {newBooks.length} new, {duplicates.length} duplicates found
+            {t("importView.reviewSummary", {
+              newCount: newBooks.length,
+              duplicateCount: duplicates.length,
+            })}
           </p>
         </div>
       </div>
@@ -464,7 +474,7 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
       {/* Mode selection */}
       <div className="border-b border-app-border px-6 py-3">
         <div className="flex items-center gap-4">
-          <span className="text-sm font-medium text-app-ink">Import mode:</span>
+          <span className="text-sm font-medium text-app-ink">{t("importView.importMode")}</span>
           <label className="flex cursor-pointer items-center gap-2 text-sm">
             <input
               type="radio"
@@ -473,7 +483,7 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
               onChange={() => updateImportMode("copy")}
               className="text-app-accent focus:ring-app-accent"
             />
-            <span className="text-app-ink">Copy files</span>
+            <span className="text-app-ink">{t("importView.copyFiles")}</span>
           </label>
           <label className="flex cursor-pointer items-center gap-2 text-sm">
             <input
@@ -483,12 +493,12 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
               onChange={() => updateImportMode("move")}
               className="text-app-accent focus:ring-app-accent"
             />
-            <span className="text-app-ink">Move files</span>
+            <span className="text-app-ink">{t("importView.moveFiles")}</span>
           </label>
           <span className="text-xs text-app-ink-muted">
             {importMode === "copy"
-              ? "Original files will be kept"
-              : "Original files will be moved to library"}
+              ? t("importView.originalsKept")
+              : t("importView.originalsMoved")}
           </span>
         </div>
       </div>
@@ -500,13 +510,13 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
           <div className="mb-6">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-app-ink-muted">
-                New Books ({newBooks.length})
+                {t("importView.newBooksHeader", { count: newBooks.length })}
               </h3>
               <button
                 onClick={handleSelectAllNewBooks}
                 className="text-xs font-medium text-app-accent hover:underline"
               >
-                {allNewBooksSelected ? "Deselect all" : "Select all"}
+                {allNewBooksSelected ? t("importView.deselectAll") : t("importView.selectAll")}
               </button>
             </div>
             <div className="flex flex-col gap-2">
@@ -520,10 +530,10 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
           <div>
             <div className="mb-3">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-app-ink-muted">
-                Already in Library ({duplicates.length})
+                {t("importView.alreadyInLibraryHeader", { count: duplicates.length })}
               </h3>
               <p className="mt-1 text-xs text-app-ink-muted">
-                These files match existing books. Choose what to do with each.
+                {t("importView.duplicatesHint")}
               </p>
             </div>
             <div className="flex flex-col gap-2">
@@ -536,9 +546,9 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
         {newBooks.length === 0 && duplicates.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="text-4xl opacity-20">📚</div>
-            <div className="mt-4 font-medium text-app-ink">No books found</div>
+            <div className="mt-4 font-medium text-app-ink">{t("importView.noBooksFound")}</div>
             <div className="text-sm text-app-ink-muted">
-              No supported ebook files were found in the selected location.
+              {t("importView.noBooksFoundHint")}
             </div>
           </div>
         )}
@@ -547,18 +557,21 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
       {/* Footer */}
       <div className="flex items-center justify-between border-t border-app-border bg-app-bg/50 px-6 py-4">
         <div className="text-sm text-app-ink-muted">
-          {importCount} {importCount === 1 ? "book" : "books"} will be imported
+          {t("importView.booksWillBeImported", {
+            count: importCount,
+            bookLabel: importCount === 1 ? t("importView.bookSingular") : t("importView.bookPlural"),
+          })}
         </div>
         <div className="flex gap-3">
           <Button variant="ghost" onClick={onCancel}>
-            Cancel
+            {t("importView.cancel")}
           </Button>
           <Button
             variant="primary"
             onClick={() => void handleStartImport()}
             disabled={importCount === 0}
           >
-            Import {importCount > 0 ? `(${importCount})` : ""}
+            {t("importView.import")} {importCount > 0 ? `(${importCount})` : ""}
           </Button>
         </div>
       </div>
@@ -569,25 +582,27 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
   const renderConfirmingScreen = () => (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8">
       <div className="text-center">
-        <h2 className="text-xl font-semibold text-app-ink">Confirm Import</h2>
+        <h2 className="text-xl font-semibold text-app-ink">{t("importView.confirmTitle")}</h2>
         <p className="mt-2 text-sm text-app-ink-muted">
-          You are about to {importMode === "copy" ? "copy" : "move"}{" "}
-          <span className="font-medium text-app-ink">{importCount}</span>{" "}
-          {importCount === 1 ? "book" : "books"} to your library.
+          {t("importView.confirmMessage", {
+            mode: importMode === "copy" ? t("importView.modeCopy") : t("importView.modeMove"),
+            count: importCount,
+            bookLabel: importCount === 1 ? t("importView.bookSingular") : t("importView.bookPlural"),
+          })}
         </p>
         {libraryRoot && (
           <p className="mt-1 text-xs text-app-ink-muted">
-            Library: {libraryRoot}
+            {t("importView.libraryLabel")}: {libraryRoot}
           </p>
         )}
       </div>
 
       <div className="flex gap-3">
         <Button variant="ghost" onClick={handleBack}>
-          Back
+          {t("importView.back")}
         </Button>
         <Button variant="primary" onClick={() => void handleConfirmImport()}>
-          Confirm Import
+          {t("importView.confirmImport")}
         </Button>
       </div>
     </div>
@@ -600,17 +615,17 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
         <AlertCircle size={32} className="text-red-500" />
       </div>
       <div className="text-center">
-        <h2 className="text-xl font-semibold text-app-ink">Import Failed</h2>
+        <h2 className="text-xl font-semibold text-app-ink">{t("importView.errorTitle")}</h2>
         <p className="mt-2 max-w-md text-sm text-app-ink-muted">
-          {errorMessage ?? "An error occurred while importing books."}
+          {errorMessage ?? t("importView.errorFallback")}
         </p>
       </div>
       <div className="flex gap-3">
         <Button variant="outline" onClick={onCancel}>
-          Cancel
+          {t("importView.cancel")}
         </Button>
         <Button variant="primary" onClick={handleBack}>
-          Try Again
+          {t("importView.tryAgain")}
         </Button>
       </div>
     </div>

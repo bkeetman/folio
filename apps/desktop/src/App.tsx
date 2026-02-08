@@ -787,7 +787,6 @@ function App() {
   const handleImportStart = useCallback(async (request: ImportRequest) => {
     if (!isTauri() || importingBooks) return;
     setImportingBooks(true);
-    setView("library-books");
     setImportProgress({
       itemId: "import",
       status: "processing",
@@ -804,6 +803,7 @@ function App() {
     try {
       const result = await invoke<OperationStats>("import_books", { request });
       await refreshLibrary();
+      setView("library-books");
       setScanStatus(
         `Import complete: ${result.processed} imported, ${result.skipped} skipped, ${result.errors} errors.`
       );
@@ -1438,6 +1438,13 @@ function App() {
       mainScrollRef.current.scrollTo({ top: 0, behavior: "auto" });
     }
   }, [view]);
+
+  useEffect(() => {
+    // Safety net: prevent ending up on Edit without a selected item (blank content state).
+    if (view === "edit" && !selectedItemId) {
+      setView("library-books");
+    }
+  }, [view, selectedItemId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

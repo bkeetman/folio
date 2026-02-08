@@ -58,6 +58,8 @@ export function TopToolbar({
     if (view === "fix") return { title: t("topbar.views.fix.title"), subtitle: t("topbar.views.fix.subtitle") };
     if (view === "changes")
       return { title: t("topbar.views.changes.title"), subtitle: t("topbar.views.changes.subtitle") };
+    if (view === "import")
+      return { title: t("topbar.views.import.title"), subtitle: t("topbar.views.import.subtitle") };
     return { title: "", subtitle: "" };
   })();
   return (

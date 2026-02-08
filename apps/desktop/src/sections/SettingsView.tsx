@@ -1,7 +1,7 @@
 import { Button, Input } from "../components/ui";
 import type { ThemeMode } from "../hooks/useTheme";
 import { useTranslation } from "react-i18next";
-import { i18n } from "../i18n";
+import { APP_LANGUAGE_OPTIONS, i18n } from "../i18n";
 
 type SettingsViewProps = {
   libraryRoot: string | null;
@@ -25,6 +25,9 @@ export function SettingsView({
   setThemeMode,
 }: SettingsViewProps) {
   const { t } = useTranslation();
+  const selectedLanguage = (i18n.resolvedLanguage ?? i18n.language ?? "en").toLowerCase().split("-")[0];
+  const currentLanguage =
+    APP_LANGUAGE_OPTIONS.some((option) => option.code === selectedLanguage) ? selectedLanguage : "en";
   const isICloudPath =
     !!libraryRoot &&
     (libraryRoot.includes("com~apple~CloudDocs") ||
@@ -45,14 +48,17 @@ export function SettingsView({
             </label>
             <div className="max-w-xs">
               <select
-                value={i18n.resolvedLanguage?.startsWith("nl") ? "nl" : "en"}
+                value={currentLanguage}
                 onChange={(event) => {
                   void i18n.changeLanguage(event.target.value);
                 }}
                 className="h-10 w-full rounded-md border border-app-border bg-white px-3 text-sm text-app-ink"
               >
-                <option value="en">English</option>
-                <option value="nl">Nederlands</option>
+                {APP_LANGUAGE_OPTIONS.map((option) => (
+                  <option key={option.code} value={option.code}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </div>
             <p className="text-xs text-app-ink-muted mt-1">{t("settings.languageHint")}</p>

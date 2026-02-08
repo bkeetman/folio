@@ -82,30 +82,30 @@ export function Sidebar({
             onClick={() => setView("library-books")}
           >
             <BookOpen size={16} />
-            {t("sidebar.books")}
+            <span className="min-w-0 truncate">{t("sidebar.books")}</span>
           </SidebarItem>
           <SidebarItem
             active={view === "library-authors"}
             onClick={() => setView("library-authors")}
           >
             <User size={16} />
-            {t("sidebar.authors")}
+            <span className="min-w-0 truncate">{t("sidebar.authors")}</span>
           </SidebarItem>
           <SidebarItem
             active={view === "library-series"}
             onClick={() => setView("library-series")}
           >
             <Library size={16} />
-            {t("sidebar.series")}
+            <span className="min-w-0 truncate">{t("sidebar.series")}</span>
           </SidebarItem>
           <SidebarItem active={view === "tags"} onClick={() => setView("tags")}>
             <Tag size={16} />
-            {t("sidebar.tags")}
+            <span className="min-w-0 truncate">{t("sidebar.tags")}</span>
           </SidebarItem>
           <SidebarItem active={view === "ereader"} onClick={() => setView("ereader")}>
             <HardDrive size={16} />
-            <span className="flex flex-1 items-center justify-between gap-2">
-              <span className="flex items-center gap-1.5">
+            <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+              <span className="flex min-w-0 items-center gap-1.5">
                 eReader
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${ereaderConnected ? "bg-emerald-500" : "bg-stone-300"}`}
@@ -127,12 +127,12 @@ export function Sidebar({
           </div>
           <SidebarItem active={scanning} onClick={handleScan}>
             <FolderOpen size={16} />
-            {t("sidebar.addBooks")}
+            <span className="min-w-0 truncate">{t("sidebar.addBooks")}</span>
           </SidebarItem>
           <SidebarItem active={view === "duplicates"} onClick={() => setView("duplicates")}>
             <Copy size={16} />
-            <span className="flex flex-1 items-center justify-between gap-2">
-              <span>{t("sidebar.duplicates")}</span>
+            <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+              <span className="min-w-0 truncate">{t("sidebar.duplicates")}</span>
               {duplicateCount > 0 ? (
                 <span className="min-w-[20px] rounded-full bg-app-accent/15 px-2 py-0.5 text-[10px] font-bold text-app-accent-strong ring-1 ring-app-accent/20">
                   {duplicateCount}
@@ -142,8 +142,8 @@ export function Sidebar({
           </SidebarItem>
           <SidebarItem active={view === "missing-files"} onClick={() => setView("missing-files")}>
             <HardDrive size={16} />
-            <span className="flex flex-1 items-center justify-between gap-2">
-              <span>{t("sidebar.missingFiles")}</span>
+            <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+              <span className="min-w-0 truncate">{t("sidebar.missingFiles")}</span>
               {missingFilesCount > 0 ? (
                 <span className="min-w-[20px] rounded-full bg-app-accent/10 px-2 py-0.5 text-[10px] font-semibold text-app-accent">
                   {missingFilesCount}
@@ -153,8 +153,8 @@ export function Sidebar({
           </SidebarItem>
           <SidebarItem active={view === "fix"} onClick={() => setView("fix")}>
             <Sparkles size={16} />
-            <span className="flex flex-1 items-center justify-between gap-2">
-              <span>{t("sidebar.fixMetadata")}</span>
+            <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+              <span className="min-w-0 truncate">{t("sidebar.fixMetadata")}</span>
               {fixActionCount > 0 ? (
                 <span className="min-w-[20px] rounded-full bg-app-accent/10 px-2 py-0.5 text-[10px] font-semibold text-app-accent">
                   {fixActionCount}
@@ -164,8 +164,8 @@ export function Sidebar({
           </SidebarItem>
           <SidebarItem active={view === "changes"} onClick={() => setView("changes")}>
             <FileClock size={16} />
-            <span className="flex flex-1 items-center justify-between gap-2">
-              <span>{t("sidebar.changes")}</span>
+            <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+              <span className="min-w-0 truncate">{t("sidebar.changes")}</span>
               {pendingChangesCount > 0 ? (
                 <span className="min-w-[20px] rounded-full bg-app-accent/10 px-2 py-0.5 text-[10px] font-semibold text-app-accent">
                   {pendingChangesCount}
@@ -175,20 +175,20 @@ export function Sidebar({
           </SidebarItem>
           <SidebarItem active={view === "organize"} onClick={() => setView("organize")}>
             <FolderInput size={16} />
-            {t("sidebar.organizer")}
+            <span className="min-w-0 truncate">{t("sidebar.organizer")}</span>
           </SidebarItem>
           <SidebarItem active={view === "settings"} onClick={() => setView("settings")}>
             <Wrench size={16} />
-            {t("sidebar.settings")}
+            <span className="min-w-0 truncate">{t("sidebar.settings")}</span>
           </SidebarItem>
           <SidebarItem
             onClick={handleClearLibrary}
             className="text-red-600 hover:text-red-700"
           >
             <AlertTriangle size={16} />
-            <span className="flex flex-col">
-              <span>{t("sidebar.clearLibraryData")}</span>
-              <span className="text-[10px] font-normal text-red-500/80">
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate">{t("sidebar.clearLibraryData")}</span>
+              <span className="truncate text-[10px] font-normal text-red-500/80">
                 {t("sidebar.deletesAllItems")}
               </span>
             </span>
