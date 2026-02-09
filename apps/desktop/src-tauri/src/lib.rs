@@ -428,6 +428,8 @@ struct EpubChangeSet {
     author: Option<String>,
     isbn: Option<String>,
     description: Option<String>,
+    #[serde(default)]
+    apply_cover: bool,
 }
 
 #[derive(Serialize)]
@@ -627,6 +629,10 @@ fn reveal_file(path: String) -> Result<(), String> {
 #[tauri::command]
 fn get_item_details(app: tauri::AppHandle, item_id: String) -> Result<ItemMetadata, String> {
     let conn = open_db(&app)?;
+    get_item_details_from_conn(&conn, &item_id)
+}
+
+fn get_item_details_from_conn(conn: &Connection, item_id: &str) -> Result<ItemMetadata, String> {
     let (title, published_year, language, series, series_index, description, isbn, genres_raw) = conn
     .query_row(
       "SELECT title, published_year, language, series, series_index, description, \
@@ -733,10 +739,23 @@ fn relink_missing_file(
 ) -> Result<(), String> {
     let conn = open_db(&app)?;
     let now = chrono::Utc::now().timestamp_millis();
+    let trimmed_path = new_path.trim().to_string();
+    if trimmed_path.is_empty() {
+        return Err("File path cannot be empty.".to_string());
+    }
+    let current_path: Option<String> = conn
+        .query_row(
+            "SELECT path FROM files WHERE id = ?1",
+            params![&file_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+    let from_path = current_path.ok_or_else(|| "Missing file entry was not found.".to_string())?;
     let existing: Option<String> = conn
         .query_row(
             "SELECT id FROM files WHERE path = ?1 AND id != ?2 LIMIT 1",
-            params![new_path, file_id],
+            params![&trimmed_path, &file_id],
             |row| row.get(0),
         )
         .optional()
@@ -744,53 +763,141 @@ fn relink_missing_file(
     if existing.is_some() {
         return Err("Selected file is already linked to another item.".to_string());
     }
-    let metadata = std::fs::metadata(&new_path).map_err(|err| err.to_string())?;
+    let metadata = std::fs::metadata(&trimmed_path).map_err(|err| err.to_string())?;
     let size_bytes = metadata.len() as i64;
     let modified_at = metadata
         .modified()
         .ok()
         .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|value| value.as_millis() as i64);
-    let filename = std::path::Path::new(&new_path)
+    let filename = std::path::Path::new(&trimmed_path)
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("file")
         .to_string();
-    let extension = std::path::Path::new(&new_path)
+    let extension = std::path::Path::new(&trimmed_path)
         .extension()
         .and_then(|value| value.to_str())
         .map(|value| format!(".{}", value.to_lowercase()))
         .unwrap_or_default();
 
+    let updated = conn
+        .execute(
+            "UPDATE files SET path = ?1, filename = ?2, extension = ?3, size_bytes = ?4, modified_at = ?5, updated_at = ?6, status = 'active' WHERE id = ?7",
+            params![
+                &trimmed_path,
+                &filename,
+                &extension,
+                size_bytes,
+                modified_at,
+                now,
+                &file_id
+            ],
+        )
+        .map_err(|err| err.to_string())?;
+    if updated == 0 {
+        return Err("Missing file entry was not found.".to_string());
+    }
     conn.execute(
-    "UPDATE files SET path = ?1, filename = ?2, extension = ?3, size_bytes = ?4, modified_at = ?5, updated_at = ?6, status = 'active' WHERE id = ?7",
-    params![new_path, filename, extension, size_bytes, modified_at, now, file_id],
-  )
-  .map_err(|err| err.to_string())?;
+        "UPDATE issues SET resolved_at = ?1 WHERE file_id = ?2 AND type = 'missing_file' AND resolved_at IS NULL",
+        params![now, &file_id],
+    )
+    .map_err(|err| err.to_string())?;
+    queue_pending_change(
+        &conn,
+        &file_id,
+        "relink_missing",
+        Some(&from_path),
+        Some(&trimmed_path),
+        None,
+        now,
+        true,
+    )?;
     Ok(())
 }
 
 #[tauri::command]
 fn remove_missing_file(app: tauri::AppHandle, file_id: String) -> Result<(), String> {
     let conn = open_db(&app)?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let from_path: Option<String> = conn
+        .query_row(
+            "SELECT path FROM files WHERE id = ?1",
+            params![&file_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+    let from_path = from_path.ok_or_else(|| "Missing file entry was not found.".to_string())?;
+    let changed = conn
+        .execute(
+            "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE id = ?2 AND status = 'missing'",
+            params![now, &file_id],
+        )
+        .map_err(|err| err.to_string())?;
+    if changed == 0 {
+        return Err("Missing file entry was not found.".to_string());
+    }
     conn.execute(
-        "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE id = ?2",
-        params![chrono::Utc::now().timestamp_millis(), file_id],
+        "UPDATE issues SET resolved_at = ?1 WHERE file_id = ?2 AND type = 'missing_file' AND resolved_at IS NULL",
+        params![now, &file_id],
     )
     .map_err(|err| err.to_string())?;
+    queue_pending_change(
+        &conn,
+        &file_id,
+        "deactivate_missing",
+        Some(&from_path),
+        None,
+        None,
+        now,
+        true,
+    )?;
     Ok(())
 }
 
 #[tauri::command]
 fn remove_all_missing_files(app: tauri::AppHandle) -> Result<i64, String> {
     let conn = open_db(&app)?;
-    let affected = conn
-        .execute(
-            "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE status = 'missing'",
-            params![chrono::Utc::now().timestamp_millis()],
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut stmt = conn
+        .prepare("SELECT id, path FROM files WHERE status = 'missing'")
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(params![], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|err| err.to_string())?;
+    let mut removed = 0i64;
+    for row in rows {
+        let (file_id, from_path) = row.map_err(|err| err.to_string())?;
+        let changed = conn
+            .execute(
+                "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE id = ?2 AND status = 'missing'",
+                params![now, &file_id],
+            )
+            .map_err(|err| err.to_string())?;
+        if changed == 0 {
+            continue;
+        }
+        conn.execute(
+            "UPDATE issues SET resolved_at = ?1 WHERE file_id = ?2 AND type = 'missing_file' AND resolved_at IS NULL",
+            params![now, &file_id],
         )
         .map_err(|err| err.to_string())?;
-    Ok(affected as i64)
+        queue_pending_change(
+            &conn,
+            &file_id,
+            "deactivate_missing",
+            Some(&from_path),
+            None,
+            None,
+            now,
+            true,
+        )?;
+        removed += 1;
+    }
+    Ok(removed)
 }
 
 #[tauri::command]
@@ -1198,12 +1305,16 @@ fn update_tag(
 #[tauri::command]
 fn add_tag_to_item(app: tauri::AppHandle, item_id: String, tag_id: String) -> Result<(), String> {
     let conn = open_db(&app)?;
-    conn
-    .execute(
-      "INSERT OR IGNORE INTO item_tags (item_id, tag_id, source, confidence) VALUES (?1, ?2, 'user', 1)",
-      params![item_id, tag_id],
-    )
-    .map_err(|err| err.to_string())?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let changed = conn
+        .execute(
+            "INSERT OR IGNORE INTO item_tags (item_id, tag_id, source, confidence) VALUES (?1, ?2, 'user', 1)",
+            params![&item_id, &tag_id],
+        )
+        .map_err(|err| err.to_string())?;
+    if changed > 0 {
+        queue_tag_review_change(&conn, &item_id, &tag_id, true, now)?;
+    }
     Ok(())
 }
 
@@ -1214,11 +1325,16 @@ fn remove_tag_from_item(
     tag_id: String,
 ) -> Result<(), String> {
     let conn = open_db(&app)?;
-    conn.execute(
-        "DELETE FROM item_tags WHERE item_id = ?1 AND tag_id = ?2",
-        params![item_id, tag_id],
-    )
-    .map_err(|err| err.to_string())?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let changed = conn
+        .execute(
+            "DELETE FROM item_tags WHERE item_id = ?1 AND tag_id = ?2",
+            params![&item_id, &tag_id],
+        )
+        .map_err(|err| err.to_string())?;
+    if changed > 0 {
+        queue_tag_review_change(&conn, &item_id, &tag_id, false, now)?;
+    }
     Ok(())
 }
 
@@ -1541,6 +1657,18 @@ fn queue_remove_item(app: tauri::AppHandle, item_id: String) -> Result<i64, Stri
       .optional()
       .map_err(|err| err.to_string())?;
         if existing.is_some() {
+            conn.execute(
+                "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE id = ?2",
+                params![now, file_id],
+            )
+            .map_err(|err| err.to_string())?;
+            conn.execute(
+                "UPDATE issues SET resolved_at = ?1 \
+                 WHERE resolved_at IS NULL \
+                   AND (file_id = ?2 OR item_id = (SELECT item_id FROM files WHERE id = ?2 LIMIT 1))",
+                params![now, file_id],
+            )
+            .map_err(|err| err.to_string())?;
             continue;
         }
 
@@ -1551,20 +1679,20 @@ fn queue_remove_item(app: tauri::AppHandle, item_id: String) -> Result<i64, Stri
       params![change_id, file_id, path, now],
     )
     .map_err(|err| err.to_string())?;
+        conn.execute(
+            "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE id = ?2",
+            params![now, file_id],
+        )
+        .map_err(|err| err.to_string())?;
+        conn.execute(
+            "UPDATE issues SET resolved_at = ?1 \
+             WHERE resolved_at IS NULL \
+               AND (file_id = ?2 OR item_id = (SELECT item_id FROM files WHERE id = ?2 LIMIT 1))",
+            params![now, file_id],
+        )
+        .map_err(|err| err.to_string())?;
         queued += 1;
     }
-
-    conn.execute(
-    "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE item_id = ?2 AND status = 'active'",
-    params![now, item_id],
-  )
-  .map_err(|err| err.to_string())?;
-
-    conn.execute(
-        "UPDATE issues SET resolved_at = ?1 WHERE item_id = ?2 AND resolved_at IS NULL",
-        params![now, item_id],
-    )
-    .map_err(|err| err.to_string())?;
 
     Ok(queued)
 }
@@ -1655,8 +1783,15 @@ fn apply_pending_changes_sync(app: &tauri::AppHandle, ids: Vec<String>) -> Resul
 
         let result = match change.change_type.as_str() {
             "rename" => apply_rename_change(&conn, change, now),
-            "epub_meta" => apply_epub_change(change, now),
+            "epub_meta" => apply_epub_change(&conn, change, now),
+            "epub_cover" => apply_epub_cover_change(&conn, change),
             "delete" => apply_delete_change(&conn, change, now),
+            "item_metadata" => apply_item_metadata_change(app, change),
+            "fix_candidate" => apply_fix_candidate_change(app, change),
+            "item_tag_add" => apply_item_tag_change(&conn, change, true),
+            "item_tag_remove" => apply_item_tag_change(&conn, change, false),
+            "relink_missing" => apply_relink_missing_change(&conn, change, now),
+            "deactivate_missing" => apply_deactivate_missing_change(&conn, change, now),
             _ => Err("Unsupported change type".to_string()),
         };
 
@@ -1760,6 +1895,18 @@ fn resolve_duplicate_group(
       params![change_id, file_id, path, now],
     )
     .map_err(|err| err.to_string())?;
+        conn.execute(
+            "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE id = ?2",
+            params![now, file_id],
+        )
+        .map_err(|err| err.to_string())?;
+        conn.execute(
+            "UPDATE issues SET resolved_at = ?1 \
+             WHERE resolved_at IS NULL \
+               AND (file_id = ?2 OR item_id = (SELECT item_id FROM files WHERE id = ?2 LIMIT 1))",
+            params![now, file_id],
+        )
+        .map_err(|err| err.to_string())?;
         queued += 1;
     }
     if queued > 0 {
@@ -1769,18 +1916,6 @@ fn resolve_duplicate_group(
             group_id
         );
     }
-
-    conn.execute(
-        "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE sha256 = ?2 AND id != ?3",
-        params![now, group_id, keep_id],
-    )
-    .map_err(|err| err.to_string())?;
-
-    conn.execute(
-    "UPDATE issues SET resolved_at = ?1 WHERE type = 'duplicate' AND file_id IN (SELECT id FROM files WHERE sha256 = ?2 AND id != ?3)",
-    params![now, group_id, keep_id],
-  )
-  .map_err(|err| err.to_string())?;
 
     Ok(())
 }
@@ -1814,13 +1949,20 @@ fn resolve_duplicate_group_by_files(
         params![change_id, file_id, path, now],
       )
       .map_err(|err| err.to_string())?;
+            conn.execute(
+                "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE id = ?2",
+                params![now, file_id],
+            )
+            .map_err(|err| err.to_string())?;
+            conn.execute(
+                "UPDATE issues SET resolved_at = ?1 \
+                 WHERE resolved_at IS NULL \
+                   AND (file_id = ?2 OR item_id = (SELECT item_id FROM files WHERE id = ?2 LIMIT 1))",
+                params![now, file_id],
+            )
+            .map_err(|err| err.to_string())?;
             queued += 1;
         }
-        conn.execute(
-            "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE id = ?2",
-            params![now, file_id],
-        )
-        .map_err(|err| err.to_string())?;
     }
     if queued > 0 {
         log::info!("queued delete changes: {} for duplicate files", queued);
@@ -1869,7 +2011,7 @@ fn apply_rename_change(conn: &Connection, change: &PendingChange, now: i64) -> R
     Ok(())
 }
 
-fn apply_epub_change(change: &PendingChange, _now: i64) -> Result<(), String> {
+fn apply_epub_change(conn: &Connection, change: &PendingChange, _now: i64) -> Result<(), String> {
     let path = change
         .from_path
         .as_ref()
@@ -1880,7 +2022,46 @@ fn apply_epub_change(change: &PendingChange, _now: i64) -> Result<(), String> {
         .ok_or_else(|| "Missing changes".to_string())?;
     let changes: EpubChangeSet =
         serde_json::from_str(changes_json).map_err(|err| err.to_string())?;
-    update_epub_metadata(path, &changes)?;
+    let has_metadata_updates = changes.title.is_some()
+        || changes.author.is_some()
+        || changes.isbn.is_some()
+        || changes.description.is_some();
+    if has_metadata_updates {
+        update_epub_metadata(path, &changes)?;
+    }
+    if changes.apply_cover {
+        apply_epub_cover_change(conn, change)?;
+    }
+    Ok(())
+}
+
+fn apply_epub_cover_change(conn: &Connection, change: &PendingChange) -> Result<(), String> {
+    let path = change
+        .from_path
+        .as_ref()
+        .ok_or_else(|| "Missing EPUB path".to_string())?;
+    let item_id: String = conn
+        .query_row(
+            "SELECT item_id FROM files WHERE id = ?1",
+            params![change.file_id],
+            |row| row.get(0),
+        )
+        .map_err(|err| err.to_string())?;
+    let cover_path: Option<String> = conn
+        .query_row(
+            "SELECT local_path FROM covers WHERE item_id = ?1 ORDER BY created_at DESC LIMIT 1",
+            params![item_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+    let cover_path = cover_path.ok_or_else(|| "No cover found for item.".to_string())?;
+    let cover_bytes = std::fs::read(&cover_path).map_err(|err| err.to_string())?;
+    let extension = std::path::Path::new(&cover_path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("jpg");
+    crate::parser::epub::write_epub_cover(std::path::Path::new(path), &cover_bytes, extension)?;
     Ok(())
 }
 
@@ -1906,6 +2087,134 @@ fn apply_delete_change(conn: &Connection, change: &PendingChange, now: i64) -> R
     .map_err(|err| err.to_string())?;
     conn.execute(
         "UPDATE issues SET resolved_at = ?1 WHERE file_id = ?2 AND type = 'duplicate'",
+        params![now, change.file_id],
+    )
+    .map_err(|err| err.to_string())?;
+    conn.execute(
+        "UPDATE issues SET resolved_at = ?1 \
+         WHERE resolved_at IS NULL \
+           AND (file_id = ?2 OR item_id = (SELECT item_id FROM files WHERE id = ?2 LIMIT 1))",
+        params![now, change.file_id],
+    )
+    .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+fn apply_item_metadata_change(app: &tauri::AppHandle, change: &PendingChange) -> Result<(), String> {
+    let changes_json = change
+        .changes_json
+        .as_ref()
+        .ok_or_else(|| "Missing metadata payload".to_string())?;
+    let _: QueuedItemMetadataChange =
+        serde_json::from_str(changes_json).map_err(|err| err.to_string())?;
+    let _ = app;
+    Ok(())
+}
+
+fn apply_fix_candidate_change(app: &tauri::AppHandle, change: &PendingChange) -> Result<(), String> {
+    let changes_json = change
+        .changes_json
+        .as_ref()
+        .ok_or_else(|| "Missing fix-candidate payload".to_string())?;
+    let payload: QueuedFixCandidateChange =
+        serde_json::from_str(changes_json).map_err(|err| err.to_string())?;
+    apply_fix_candidate_sync(app.clone(), payload.item_id, payload.candidate)
+}
+
+fn apply_item_tag_change(
+    conn: &Connection,
+    change: &PendingChange,
+    add: bool,
+) -> Result<(), String> {
+    let changes_json = change
+        .changes_json
+        .as_ref()
+        .ok_or_else(|| "Missing tag payload".to_string())?;
+    let payload: QueuedItemTagChange =
+        serde_json::from_str(changes_json).map_err(|err| err.to_string())?;
+    if add {
+        conn.execute(
+            "INSERT OR IGNORE INTO item_tags (item_id, tag_id, source, confidence) VALUES (?1, ?2, 'user', 1)",
+            params![payload.item_id, payload.tag_id],
+        )
+        .map_err(|err| err.to_string())?;
+    } else {
+        conn.execute(
+            "DELETE FROM item_tags WHERE item_id = ?1 AND tag_id = ?2",
+            params![payload.item_id, payload.tag_id],
+        )
+        .map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
+fn apply_relink_missing_change(
+    conn: &Connection,
+    change: &PendingChange,
+    now: i64,
+) -> Result<(), String> {
+    let new_path = change
+        .to_path
+        .as_deref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Missing target path".to_string())?;
+
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT id FROM files WHERE path = ?1 AND id != ?2 LIMIT 1",
+            params![new_path, change.file_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+    if existing.is_some() {
+        return Err("Selected file is already linked to another item.".to_string());
+    }
+
+    let metadata = std::fs::metadata(new_path).map_err(|err| err.to_string())?;
+    let size_bytes = metadata.len() as i64;
+    let modified_at = metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|value| value.as_millis() as i64);
+    let filename = std::path::Path::new(new_path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("file")
+        .to_string();
+    let extension = std::path::Path::new(new_path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| format!(".{}", value.to_lowercase()))
+        .unwrap_or_default();
+
+    conn.execute(
+        "UPDATE files SET path = ?1, filename = ?2, extension = ?3, size_bytes = ?4, modified_at = ?5, updated_at = ?6, status = 'active' WHERE id = ?7",
+        params![new_path, filename, extension, size_bytes, modified_at, now, change.file_id],
+    )
+    .map_err(|err| err.to_string())?;
+    conn.execute(
+        "UPDATE issues SET resolved_at = ?1 WHERE file_id = ?2 AND type = 'missing_file' AND resolved_at IS NULL",
+        params![now, change.file_id],
+    )
+    .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+fn apply_deactivate_missing_change(
+    conn: &Connection,
+    change: &PendingChange,
+    now: i64,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE id = ?2 AND status = 'missing'",
+        params![now, change.file_id],
+    )
+    .map_err(|err| err.to_string())?;
+    conn.execute(
+        "UPDATE issues SET resolved_at = ?1 WHERE file_id = ?2 AND type = 'missing_file' AND resolved_at IS NULL",
         params![now, change.file_id],
     )
     .map_err(|err| err.to_string())?;
@@ -3039,11 +3348,16 @@ fn apply_enrichment_for_batch(
 
     // Try to fetch cover
     let mut cover_fetched = false;
+    let mut cover_updated = false;
     if let Some(url) = candidate.cover_url.as_deref() {
         cover_fetched = fetch_cover_from_url(app, conn, item_id, url, now).unwrap_or(false);
+        cover_updated = cover_fetched;
     }
     if !cover_fetched {
-        let _ = fetch_cover_fallback(app, conn, item_id, now);
+        cover_updated = fetch_cover_fallback(app, conn, item_id, now).unwrap_or(false);
+    }
+    if cover_updated {
+        let _ = queue_epub_cover_changes_for_item(conn, item_id, now);
     }
 
     conn.execute(
@@ -3066,7 +3380,7 @@ struct ApplyMetadataProgress {
     total: usize,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ItemMetadata {
     title: Option<String>,
@@ -3081,6 +3395,178 @@ struct ItemMetadata {
     genres: Vec<String>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QueuedItemMetadataChange {
+    item_id: String,
+    metadata: ItemMetadata,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QueuedItemTagChange {
+    item_id: String,
+    tag_id: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QueuedFixCandidateChange {
+    item_id: String,
+    candidate: EnrichmentCandidate,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchMetadataUpdatePayload {
+    item_ids: Vec<String>,
+    #[serde(default)]
+    authors: Option<Vec<String>>,
+    #[serde(default)]
+    genres: Option<Vec<String>>,
+    #[serde(default)]
+    author_mode: Option<String>,
+    #[serde(default)]
+    language: Option<String>,
+    #[serde(default)]
+    clear_language: bool,
+    #[serde(default)]
+    published_year: Option<i64>,
+    #[serde(default)]
+    clear_published_year: bool,
+    #[serde(default)]
+    tag_ids: Option<Vec<String>>,
+    #[serde(default)]
+    tag_mode: Option<String>,
+    #[serde(default)]
+    clear_tags: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchMetadataUpdateResult {
+    items_updated: i64,
+    authors_updated: i64,
+    categories_updated: i64,
+    language_updated: i64,
+    years_updated: i64,
+    tags_updated: i64,
+    changes_queued: i64,
+    files_queued: i64,
+}
+
+fn get_item_reference_file(conn: &Connection, item_id: &str) -> Result<(String, String), String> {
+    let record: Option<(String, String)> = conn
+        .query_row(
+            "SELECT id, path FROM files \
+             WHERE item_id = ?1 \
+             ORDER BY (status = 'active') DESC, created_at ASC, id ASC \
+             LIMIT 1",
+            params![item_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+    record.ok_or_else(|| "No file record found for item.".to_string())
+}
+
+fn queue_pending_change(
+    conn: &Connection,
+    file_id: &str,
+    change_type: &str,
+    from_path: Option<&str>,
+    to_path: Option<&str>,
+    changes_json: Option<&str>,
+    now: i64,
+    replace_existing: bool,
+) -> Result<String, String> {
+    if replace_existing {
+        conn.execute(
+            "DELETE FROM pending_changes WHERE file_id = ?1 AND type = ?2 AND status = 'pending'",
+            params![file_id, change_type],
+        )
+        .map_err(|err| err.to_string())?;
+    }
+    let id = Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO pending_changes (id, file_id, type, from_path, to_path, changes_json, status, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7)",
+        params![id, file_id, change_type, from_path, to_path, changes_json, now],
+    )
+    .map_err(|err| err.to_string())?;
+    Ok(id)
+}
+
+fn queue_item_metadata_change(
+    conn: &Connection,
+    item_id: &str,
+    mut metadata: ItemMetadata,
+    now: i64,
+    replace_existing: bool,
+) -> Result<(), String> {
+    let (file_id, from_path) = get_item_reference_file(conn, item_id)?;
+    metadata.authors = normalize_author_values(&metadata.authors);
+    metadata.description = normalize_optional_description(metadata.description);
+    let payload = QueuedItemMetadataChange {
+        item_id: item_id.to_string(),
+        metadata,
+    };
+    let changes_json = serde_json::to_string(&payload).map_err(|err| err.to_string())?;
+    queue_pending_change(
+        conn,
+        &file_id,
+        "item_metadata",
+        Some(&from_path),
+        None,
+        Some(&changes_json),
+        now,
+        replace_existing,
+    )?;
+    Ok(())
+}
+
+fn queue_metadata_review_change(
+    conn: &Connection,
+    item_id: &str,
+    now: i64,
+) -> Result<(), String> {
+    let metadata = get_item_details_from_conn(conn, item_id)?;
+    queue_item_metadata_change(conn, item_id, metadata, now, true)
+}
+
+fn queue_tag_review_change(
+    conn: &Connection,
+    item_id: &str,
+    tag_id: &str,
+    add: bool,
+    now: i64,
+) -> Result<(), String> {
+    let (file_id, from_path) = get_item_reference_file(conn, item_id)?;
+    let payload = QueuedItemTagChange {
+        item_id: item_id.to_string(),
+        tag_id: tag_id.to_string(),
+    };
+    let changes_json = serde_json::to_string(&payload).map_err(|err| err.to_string())?;
+    let change_type = if add { "item_tag_add" } else { "item_tag_remove" };
+    conn.execute(
+        "DELETE FROM pending_changes \
+         WHERE file_id = ?1 AND type = ?2 AND status = 'pending' AND changes_json = ?3",
+        params![&file_id, change_type, &changes_json],
+    )
+    .map_err(|err| err.to_string())?;
+    queue_pending_change(
+        conn,
+        &file_id,
+        change_type,
+        Some(&from_path),
+        None,
+        Some(&changes_json),
+        now,
+        false,
+    )?;
+    Ok(())
+}
+
 #[tauri::command]
 async fn apply_fix_candidate(
     app: tauri::AppHandle,
@@ -3088,9 +3574,7 @@ async fn apply_fix_candidate(
     candidate: EnrichmentCandidate,
 ) -> Result<(), String> {
     let app_handle = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        apply_fix_candidate_sync(app_handle, item_id, candidate)
-    })
+    tauri::async_runtime::spawn_blocking(move || apply_fix_candidate_sync(app_handle, item_id, candidate))
     .await
     .map_err(|err| err.to_string())?
 }
@@ -3154,8 +3638,11 @@ fn apply_fix_candidate_sync(
         },
     );
     let mut cover_fetched = false;
+    let mut cover_updated = false;
+    let candidate_had_cover_url = candidate.cover_url.is_some();
     if let Some(url) = candidate.cover_url.as_deref() {
         cover_fetched = fetch_cover_from_url(&app, &conn, &item_id, url, now)?;
+        cover_updated = cover_fetched;
     }
 
     // Step 4: Fallback cover if needed
@@ -3171,12 +3658,27 @@ fn apply_fix_candidate_sync(
             },
         );
         log::info!("trying cover fallback for item {}", item_id);
-        let _ = fetch_cover_fallback(&app, &conn, &item_id, now);
+        cover_updated = fetch_cover_fallback_with_mode(
+            &app,
+            &conn,
+            &item_id,
+            now,
+            candidate_had_cover_url,
+        )
+        .unwrap_or(false);
     }
 
-    if let Err(err) = embed_latest_cover_into_epub(&conn, &item_id) {
+    if cover_updated {
+        let queued_cover_changes = queue_epub_cover_changes_for_item(&conn, &item_id, now)?;
+        log::info!(
+            "queued epub cover changes: {} for item {}",
+            queued_cover_changes,
+            item_id
+        );
+    }
+    if let Err(err) = queue_metadata_review_change(&conn, &item_id, now) {
         log::warn!(
-            "failed to embed cover after applying candidate {}: {}",
+            "failed to queue metadata review change after candidate apply for {}: {}",
             item_id,
             err
         );
@@ -3206,7 +3708,20 @@ async fn save_item_metadata(
 ) -> Result<(), String> {
     let app_handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        save_item_metadata_sync(app_handle, item_id, metadata)
+        save_item_metadata_sync(app_handle, item_id, metadata).map(|_| ())
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn apply_batch_metadata_update(
+    app: tauri::AppHandle,
+    payload: BatchMetadataUpdatePayload,
+) -> Result<BatchMetadataUpdateResult, String> {
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        apply_batch_metadata_update_sync(app_handle, payload)
     })
     .await
     .map_err(|err| err.to_string())?
@@ -3216,7 +3731,7 @@ fn save_item_metadata_sync(
     app: tauri::AppHandle,
     item_id: String,
     metadata: ItemMetadata,
-) -> Result<(), String> {
+) -> Result<i64, String> {
     let conn = open_db(&app)?;
     let now = chrono::Utc::now().timestamp_millis();
     let description = normalize_optional_description(metadata.description.clone());
@@ -3347,6 +3862,7 @@ fn save_item_metadata_sync(
                 .and_then(|raw| normalize_isbn(raw).or_else(|| Some(raw.trim().to_string())))
                 .filter(|value| !value.is_empty()),
             description: Some(description.clone().unwrap_or_default()),
+            apply_cover: false,
         },
         now,
     )?;
@@ -3358,8 +3874,9 @@ fn save_item_metadata_sync(
         );
     }
 
+    let mut cover_updated = false;
     if let Ok(false) = has_cover(&conn, &item_id) {
-        let _ = fetch_cover_fallback(&app, &conn, &item_id, now);
+        cover_updated = fetch_cover_fallback(&app, &conn, &item_id, now).unwrap_or(false);
     }
 
     if let Ok(false) = has_cover(&conn, &item_id) {
@@ -3380,15 +3897,19 @@ fn save_item_metadata_sync(
       .unwrap_or_else(|| "Unknown".to_string());
         if let Ok(bytes) = crate::generate_text_cover(&title, &author) {
             let _ = crate::save_cover(&app, &conn, &item_id, bytes, "png", now, "generated", None);
+            cover_updated = true;
         }
     }
 
-    if let Err(err) = embed_latest_cover_into_epub(&conn, &item_id) {
-        log::warn!(
-            "failed to embed cover after manual save {}: {}",
-            item_id,
-            err
-        );
+    if cover_updated {
+        let queued_cover_changes = queue_epub_cover_changes_for_item(&conn, &item_id, now)?;
+        if queued_cover_changes > 0 {
+            log::info!(
+                "queued epub cover changes for {} files after manual save of item {}",
+                queued_cover_changes,
+                item_id
+            );
+        }
     }
 
     let cover_count: i64 = conn
@@ -3434,9 +3955,423 @@ fn save_item_metadata_sync(
     params![now, item_id],
   )
   .map_err(|err| err.to_string())?;
+    if let Err(err) = queue_metadata_review_change(&conn, &item_id, now) {
+        log::warn!(
+            "failed to queue metadata review change after manual save for {}: {}",
+            item_id,
+            err
+        );
+    }
     log::info!("resolved missing_metadata issues for item {}", item_id);
 
-    Ok(())
+    Ok(queued_epub_changes)
+}
+
+fn normalize_author_values(values: &[String]) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for value in values {
+        let cleaned = normalize_ws(value);
+        if cleaned.is_empty() {
+            continue;
+        }
+        if normalized
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(&cleaned))
+        {
+            continue;
+        }
+        normalized.push(cleaned);
+    }
+    normalized
+}
+
+fn apply_batch_metadata_update_sync(
+    app: tauri::AppHandle,
+    payload: BatchMetadataUpdatePayload,
+) -> Result<BatchMetadataUpdateResult, String> {
+    let conn = open_db(&app)?;
+    let now = chrono::Utc::now().timestamp_millis();
+
+    let mut item_ids = payload.item_ids;
+    item_ids.sort();
+    item_ids.dedup();
+    if item_ids.is_empty() {
+        return Err("Select at least one book.".to_string());
+    }
+
+    let author_mode = payload
+        .author_mode
+        .as_deref()
+        .map(|value| value.trim().to_lowercase())
+        .unwrap_or_else(|| "replace".to_string());
+    if author_mode != "replace" && author_mode != "append" {
+        return Err("Author mode must be either 'replace' or 'append'.".to_string());
+    }
+
+    let normalized_authors = payload
+        .authors
+        .as_ref()
+        .map(|values| normalize_author_values(values));
+    let normalized_genres = payload.genres.as_ref().map(|values| {
+        normalize_genre_values(values)
+            .into_iter()
+            .map(|(genre, _)| genre)
+            .collect::<Vec<String>>()
+    });
+    let normalized_language = payload
+        .language
+        .as_ref()
+        .and_then(|value| normalize_language_code(value));
+    let clear_language = payload.clear_language;
+    if clear_language && normalized_language.is_some() {
+        return Err("Choose either set or clear for language, not both.".to_string());
+    }
+    let requested_published_year = payload.published_year;
+    let clear_published_year = payload.clear_published_year;
+    if clear_published_year && requested_published_year.is_some() {
+        return Err("Choose either set or clear for publication year, not both.".to_string());
+    }
+    if let Some(year) = requested_published_year {
+        let max_year = chrono::Utc::now().year() as i64 + 1;
+        if !(1400..=max_year).contains(&year) {
+            return Err("Publication year must be between 1400 and next year.".to_string());
+        }
+    }
+    let tag_mode = payload
+        .tag_mode
+        .as_deref()
+        .map(|value| value.trim().to_lowercase())
+        .unwrap_or_else(|| "append".to_string());
+    if tag_mode != "append" && tag_mode != "replace" && tag_mode != "remove" {
+        return Err("Tag mode must be append, replace, or remove.".to_string());
+    }
+    let normalized_tag_ids = payload.tag_ids.as_ref().map(|values| {
+        let mut normalized = Vec::new();
+        for value in values {
+            let cleaned = value.trim().to_string();
+            if cleaned.is_empty() {
+                continue;
+            }
+            if normalized.iter().any(|existing: &String| existing == &cleaned) {
+                continue;
+            }
+            normalized.push(cleaned);
+        }
+        normalized
+    });
+    let clear_tags = payload.clear_tags;
+    let requested_tag_ids = normalized_tag_ids
+        .as_ref()
+        .map(|values| !values.is_empty())
+        .unwrap_or(false);
+    if clear_tags && requested_tag_ids {
+        return Err("Choose either tag updates or clear tags, not both.".to_string());
+    }
+    let resolved_tag_ids = if let Some(tag_ids) = normalized_tag_ids.as_ref() {
+        let mut resolved = Vec::new();
+        for tag_id in tag_ids {
+            let exists: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM tags WHERE id = ?1 LIMIT 1",
+                    params![tag_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|err| err.to_string())?;
+            if exists.is_some() {
+                resolved.push(tag_id.clone());
+            }
+        }
+        Some(resolved)
+    } else {
+        None
+    };
+
+    let has_tag_request = resolved_tag_ids
+        .as_ref()
+        .map(|values| !values.is_empty())
+        .unwrap_or(false);
+    if normalized_authors.is_none()
+        && normalized_genres.is_none()
+        && !clear_language
+        && normalized_language.is_none()
+        && !clear_published_year
+        && requested_published_year.is_none()
+        && !clear_tags
+        && !has_tag_request
+    {
+        return Err("No batch metadata changes were provided.".to_string());
+    }
+
+    let mut result = BatchMetadataUpdateResult {
+        items_updated: 0,
+        authors_updated: 0,
+        categories_updated: 0,
+        language_updated: 0,
+        years_updated: 0,
+        tags_updated: 0,
+        changes_queued: 0,
+        files_queued: 0,
+    };
+
+    for item_id in item_ids {
+        let current = match get_item_details_from_conn(&conn, &item_id) {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+        let mut touched = false;
+        let mut file_changes_for_item = 0i64;
+
+        if let Some(genres) = normalized_genres.as_ref() {
+            let existing_genres = normalize_genre_values(&current.genres)
+                .into_iter()
+                .map(|(genre, _)| genre)
+                .collect::<Vec<String>>();
+            if existing_genres != *genres {
+                replace_item_genres(&conn, &item_id, genres, "user", 1.0, now)?;
+                insert_field_source_with_source(&conn, &item_id, "genres", "user", 1.0, now)?;
+                result.categories_updated += 1;
+                touched = true;
+            }
+        }
+
+        if let Some(request_authors) = normalized_authors.as_ref() {
+            let skip_append_empty = author_mode == "append" && request_authors.is_empty();
+            if !skip_append_empty {
+                let next_authors = if author_mode == "append" {
+                    let mut merged = normalize_author_values(&current.authors);
+                    for author in request_authors {
+                        if merged
+                            .iter()
+                            .any(|existing| existing.eq_ignore_ascii_case(author))
+                        {
+                            continue;
+                        }
+                        merged.push(author.clone());
+                    }
+                    merged
+                } else {
+                    request_authors.clone()
+                };
+                let existing_authors = normalize_author_values(&current.authors);
+                if next_authors != existing_authors {
+                    conn.execute(
+                        "DELETE FROM item_authors WHERE item_id = ?1",
+                        params![item_id],
+                    )
+                    .map_err(|err| err.to_string())?;
+                    for author in &next_authors {
+                        let author_id = get_or_create_author(&conn, author, now)?;
+                        conn.execute(
+                            "INSERT OR IGNORE INTO item_authors (item_id, author_id) VALUES (?1, ?2)",
+                            params![item_id, author_id],
+                        )
+                        .map_err(|err| err.to_string())?;
+                    }
+                    insert_field_source_with_source(&conn, &item_id, "authors", "user", 1.0, now)?;
+                    file_changes_for_item += queue_epub_changes_for_item(
+                        &conn,
+                        &item_id,
+                        &EpubChangeSet {
+                            title: None,
+                            author: next_authors.first().cloned(),
+                            isbn: None,
+                            description: None,
+                            apply_cover: false,
+                        },
+                        now,
+                    )?;
+                    result.authors_updated += 1;
+                    touched = true;
+                }
+            }
+        }
+        if clear_language {
+            if current.language.is_some() {
+                conn.execute("UPDATE items SET language = NULL WHERE id = ?1", params![item_id])
+                    .map_err(|err| err.to_string())?;
+                insert_field_source_with_source(&conn, &item_id, "language", "user", 1.0, now)?;
+                result.language_updated += 1;
+                touched = true;
+            }
+        } else if let Some(language) = normalized_language.as_ref() {
+            let current_language = current
+                .language
+                .as_deref()
+                .and_then(normalize_language_code);
+            if current_language.as_deref() != Some(language.as_str()) {
+                conn.execute(
+                    "UPDATE items SET language = ?1 WHERE id = ?2",
+                    params![language, item_id],
+                )
+                .map_err(|err| err.to_string())?;
+                insert_field_source_with_source(&conn, &item_id, "language", "user", 1.0, now)?;
+                result.language_updated += 1;
+                touched = true;
+            }
+        }
+        if clear_published_year {
+            if current.published_year.is_some() {
+                conn.execute(
+                    "UPDATE items SET published_year = NULL WHERE id = ?1",
+                    params![item_id],
+                )
+                .map_err(|err| err.to_string())?;
+                insert_field_source_with_source(
+                    &conn,
+                    &item_id,
+                    "published_year",
+                    "user",
+                    1.0,
+                    now,
+                )?;
+                result.years_updated += 1;
+                touched = true;
+            }
+        } else if let Some(year) = requested_published_year {
+            if current.published_year != Some(year) {
+                conn.execute(
+                    "UPDATE items SET published_year = ?1 WHERE id = ?2",
+                    params![year, item_id],
+                )
+                .map_err(|err| err.to_string())?;
+                insert_field_source_with_source(
+                    &conn,
+                    &item_id,
+                    "published_year",
+                    "user",
+                    1.0,
+                    now,
+                )?;
+                result.years_updated += 1;
+                touched = true;
+            }
+        }
+        if clear_tags {
+            let mut existing_stmt = conn
+                .prepare("SELECT tag_id FROM item_tags WHERE item_id = ?1")
+                .map_err(|err| err.to_string())?;
+            let existing_rows = existing_stmt
+                .query_map(params![item_id.clone()], |row| row.get::<_, String>(0))
+                .map_err(|err| err.to_string())?;
+            let mut existing_tag_ids = Vec::new();
+            for existing_row in existing_rows {
+                existing_tag_ids.push(existing_row.map_err(|err| err.to_string())?);
+            }
+            let removed = conn
+                .execute("DELETE FROM item_tags WHERE item_id = ?1", params![item_id])
+                .map_err(|err| err.to_string())?;
+            if removed > 0 {
+                result.tags_updated += 1;
+                touched = true;
+                for tag_id in existing_tag_ids {
+                    if let Err(err) = queue_tag_review_change(&conn, &item_id, &tag_id, false, now)
+                    {
+                        log::warn!(
+                            "failed to queue tag review change for item {} tag {}: {}",
+                            item_id,
+                            tag_id,
+                            err
+                        );
+                    } else {
+                        result.changes_queued += 1;
+                    }
+                }
+            }
+        } else if let Some(request_tag_ids) = resolved_tag_ids.as_ref() {
+            if !request_tag_ids.is_empty() {
+                let mut existing_stmt = conn
+                    .prepare("SELECT tag_id FROM item_tags WHERE item_id = ?1")
+                    .map_err(|err| err.to_string())?;
+                let existing_rows = existing_stmt
+                    .query_map(params![item_id.clone()], |row| row.get::<_, String>(0))
+                    .map_err(|err| err.to_string())?;
+                let mut existing_set = std::collections::BTreeSet::new();
+                for existing_row in existing_rows {
+                    existing_set.insert(existing_row.map_err(|err| err.to_string())?);
+                }
+
+                let request_set: std::collections::BTreeSet<String> =
+                    request_tag_ids.iter().cloned().collect();
+                let next_set: std::collections::BTreeSet<String> = match tag_mode.as_str() {
+                    "append" => existing_set.union(&request_set).cloned().collect(),
+                    "remove" => existing_set.difference(&request_set).cloned().collect(),
+                    "replace" => request_set.clone(),
+                    _ => existing_set.clone(),
+                };
+                let removed_tags: Vec<String> =
+                    existing_set.difference(&next_set).cloned().collect();
+                let added_tags: Vec<String> = next_set.difference(&existing_set).cloned().collect();
+
+                if next_set != existing_set {
+                    conn.execute("DELETE FROM item_tags WHERE item_id = ?1", params![item_id])
+                        .map_err(|err| err.to_string())?;
+                    for tag_id in &next_set {
+                        conn.execute(
+                            "INSERT OR IGNORE INTO item_tags (item_id, tag_id, source, confidence) VALUES (?1, ?2, 'user', 1)",
+                            params![item_id, tag_id],
+                        )
+                        .map_err(|err| err.to_string())?;
+                    }
+                    result.tags_updated += 1;
+                    touched = true;
+                    for tag_id in removed_tags {
+                        if let Err(err) = queue_tag_review_change(&conn, &item_id, &tag_id, false, now)
+                        {
+                            log::warn!(
+                                "failed to queue tag review change for item {} tag {}: {}",
+                                item_id,
+                                tag_id,
+                                err
+                            );
+                        } else {
+                            result.changes_queued += 1;
+                        }
+                    }
+                    for tag_id in added_tags {
+                        if let Err(err) = queue_tag_review_change(&conn, &item_id, &tag_id, true, now)
+                        {
+                            log::warn!(
+                                "failed to queue tag review change for item {} tag {}: {}",
+                                item_id,
+                                tag_id,
+                                err
+                            );
+                        } else {
+                            result.changes_queued += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        if !touched {
+            continue;
+        }
+        conn.execute(
+            "UPDATE items SET updated_at = ?1 WHERE id = ?2",
+            params![now, item_id],
+        )
+        .map_err(|err| err.to_string())?;
+        conn.execute(
+            "UPDATE issues SET resolved_at = ?1 WHERE item_id = ?2 AND type = 'missing_metadata' AND resolved_at IS NULL",
+            params![now, item_id],
+        )
+        .map_err(|err| err.to_string())?;
+        if let Err(err) = queue_metadata_review_change(&conn, &item_id, now) {
+            log::warn!(
+                "failed to queue metadata review change for batch-updated item {}: {}",
+                item_id,
+                err
+            );
+        } else {
+            result.changes_queued += 1;
+        }
+        result.files_queued += file_changes_for_item;
+        result.items_updated += 1;
+    }
+
+    Ok(result)
 }
 
 fn normalize_title_snapshot(value: &str) -> String {
@@ -4067,11 +5002,17 @@ fn normalize_item_descriptions(app: tauri::AppHandle) -> Result<DescriptionClean
     for (item_id, description) in updates {
         conn.execute(
             "UPDATE items SET description = ?1, updated_at = ?2 WHERE id = ?3",
-            params![description, now, item_id],
+            params![description, now, &item_id],
         )
         .map_err(|err| err.to_string())?;
-        changed += 1;
-
+        if description.is_some() {
+            insert_field_source_with_source(&conn, &item_id, "description", "user", 1.0, now)?;
+        }
+        conn.execute(
+            "UPDATE issues SET resolved_at = ?1 WHERE item_id = ?2 AND type = 'missing_metadata' AND resolved_at IS NULL",
+            params![now, &item_id],
+        )
+        .map_err(|err| err.to_string())?;
         queued += queue_epub_changes_for_item(
             &conn,
             &item_id,
@@ -4080,9 +5021,11 @@ fn normalize_item_descriptions(app: tauri::AppHandle) -> Result<DescriptionClean
                 author: None,
                 isbn: None,
                 description: Some(description.unwrap_or_default()),
+                apply_cover: false,
             },
             now,
         )?;
+        changed += 1;
     }
 
     Ok(DescriptionCleanupResult {
@@ -4147,87 +5090,6 @@ fn strip_dangling_separators(title: &str) -> String {
     let end_re = Regex::new(r"\s*[-:–—|]+\s*$").expect("valid separator regex");
     let without_start = start_re.replace(title, "").to_string();
     normalize_ws(&end_re.replace(&without_start, "").to_string())
-}
-
-fn cleanup_item_isbn_identifiers(
-    conn: &Connection,
-    item_id: &str,
-    now: i64,
-) -> Result<(Option<String>, bool, bool), String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT type, value FROM identifiers \
-       WHERE item_id = ?1 AND type IN ('ISBN10','ISBN13','OTHER','isbn10','isbn13','other')",
-        )
-        .map_err(|err| err.to_string())?;
-    let rows = stmt
-        .query_map(params![item_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(|err| err.to_string())?;
-
-    let mut existing: Vec<(String, String)> = Vec::new();
-    for row in rows {
-        existing.push(row.map_err(|err| err.to_string())?);
-    }
-    if existing.is_empty() {
-        return Ok((None, false, false));
-    }
-
-    let mut normalized_candidates: Vec<String> = existing
-        .iter()
-        .filter_map(|(_, value)| normalize_isbn(value))
-        .collect();
-    normalized_candidates.sort();
-    normalized_candidates.dedup();
-
-    let kept = normalized_candidates
-        .iter()
-        .find(|value| value.len() == 13)
-        .cloned()
-        .or_else(|| normalized_candidates.first().cloned());
-
-    let canonical_unchanged = if let Some(ref kept_value) = kept {
-        if existing.len() != 1 {
-            false
-        } else {
-            let (existing_type, existing_value) = &existing[0];
-            let expected_type = if kept_value.len() == 13 {
-                "ISBN13"
-            } else {
-                "ISBN10"
-            };
-            existing_type.eq_ignore_ascii_case(expected_type)
-                && normalize_isbn(existing_value).as_deref() == Some(kept_value.as_str())
-        }
-    } else {
-        false
-    };
-
-    conn
-    .execute(
-      "DELETE FROM identifiers WHERE item_id = ?1 AND type IN ('ISBN10','ISBN13','OTHER','isbn10','isbn13','other')",
-      params![item_id],
-    )
-    .map_err(|err| err.to_string())?;
-
-    if let Some(ref kept_value) = kept {
-        let isbn_type = if kept_value.len() == 13 {
-            "ISBN13"
-        } else {
-            "ISBN10"
-        };
-        conn
-      .execute(
-        "INSERT INTO identifiers (id, item_id, type, value, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![Uuid::new_v4().to_string(), item_id, isbn_type, kept_value, now],
-      )
-      .map_err(|err| err.to_string())?;
-    }
-
-    let normalized = kept.is_some() && !canonical_unchanged;
-    let removed = kept.is_none();
-    Ok((kept, normalized, removed))
 }
 
 fn normalize_for_compare(value: &str) -> String {
@@ -4314,25 +5176,11 @@ fn batch_cleanup_titles(app: tauri::AppHandle) -> Result<TitleCleanupBatchResult
     let now = chrono::Utc::now().timestamp_millis();
 
     let mut stmt = conn
-        .prepare(
-            "SELECT items.id, items.title, items.published_year, \
-       COALESCE(GROUP_CONCAT(DISTINCT authors.name), '') as authors \
-       FROM items \
-       LEFT JOIN item_authors ON item_authors.item_id = items.id \
-       LEFT JOIN authors ON authors.id = item_authors.author_id \
-       GROUP BY items.id",
-        )
+        .prepare("SELECT id FROM items")
         .map_err(|err| err.to_string())?;
 
     let rows = stmt
-        .query_map(params![], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<i64>>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        })
+        .query_map(params![], |row| row.get::<_, String>(0))
         .map_err(|err| err.to_string())?;
 
     let mut items_updated = 0i64;
@@ -4347,15 +5195,15 @@ fn batch_cleanup_titles(app: tauri::AppHandle) -> Result<TitleCleanupBatchResult
         Regex::new(r"^\s*(.+?)\s+(?:-|–|—|:)\s+(.+)$").expect("valid author split regex");
 
     for row in rows {
-        let (item_id, raw_title, existing_year, raw_authors) =
-            row.map_err(|err| err.to_string())?;
-        let original_title = normalize_ws(raw_title.as_deref().unwrap_or(""));
-
-        let existing_authors: Vec<String> = raw_authors
-            .split(',')
-            .map(|author| normalize_ws(author))
-            .filter(|author| !author.is_empty())
-            .collect();
+        let item_id = row.map_err(|err| err.to_string())?;
+        let current = match get_item_details_from_conn(&conn, &item_id) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let original_title = normalize_ws(current.title.as_deref().unwrap_or(""));
+        let existing_year = current.published_year;
+        let existing_authors = normalize_author_values(&current.authors);
+        let mut next_metadata = current.clone();
 
         let mut cleaned_title = original_title.clone();
         if !cleaned_title.is_empty() {
@@ -4393,107 +5241,146 @@ fn batch_cleanup_titles(app: tauri::AppHandle) -> Result<TitleCleanupBatchResult
             }
         }
 
-        let title_changed = cleaned_title != original_title;
+        let title_changed = !cleaned_title.is_empty() && cleaned_title != original_title;
         let year_changed = existing_year != inferred_year;
         let author_changed = inferred_author.is_some();
-        let (isbn_for_epub, isbn_normalized, isbn_removed) =
-            cleanup_item_isbn_identifiers(&conn, &item_id, now)?;
-        if isbn_normalized {
-            isbns_normalized += 1;
-            insert_field_source_with_source(&conn, &item_id, "isbn", "cleanup", 0.9, now)?;
+
+        let mut isbn_normalized = false;
+        let mut isbn_removed = false;
+        let mut isbn_changed = false;
+        if let Some(raw_isbn) = current
+            .isbn
+            .as_ref()
+            .map(|value| normalize_ws(value))
+            .filter(|value| !value.is_empty())
+        {
+            if let Some(normalized) = normalize_isbn(&raw_isbn) {
+                if normalized != raw_isbn {
+                    isbn_normalized = true;
+                    isbn_changed = true;
+                }
+                next_metadata.isbn = Some(normalized);
+            } else {
+                isbn_removed = true;
+                isbn_changed = true;
+                next_metadata.isbn = None;
+            }
         }
-        if isbn_removed {
-            isbns_removed += 1;
+
+        if title_changed {
+            next_metadata.title = Some(cleaned_title.clone());
         }
-        let isbn_changed = isbn_normalized || isbn_removed;
+        if year_changed {
+            next_metadata.published_year = inferred_year;
+        }
+        if let Some(author_name) = inferred_author.clone() {
+            next_metadata.authors = vec![author_name];
+        }
+
         if !title_changed && !year_changed && !author_changed && !isbn_changed {
             continue;
         }
 
-        if !cleaned_title.is_empty() || year_changed {
-            conn.execute(
-                "UPDATE items SET title = ?1, published_year = ?2, updated_at = ?3 WHERE id = ?4",
-                params![
-                    if cleaned_title.is_empty() {
-                        raw_title
-                    } else {
-                        Some(cleaned_title.clone())
-                    },
-                    inferred_year,
-                    now,
-                    item_id
-                ],
-            )
-            .map_err(|err| err.to_string())?;
-        }
-
         if title_changed {
             titles_cleaned += 1;
-            insert_field_source_with_source(&conn, &item_id, "title", "cleanup", 0.95, now)?;
         }
         if year_changed && inferred_year.is_some() {
             years_inferred += 1;
-            insert_field_source_with_source(
-                &conn,
-                &item_id,
-                "published_year",
-                "cleanup",
-                0.9,
-                now,
-            )?;
+        }
+        if author_changed {
+            authors_inferred += 1;
+        }
+        if isbn_normalized {
+            isbns_normalized += 1;
+        }
+        if isbn_removed {
+            isbns_removed += 1;
         }
 
+        conn.execute(
+            "UPDATE items SET title = ?1, published_year = ?2, updated_at = ?3 WHERE id = ?4",
+            params![
+                next_metadata.title.clone(),
+                next_metadata.published_year,
+                now,
+                &item_id
+            ],
+        )
+        .map_err(|err| err.to_string())?;
+        if title_changed {
+            insert_field_source_with_source(&conn, &item_id, "title", "user", 1.0, now)?;
+        }
+        if year_changed && inferred_year.is_some() {
+            insert_field_source_with_source(&conn, &item_id, "published_year", "user", 1.0, now)?;
+        }
         if let Some(author_name) = inferred_author.clone() {
-            let author_id: Option<String> = conn
-                .query_row(
-                    "SELECT id FROM authors WHERE name = ?1",
-                    params![author_name],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(|err| err.to_string())?;
-            let resolved_author_id = match author_id {
-                Some(id) => id,
-                None => {
-                    let new_id = Uuid::new_v4().to_string();
-                    conn.execute(
-            "INSERT INTO authors (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-            params![new_id, author_name, now, now],
-          )
-          .map_err(|err| err.to_string())?;
-                    new_id
-                }
-            };
             conn.execute(
-                "INSERT OR IGNORE INTO item_authors (item_id, author_id) VALUES (?1, ?2)",
-                params![item_id, resolved_author_id],
+                "DELETE FROM item_authors WHERE item_id = ?1",
+                params![&item_id],
             )
             .map_err(|err| err.to_string())?;
-            authors_inferred += 1;
-            insert_field_source_with_source(&conn, &item_id, "authors", "cleanup", 0.85, now)?;
+            let author_id = get_or_create_author(&conn, &author_name, now)?;
+            conn.execute(
+                "INSERT OR IGNORE INTO item_authors (item_id, author_id) VALUES (?1, ?2)",
+                params![&item_id, author_id],
+            )
+            .map_err(|err| err.to_string())?;
+            insert_field_source_with_source(&conn, &item_id, "authors", "user", 1.0, now)?;
         }
-
+        if isbn_changed {
+            conn.execute(
+                "DELETE FROM identifiers WHERE item_id = ?1 AND type IN ('ISBN10','ISBN13','OTHER','isbn10','isbn13','other')",
+                params![&item_id],
+            )
+            .map_err(|err| err.to_string())?;
+            if let Some(isbn_value) = next_metadata.isbn.as_ref() {
+                let trimmed = isbn_value.trim();
+                if !trimmed.is_empty() {
+                    let normalized = normalize_isbn(trimmed);
+                    let (isbn_type, value) = match normalized {
+                        Some(value) if value.len() == 13 => ("ISBN13", value),
+                        Some(value) if value.len() == 10 => ("ISBN10", value),
+                        Some(value) => ("OTHER", value),
+                        None => ("OTHER", trimmed.to_string()),
+                    };
+                    let identifier_id = uuid::Uuid::new_v4().to_string();
+                    conn.execute(
+                        "INSERT INTO identifiers (id, item_id, type, value, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![identifier_id, &item_id, isbn_type, value, now],
+                    )
+                    .map_err(|err| err.to_string())?;
+                }
+            }
+        }
+        conn.execute(
+            "UPDATE issues SET resolved_at = ?1 WHERE item_id = ?2 AND type = 'missing_metadata' AND resolved_at IS NULL",
+            params![now, &item_id],
+        )
+        .map_err(|err| err.to_string())?;
         files_queued += queue_epub_changes_for_item(
             &conn,
             &item_id,
             &EpubChangeSet {
                 title: if title_changed {
-                    Some(cleaned_title.clone())
+                    next_metadata.title.clone()
                 } else {
                     None
                 },
-                author: inferred_author,
-                isbn: isbn_for_epub,
+                author: if author_changed {
+                    inferred_author.clone()
+                } else {
+                    None
+                },
+                isbn: if isbn_changed {
+                    next_metadata.isbn.clone()
+                } else {
+                    None
+                },
                 description: None,
+                apply_cover: false,
             },
             now,
         )?;
-
-        conn.execute(
-      "UPDATE issues SET resolved_at = ?1 WHERE item_id = ?2 AND type = 'missing_metadata' AND resolved_at IS NULL",
-      params![now, item_id],
-    )
-    .map_err(|err| err.to_string())?;
 
         items_updated += 1;
     }
@@ -6244,13 +7131,12 @@ fn upload_cover(app: tauri::AppHandle, item_id: String, path: String) -> Result<
     save_cover(
         &app, &conn, &item_id, bytes, &extension, now, "manual", None,
     )?;
-    if let Err(err) = embed_latest_cover_into_epub(&conn, &item_id) {
-        log::warn!(
-            "failed to embed manual cover into epub {}: {}",
-            item_id,
-            err
-        );
-    }
+    let queued_cover_changes = queue_epub_cover_changes_for_item(&conn, &item_id, now)?;
+    log::info!(
+        "queued epub cover changes after manual cover upload for {}: {}",
+        item_id,
+        queued_cover_changes
+    );
 
     Ok(())
 }
@@ -6301,13 +7187,12 @@ fn use_embedded_cover(app: tauri::AppHandle, item_id: String) -> Result<(), Stri
     save_cover(
         &app, &conn, &item_id, bytes, &extension, now, "embedded", None,
     )?;
-    if let Err(err) = embed_latest_cover_into_epub(&conn, &item_id) {
-        log::warn!(
-            "failed to re-embed embedded cover into epub {}: {}",
-            item_id,
-            err
-        );
-    }
+    let queued_cover_changes = queue_epub_cover_changes_for_item(&conn, &item_id, now)?;
+    log::info!(
+        "queued epub cover changes after embedded cover update for {}: {}",
+        item_id,
+        queued_cover_changes
+    );
 
     Ok(())
 }
@@ -6330,13 +7215,12 @@ fn use_embedded_cover_from_bytes(
     save_cover(
         &app, &conn, &item_id, bytes, extension, now, "embedded", None,
     )?;
-    if let Err(err) = embed_latest_cover_into_epub(&conn, &item_id) {
-        log::warn!(
-            "failed to embed selected cover into epub {}: {}",
-            item_id,
-            err
-        );
-    }
+    let queued_cover_changes = queue_epub_cover_changes_for_item(&conn, &item_id, now)?;
+    log::info!(
+        "queued epub cover changes after embedded cover selection for {}: {}",
+        item_id,
+        queued_cover_changes
+    );
     Ok(())
 }
 
@@ -6638,7 +7522,7 @@ fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
         "0008_library_query_indexes",
         MIGRATION_LIBRARY_QUERY_INDEXES_SQL,
     )?;
-  apply_migration(
+    apply_migration(
     &conn,
     "0009_metadata_lookup_settings",
     MIGRATION_METADATA_LOOKUP_SETTINGS_SQL,
@@ -7760,41 +8644,6 @@ fn save_cover(
     Ok(())
 }
 
-fn embed_latest_cover_into_epub(conn: &Connection, item_id: &str) -> Result<(), String> {
-    let epub_path: Option<String> = conn
-    .query_row(
-      "SELECT path FROM files WHERE item_id = ?1 AND extension = '.epub' AND status = 'active' LIMIT 1",
-      params![item_id],
-      |row| row.get(0),
-    )
-    .optional()
-    .map_err(|err| err.to_string())?;
-    let Some(path) = epub_path else {
-        return Ok(());
-    };
-    let cover_path: Option<String> = conn
-        .query_row(
-            "SELECT local_path FROM covers WHERE item_id = ?1 ORDER BY created_at DESC LIMIT 1",
-            params![item_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|err| err.to_string())?;
-    let Some(cover_path) = cover_path else {
-        return Ok(());
-    };
-    let cover_bytes = std::fs::read(&cover_path).map_err(|err| err.to_string())?;
-    let extension = std::path::Path::new(&cover_path)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("png");
-    let epub_file = std::path::Path::new(&path);
-    if epub_file.exists() {
-        crate::parser::epub::write_epub_cover(epub_file, &cover_bytes, extension)?;
-    }
-    Ok(())
-}
-
 fn has_cover(conn: &Connection, item_id: &str) -> Result<bool, String> {
     let existing: Option<String> = conn
         .query_row(
@@ -7861,26 +8710,6 @@ fn fetch_cover_from_url(
     )?;
     log::info!("cover saved successfully for item {}", item_id);
 
-    // Also embed the cover into the EPUB file itself
-    let epub_path: Option<String> = conn
-    .query_row(
-      "SELECT path FROM files WHERE item_id = ?1 AND extension = '.epub' AND status = 'active' LIMIT 1",
-      params![item_id],
-      |row| row.get(0),
-    )
-    .optional()
-    .map_err(|err| err.to_string())?;
-
-    if let Some(path) = epub_path {
-        let epub_file = std::path::Path::new(&path);
-        if epub_file.exists() {
-            match crate::parser::epub::write_epub_cover(epub_file, &bytes, extension) {
-                Ok(()) => log::info!("embedded cover into EPUB: {}", path),
-                Err(err) => log::warn!("failed to embed cover into EPUB {}: {}", path, err),
-            }
-        }
-    }
-
     Ok(true)
 }
 
@@ -7890,7 +8719,24 @@ fn fetch_cover_fallback(
     item_id: &str,
     now: i64,
 ) -> Result<bool, String> {
-    if has_cover(conn, item_id)? {
+    fetch_cover_fallback_with_mode(app, conn, item_id, now, false)
+}
+
+fn fetch_cover_fallback_with_mode(
+    app: &tauri::AppHandle,
+    conn: &Connection,
+    item_id: &str,
+    now: i64,
+    replace_existing: bool,
+) -> Result<bool, String> {
+    let item_has_cover = has_cover(conn, item_id)?;
+    if replace_existing && item_has_cover {
+        log::info!(
+            "cover fallback allowed to replace existing cover for item {}",
+            item_id
+        );
+    }
+    if !replace_existing && item_has_cover {
         log::info!(
             "cover fallback skipped (already has cover) for item {}",
             item_id
@@ -7965,39 +8811,14 @@ fn fetch_cover_fallback(
         Some(&url),
     )?;
 
-    // Also embed the cover into the EPUB file itself
-    let epub_path: Option<String> = conn
-    .query_row(
-      "SELECT path FROM files WHERE item_id = ?1 AND extension = '.epub' AND status = 'active' LIMIT 1",
-      params![item_id],
-      |row| row.get(0),
-    )
-    .optional()
-    .map_err(|err| err.to_string())?;
-
-    if let Some(path) = epub_path {
-        let epub_file = std::path::Path::new(&path);
-        if epub_file.exists() {
-            match crate::parser::epub::write_epub_cover(epub_file, &bytes, extension) {
-                Ok(()) => log::info!("embedded cover into EPUB: {}", path),
-                Err(err) => log::warn!("failed to embed cover into EPUB {}: {}", path, err),
-            }
-        }
-    }
-
     Ok(true)
 }
 
 fn fetch_openlibrary_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
     let url = format!("https://openlibrary.org/isbn/{}.json", isbn);
-    let response = reqwest::blocking::get(url);
-    let response = match response {
-        Ok(value) => value,
-        Err(_) => return vec![],
-    };
-    let data: serde_json::Value = match response.json() {
-        Ok(value) => value,
-        Err(_) => return vec![],
+    let data = match fetch_json_with_retry(&url) {
+        Some(value) => value,
+        None => return vec![],
     };
     let title = data
         .get("title")
@@ -8010,15 +8831,12 @@ fn fetch_openlibrary_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
     let mut authors = Vec::new();
     if let Some(author_refs) = data.get("authors").and_then(|value| value.as_array()) {
         for author_ref in author_refs.iter().take(3) {
-            if let Some(key) = author_ref.get("key").and_then(|value| value.as_str()) {
-                if let Ok(resp) =
-                    reqwest::blocking::get(format!("https://openlibrary.org{}.json", key))
+                if let Some(key) = author_ref.get("key").and_then(|value| value.as_str()) {
+                if let Some(author_data) =
+                    fetch_json_with_retry(&format!("https://openlibrary.org{}.json", key))
                 {
-                    if let Ok(author_data) = resp.json::<serde_json::Value>() {
-                        if let Some(name) = author_data.get("name").and_then(|value| value.as_str())
-                        {
-                            authors.push(name.to_string());
-                        }
+                    if let Some(name) = author_data.get("name").and_then(|value| value.as_str()) {
+                        authors.push(name.to_string());
                     }
                 }
             }
@@ -8116,14 +8934,9 @@ fn fetch_google_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
         "https://www.googleapis.com/books/v1/volumes?q=isbn:{}",
         isbn
     );
-    let response = reqwest::blocking::get(url);
-    let response = match response {
-        Ok(value) => value,
-        Err(_) => return vec![],
-    };
-    let data: serde_json::Value = match response.json() {
-        Ok(value) => value,
-        Err(_) => return vec![],
+    let data = match fetch_json_with_retry(&url) {
+        Some(value) => value,
+        None => return vec![],
     };
     let items = data
         .get("items")
@@ -8259,12 +9072,14 @@ fn fetch_apple_books_search(
 }
 
 fn fetch_json_with_retry(url: &str) -> Option<serde_json::Value> {
+    const METADATA_HTTP_TIMEOUT_SECS: u64 = 6;
+    const METADATA_HTTP_MAX_RETRIES: u64 = 1;
     let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(METADATA_HTTP_TIMEOUT_SECS))
         .build()
         .ok()?;
 
-    for attempt in 0..=2u64 {
+    for attempt in 0..=METADATA_HTTP_MAX_RETRIES {
         let response = client
             .get(url)
             .header(reqwest::header::ACCEPT, "application/json")
@@ -8273,7 +9088,7 @@ fn fetch_json_with_retry(url: &str) -> Option<serde_json::Value> {
         let response = match response {
             Ok(value) => value,
             Err(_) => {
-                if attempt < 2 {
+                if attempt < METADATA_HTTP_MAX_RETRIES {
                     std::thread::sleep(Duration::from_millis(350 * (attempt + 1)));
                     continue;
                 }
@@ -8286,7 +9101,7 @@ fn fetch_json_with_retry(url: &str) -> Option<serde_json::Value> {
             return response.json::<serde_json::Value>().ok();
         }
 
-        if (status.as_u16() == 429 || status.is_server_error()) && attempt < 2 {
+        if (status.as_u16() == 429 || status.is_server_error()) && attempt < METADATA_HTTP_MAX_RETRIES {
             let retry_after_ms = response
                 .headers()
                 .get(reqwest::header::RETRY_AFTER)
@@ -8302,6 +9117,50 @@ fn fetch_json_with_retry(url: &str) -> Option<serde_json::Value> {
     }
 
     None
+}
+
+fn fetch_text_with_retry(url: &str) -> Result<String, String> {
+    const METADATA_HTTP_TIMEOUT_SECS: u64 = 6;
+    const METADATA_HTTP_MAX_RETRIES: u64 = 1;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(METADATA_HTTP_TIMEOUT_SECS))
+        .build()
+        .map_err(|err| err.to_string())?;
+
+    for attempt in 0..=METADATA_HTTP_MAX_RETRIES {
+        let response = client.get(url).send();
+        let response = match response {
+            Ok(value) => value,
+            Err(err) => {
+                if attempt < METADATA_HTTP_MAX_RETRIES {
+                    std::thread::sleep(Duration::from_millis(350 * (attempt + 1)));
+                    continue;
+                }
+                return Err(err.to_string());
+            }
+        };
+
+        let status = response.status();
+        if status.is_success() {
+            return response.text().map_err(|err| err.to_string());
+        }
+
+        if (status.as_u16() == 429 || status.is_server_error()) && attempt < METADATA_HTTP_MAX_RETRIES {
+            let retry_after_ms = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok())
+                .map(|value| value * 1000)
+                .unwrap_or(350 * (attempt + 1));
+            std::thread::sleep(Duration::from_millis(retry_after_ms.min(4_000)));
+            continue;
+        }
+
+        return Err(format!("HTTP {}", status));
+    }
+
+    Err("Request failed".to_string())
 }
 
 fn parse_apple_books_candidates(
@@ -8810,7 +9669,7 @@ fn fetch_openbd_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {
         "https://api.openbd.jp/v1/get?isbn={}",
         urlencoding::encode(&normalized)
     );
-    let response = match reqwest::blocking::get(url).and_then(|value| value.text()) {
+    let response = match fetch_text_with_retry(&url) {
         Ok(value) => value,
         Err(_) => return vec![],
     };
@@ -8988,7 +9847,7 @@ fn fetch_isfdb_isbn(isbn: &str, endpoint: Option<&str>) -> Vec<EnrichmentCandida
         log::info!("[metadata-debug] ISFDB ISBN lookup start isbn={} endpoint={}", isbn, base);
     }
     let url = format!("{}?arg={}&type=ISBN", base, urlencoding::encode(isbn),);
-    let body = match reqwest::blocking::get(url).and_then(|response| response.text()) {
+    let body = match fetch_text_with_retry(&url) {
         Ok(value) => value,
         Err(_) => return vec![],
     };
@@ -9038,7 +9897,7 @@ fn fetch_isfdb_search(
             base
         );
     }
-    let body = match reqwest::blocking::get(url).and_then(|response| response.text()) {
+    let body = match fetch_text_with_retry(&url) {
         Ok(value) => value,
         Err(_) => return vec![],
     };
@@ -9329,14 +10188,9 @@ fn fetch_openlibrary_search(title: &str, author: Option<&str>) -> Vec<Enrichment
     if let Some(author) = author {
         url.push_str(&format!("&author={}", urlencoding::encode(author)));
     }
-    let response = reqwest::blocking::get(url);
-    let response = match response {
-        Ok(value) => value,
-        Err(_) => return vec![],
-    };
-    let data: serde_json::Value = match response.json() {
-        Ok(value) => value,
-        Err(_) => return vec![],
+    let data = match fetch_json_with_retry(&url) {
+        Some(value) => value,
+        None => return vec![],
     };
     let docs = data
         .get("docs")
@@ -9442,14 +10296,9 @@ fn fetch_google_search(title: &str, author: Option<&str>) -> Vec<EnrichmentCandi
         "https://www.googleapis.com/books/v1/volumes?q={}",
         urlencoding::encode(&terms.join("+"))
     );
-    let response = reqwest::blocking::get(url);
-    let response = match response {
-        Ok(value) => value,
-        Err(_) => return vec![],
-    };
-    let data: serde_json::Value = match response.json() {
-        Ok(value) => value,
-        Err(_) => return vec![],
+    let data = match fetch_json_with_retry(&url) {
+        Some(value) => value,
+        None => return vec![],
     };
     let items = data
         .get("items")
@@ -9864,6 +10713,7 @@ fn queue_epub_changes(
         author: candidate.authors.first().cloned(),
         isbn,
         description: None,
+        apply_cover: false,
     };
     queue_epub_changes_for_item(conn, item_id, &changes, now)
 }
@@ -9877,7 +10727,8 @@ fn queue_epub_changes_for_item(
     let has_changes = changes.title.is_some()
         || changes.author.is_some()
         || changes.isbn.is_some()
-        || changes.description.is_some();
+        || changes.description.is_some()
+        || changes.apply_cover;
     if !has_changes {
         return Ok(0);
     }
@@ -9910,6 +10761,47 @@ fn queue_epub_changes_for_item(
       params![change_id, file_id, path, changes_json, now],
     )
     .map_err(|err| err.to_string())?;
+        created += 1;
+    }
+
+    Ok(created)
+}
+
+fn queue_epub_cover_changes_for_item(
+    conn: &Connection,
+    item_id: &str,
+    now: i64,
+) -> Result<i64, String> {
+    if !has_cover(conn, item_id)? {
+        return Ok(0);
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, path FROM files WHERE item_id = ?1 AND status = 'active' AND LOWER(extension) IN ('epub', '.epub')",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(params![item_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|err| err.to_string())?;
+
+    let mut created = 0i64;
+    for row in rows {
+        let (file_id, path) = row.map_err(|err| err.to_string())?;
+        conn.execute(
+            "DELETE FROM pending_changes WHERE file_id = ?1 AND type = 'epub_cover' AND status = 'pending'",
+            params![file_id],
+        )
+        .map_err(|err| err.to_string())?;
+        let change_id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO pending_changes (id, file_id, type, from_path, to_path, changes_json, status, created_at) \
+             VALUES (?1, ?2, 'epub_cover', ?3, NULL, NULL, 'pending', ?4)",
+            params![change_id, file_id, path, now],
+        )
+        .map_err(|err| err.to_string())?;
         created += 1;
     }
 
@@ -10774,6 +11666,7 @@ pub fn run() {
             search_candidates,
             apply_fix_candidate,
             save_item_metadata,
+            apply_batch_metadata_update,
             get_title_cleanup_ignores,
             set_title_cleanup_ignored,
             enrich_all,

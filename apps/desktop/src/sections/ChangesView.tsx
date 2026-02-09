@@ -57,6 +57,55 @@ function parseChangesJson(changesJson: string | null | undefined): Record<string
   }
 }
 
+function extractMetadataPayload(
+  changeType: string,
+  parsed: Record<string, unknown> | null
+): Record<string, unknown> | null {
+  if (!parsed) return null;
+  if (changeType === "item_metadata") {
+    const metadata = parsed.metadata;
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+    return metadata as Record<string, unknown>;
+  }
+  if (changeType === "fix_candidate") {
+    const candidate = parsed.candidate;
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+    const candidateData = candidate as Record<string, unknown>;
+    const identifiers = Array.isArray(candidateData.identifiers)
+      ? candidateData.identifiers
+          .map((value) => String(value ?? "").trim())
+          .filter(Boolean)
+      : [];
+    const firstIsbn = identifiers.find((value) => value.length === 10 || value.length === 13) ?? null;
+    return {
+      title: candidateData.title,
+      authors: candidateData.authors,
+      isbn: firstIsbn,
+      description: candidateData.description,
+      language: candidateData.language,
+      published_year: candidateData.published_year,
+    };
+  }
+  if (changeType === "epub_meta") {
+    return parsed;
+  }
+  return null;
+}
+
+function changeTypeLabel(changeType: string, t: (key: string) => string): string {
+  if (changeType === "rename") return t("changes.renameFile");
+  if (changeType === "delete") return t("changes.deleteFile");
+  if (changeType === "epub_meta") return t("changes.updateEpubMetadata");
+  if (changeType === "epub_cover") return t("changes.updateEpubCover");
+  if (changeType === "item_metadata") return t("changes.updateItemMetadata");
+  if (changeType === "fix_candidate") return t("changes.applyMetadataMatch");
+  if (changeType === "item_tag_add") return t("changes.addTagToBook");
+  if (changeType === "item_tag_remove") return t("changes.removeTagFromBook");
+  if (changeType === "relink_missing") return t("changes.relinkMissingFile");
+  if (changeType === "deactivate_missing") return t("changes.removeMissingFile");
+  return t("changes.updateMetadata");
+}
+
 function formatMetadataValue(value: unknown, t: (key: string) => string): string {
   if (value === null || value === undefined || value === "") return t("changes.valueCleared");
   if (Array.isArray(value)) {
@@ -175,12 +224,17 @@ export function ChangesView({
           pendingChanges.map((change) => {
             const isApplying = applyingChangeIds.has(change.id);
             const parsedChanges = parseChangesJson(change.changes_json);
+            const metadataPayload = extractMetadataPayload(change.change_type, parsedChanges);
+            const isMetadataChange =
+              change.change_type === "epub_meta" ||
+              change.change_type === "item_metadata" ||
+              change.change_type === "fix_candidate";
             const shownMetadataFields = METADATA_FIELDS.filter(({ key }, index, fields) => {
-              if (!parsedChanges) return false;
-              if (!(key in parsedChanges)) return false;
-              if (key === "author" && "authors" in parsedChanges) return false;
-              if (key === "published_year" && "publishedYear" in parsedChanges) return false;
-              if (key === "series_index" && "seriesIndex" in parsedChanges) return false;
+              if (!metadataPayload) return false;
+              if (!(key in metadataPayload)) return false;
+              if (key === "author" && "authors" in metadataPayload) return false;
+              if (key === "published_year" && "publishedYear" in metadataPayload) return false;
+              if (key === "series_index" && "seriesIndex" in metadataPayload) return false;
               return fields.findIndex((field) => field.key === key) === index;
             });
             const hasMetadataDetails = shownMetadataFields.length > 0;
@@ -207,11 +261,7 @@ export function ChangesView({
                 </label>
                 <div className="flex flex-1 flex-col gap-1">
                   <div className="text-[13px] font-semibold">
-                    {change.change_type === "rename"
-                      ? t("changes.renameFile")
-                      : change.change_type === "delete"
-                        ? t("changes.deleteFile")
-                        : t("changes.updateEpubMetadata")}
+                    {changeTypeLabel(change.change_type, t)}
                   </div>
                   <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
                     {isApplying
@@ -248,13 +298,13 @@ export function ChangesView({
                               {t(field.labelKey)}
                             </div>
                             <div className="mt-1 text-xs text-[var(--app-ink)]">
-                              {formatMetadataValue(parsedChanges?.[field.key], t)}
+                              {formatMetadataValue(metadataPayload?.[field.key], t)}
                             </div>
                           </div>
                         ))}
                       </div>
                     </div>
-                  ) : change.changes_json ? (
+                  ) : isMetadataChange && change.changes_json ? (
                     <div className="text-xs text-[var(--app-ink-muted)]">
                       {t("changes.unreadableMetadata")}
                     </div>

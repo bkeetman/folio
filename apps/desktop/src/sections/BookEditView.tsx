@@ -40,6 +40,39 @@ type BookEditViewProps = {
     embedded?: boolean;
 };
 
+function isLikelyIsbn(value: string): boolean {
+    const normalized = value.replace(/[^0-9Xx]/g, "");
+    return normalized.length === 10 || normalized.length === 13;
+}
+
+function buildMetadataSearchQuery(metadata: ItemMetadata): string {
+    const rawIdentifier = metadata.isbn?.trim() ?? "";
+    const title = metadata.title?.trim() ?? "";
+    const primaryAuthor = metadata.authors.find((author) => author.trim().length > 0)?.trim() ?? "";
+    if (rawIdentifier && isLikelyIsbn(rawIdentifier)) return rawIdentifier;
+    if (title && primaryAuthor) {
+        return `${title} by ${primaryAuthor}`;
+    }
+    return title || primaryAuthor || rawIdentifier;
+}
+
+function getErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    if (typeof error === "string") return error;
+    return "";
+}
+
+function isExpectedEmbeddedCoverMiss(error: unknown): boolean {
+    const message = getErrorMessage(error).toLowerCase();
+    if (!message) return false;
+    return (
+        message.includes("no epub file found") ||
+        message.includes("no embedded cover found") ||
+        message.includes("unsupported") ||
+        message.includes("not supported")
+    );
+}
+
 export function BookEditView({
     selectedItemId,
     libraryItems,
@@ -76,7 +109,9 @@ export function BookEditView({
     const [infoMessage, setInfoMessage] = useState<string | null>(null);
     const [embeddedCandidates, setEmbeddedCandidates] = useState<EmbeddedCoverCandidate[]>([]);
     const [selectedEmbeddedIndex, setSelectedEmbeddedIndex] = useState(0);
+    const [embeddedSelectionDirty, setEmbeddedSelectionDirty] = useState(false);
     const [selectedCategoryToAdd, setSelectedCategoryToAdd] = useState("");
+    const [openSearchMode, setOpenSearchMode] = useState(false);
     const [formData, setFormData] = useState<ItemMetadata>({
         title: "",
         authors: [],
@@ -95,9 +130,10 @@ export function BookEditView({
     const availableCategoryOptions = PREDEFINED_BOOK_CATEGORIES.filter(
         (category) => !visibleGenres.some((genre) => genre.localeCompare(category, undefined, { sensitivity: "base" }) === 0),
     );
+    const metadataSearchQuery = buildMetadataSearchQuery(formData);
 
     const selectedItem = libraryItems.find((item) => item.id === selectedItemId);
-    const displayCoverUrl = coverUrl ?? localCoverUrl;
+    const displayCoverUrl = localCoverUrl ?? coverUrl;
     const activeItemIdRef = useRef<string | null>(selectedItemId);
     const embeddedPreviewUrlRef = useRef<string | null>(null);
     const localCoverUrlRef = useRef<string | null>(null);
@@ -106,8 +142,10 @@ export function BookEditView({
         activeItemIdRef.current = selectedItemId;
         setError(null);
         setInfoMessage(null);
+        setOpenSearchMode(false);
         setEmbeddedCandidates([]);
         setSelectedEmbeddedIndex(0);
+        setEmbeddedSelectionDirty(false);
         setEmbeddedPreviewUrl((previous) => {
             if (previous) URL.revokeObjectURL(previous);
             return null;
@@ -158,9 +196,11 @@ export function BookEditView({
                     setIsLoading(false);
                 });
 
-            // Ensure cover is loaded
-            if (selectedItemId && !coverUrl) {
-                void onFetchCover(selectedItemId);
+            // Ensure the latest saved cover is loaded after metadata/candidate updates.
+            if (selectedItemId) {
+                if (!coverUrl) {
+                    void onFetchCover(selectedItemId);
+                }
                 void loadLocalCoverBlob(selectedItemId);
             }
         }
@@ -193,12 +233,56 @@ export function BookEditView({
         };
     }, [t]);
 
+    useEffect(() => {
+        if (openSearchMode || !selectedItemId || isLoading) return;
+        if (metadataSearchQuery !== matchQuery) {
+            onMatchQueryChange(metadataSearchQuery);
+        }
+    }, [
+        openSearchMode,
+        selectedItemId,
+        isLoading,
+        metadataSearchQuery,
+        matchQuery,
+        onMatchQueryChange,
+    ]);
+
+    const handleToggleOpenSearch = useCallback(() => {
+        setOpenSearchMode((current) => {
+            const next = !current;
+            if (!next && metadataSearchQuery !== matchQuery) {
+                onMatchQueryChange(metadataSearchQuery);
+            }
+            return next;
+        });
+    }, [metadataSearchQuery, matchQuery, onMatchQueryChange]);
+
+    const handleUseCurrentMetadataQuery = useCallback(() => {
+        if (metadataSearchQuery !== matchQuery) {
+            onMatchQueryChange(metadataSearchQuery);
+        }
+    }, [metadataSearchQuery, matchQuery, onMatchQueryChange]);
+
     const handleSave = async () => {
         if (!selectedItemId) return;
         setIsSaving(true);
         setError(null);
         setInfoMessage(null);
         try {
+            if (embeddedSelectionDirty) {
+                const selected = embeddedCandidates[selectedEmbeddedIndex];
+                if (selected) {
+                    await invoke("use_embedded_cover_from_bytes", {
+                        itemId: selectedItemId,
+                        bytes: selected.bytes,
+                        mime: selected.mime,
+                    });
+                    onClearCover(selectedItemId);
+                    await onFetchCover(selectedItemId, true);
+                    await loadLocalCoverBlob(selectedItemId);
+                }
+                setEmbeddedSelectionDirty(false);
+            }
             if (onSaveMetadata) {
                 await onSaveMetadata(selectedItemId, formData);
             } else {
@@ -277,6 +361,9 @@ export function BookEditView({
                 onClearCover(selectedItemId);
                 await onFetchCover(selectedItemId, true);
                 await loadLocalCoverBlob(selectedItemId);
+                if (onItemUpdate) {
+                    await onItemUpdate();
+                }
                 setInfoMessage(t("bookEdit.coverUpdated"));
                 setIsUploadingCover(false);
             }
@@ -311,6 +398,10 @@ export function BookEditView({
                 setInfoMessage(null);
                 return;
             }
+            if (onItemUpdate) {
+                await onItemUpdate();
+            }
+            setEmbeddedSelectionDirty(false);
             setInfoMessage(t("bookEdit.embeddedCoverApplied"));
         } catch (err) {
             console.error("Failed to use embedded cover", err);
@@ -333,6 +424,7 @@ export function BookEditView({
             if (!result.length) {
                 setEmbeddedCandidates([]);
                 setSelectedEmbeddedIndex(0);
+                setEmbeddedSelectionDirty(false);
                 setEmbeddedPreviewUrl((previous) => {
                     if (previous) URL.revokeObjectURL(previous);
                     return null;
@@ -341,6 +433,7 @@ export function BookEditView({
             }
             setEmbeddedCandidates(result);
             setSelectedEmbeddedIndex(0);
+            setEmbeddedSelectionDirty(false);
             const blob = new Blob([new Uint8Array(result[0].bytes)], { type: result[0].mime });
             const url = URL.createObjectURL(blob);
             setEmbeddedPreviewUrl((previous) => {
@@ -348,7 +441,6 @@ export function BookEditView({
                 return url;
             });
         } catch (err) {
-            console.error("Failed to load embedded cover preview", err);
             if (activeItemIdRef.current === itemId) {
                 setEmbeddedCandidates([]);
                 setSelectedEmbeddedIndex(0);
@@ -356,7 +448,12 @@ export function BookEditView({
                     if (previous) URL.revokeObjectURL(previous);
                     return null;
                 });
-                setError(err instanceof Error ? err.message : t("bookEdit.failedLoadEmbeddedPreview"));
+                if (isExpectedEmbeddedCoverMiss(err)) {
+                    setError(null);
+                } else {
+                    console.error("Failed to load embedded cover preview", err);
+                    setError(err instanceof Error ? err.message : t("bookEdit.failedLoadEmbeddedPreview"));
+                }
             }
         } finally {
             if (activeItemIdRef.current === itemId) {
@@ -375,6 +472,7 @@ export function BookEditView({
             return url;
         });
         setSelectedEmbeddedIndex(index);
+        setEmbeddedSelectionDirty(true);
     };
 
     useEffect(() => {
@@ -793,17 +891,33 @@ export function BookEditView({
                                 : "flex flex-col rounded-lg border border-[var(--app-border-soft)] bg-app-panel p-4 shadow-none"
                         }
                     >
-                        <div className="mb-3 flex items-center justify-between">
+                        <div className="mb-3 flex items-center justify-between gap-2">
                             <h2 className="text-xs font-semibold uppercase tracking-wider text-app-ink-muted">
                                 {t("bookEdit.matchMetadata")}
                             </h2>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleToggleOpenSearch}
+                                className={
+                                    openSearchMode
+                                        ? "h-7 border-[var(--app-accent)] bg-[rgba(201,122,58,0.12)] px-2 text-[11px] text-[var(--app-accent-strong)] hover:bg-[rgba(201,122,58,0.2)]"
+                                        : "h-7 border-[var(--app-border-soft)] bg-[var(--app-bg-secondary)] px-2 text-[11px] text-app-ink-muted hover:text-app-ink"
+                                }
+                            >
+                                {t("bookEdit.openSearch")}
+                            </Button>
                         </div>
                         <div className="flex gap-2">
                             <Input
                                 value={matchQuery}
-                                onChange={(e) => onMatchQueryChange(e.target.value)}
+                                onChange={(e) => {
+                                    if (!openSearchMode) return;
+                                    onMatchQueryChange(e.target.value);
+                                }}
                                 placeholder={t("bookEdit.searchTitleOrAuthor")}
                                 className="flex-1 text-sm"
+                                readOnly={!openSearchMode}
                                 onKeyDown={(e) => {
                                     if (e.key === "Enter") {
                                         onMatchSearch(matchQuery);
@@ -818,6 +932,16 @@ export function BookEditView({
                             >
                                 {matchLoading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
                             </Button>
+                        </div>
+                        <div className="mt-1 flex items-center justify-end">
+                            <button
+                                type="button"
+                                onClick={handleUseCurrentMetadataQuery}
+                                disabled={!metadataSearchQuery}
+                                className="text-[11px] text-app-ink-muted transition hover:text-[var(--app-accent-strong)] disabled:opacity-50"
+                            >
+                                {t("bookEdit.useCurrentMetadata")}
+                            </button>
                         </div>
 
                         <div className="mt-4 flex-1 overflow-y-auto">

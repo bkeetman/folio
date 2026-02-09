@@ -24,6 +24,9 @@ export function MissingFilesView({ items, onRelink, onRemove, onRemoveAll, onRes
             <p className="text-sm text-app-ink-muted">
               These items are in your library but the file path no longer exists.
             </p>
+            <p className="text-xs text-app-ink-muted mt-1">
+              Actions on this page are applied immediately and do not appear in Changes.
+            </p>
             {libraryRoot ? (
               <p className="text-xs text-app-ink-muted mt-1">
                 Library root: {libraryRoot}

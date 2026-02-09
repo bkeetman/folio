@@ -13,7 +13,6 @@ type OrganizerViewProps = {
     organizePlan: OrganizePlan | null;
     handlePlanOrganize: () => void;
     handleApplyOrganize: () => void;
-    handleQueueOrganize: () => void;
     organizeStatus: string | null;
     organizeProgress: OperationProgress | null;
     organizing: boolean;
@@ -29,7 +28,6 @@ export function OrganizerView({
     organizePlan,
     handlePlanOrganize,
     handleApplyOrganize,
-    handleQueueOrganize,
     organizeStatus,
     organizeProgress,
     organizing,
@@ -127,13 +125,6 @@ export function OrganizerView({
                         )}
                     </Button>
                     <Button
-                        variant="outline"
-                        onClick={handleQueueOrganize}
-                        disabled={actionableEntries.length === 0 || organizing}
-                    >
-                        Queue Changes
-                    </Button>
-                    <Button
                         variant="primary"
                         onClick={handleApplyOrganize}
                         disabled={actionableEntries.length === 0 || organizing}
@@ -142,10 +133,10 @@ export function OrganizerView({
                         {organizing ? (
                             <span className="flex items-center gap-2">
                                 <Loader2 size={14} className="animate-spin" />
-                                Applying...
+                                Queueing...
                             </span>
                         ) : (
-                            "Apply Changes"
+                            "Queue for Review"
                         )}
                     </Button>
                 </div>

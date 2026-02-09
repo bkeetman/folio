@@ -8,7 +8,9 @@ import { BookCard } from "./BookCard";
 type LibraryGridProps = {
   books: BookDisplay[];
   selectedItemId: string | null;
+  selectedBatchItemIds: Set<string>;
   onSelect: (id: string) => void;
+  onToggleBatchSelect: (id: string) => void;
   fetchCoverOverride: (id: string) => void;
   clearCoverOverride: (id: string) => void;
   onVisibleItemIdsChange: (ids: string[]) => void;
@@ -25,7 +27,9 @@ const GRID_CARD_META_HEIGHT = 126;
 export function LibraryGrid({
   books,
   selectedItemId,
+  selectedBatchItemIds,
   onSelect,
+  onToggleBatchSelect,
   fetchCoverOverride,
   clearCoverOverride,
   onVisibleItemIdsChange,
@@ -144,7 +148,9 @@ export function LibraryGrid({
                 <BookCard
                   book={book}
                   selected={selectedItemId === book.id}
+                  selectedForBatch={selectedBatchItemIds.has(book.id)}
                   onSelect={onSelect}
+                  onToggleBatchSelect={onToggleBatchSelect}
                   fetchCoverOverride={fetchCoverOverride}
                   clearCoverOverride={clearCoverOverride}
                   viewMode="list"
@@ -182,7 +188,9 @@ export function LibraryGrid({
                   key={book.id}
                   book={book}
                   selected={selectedItemId === book.id}
+                  selectedForBatch={selectedBatchItemIds.has(book.id)}
                   onSelect={onSelect}
+                  onToggleBatchSelect={onToggleBatchSelect}
                   fetchCoverOverride={fetchCoverOverride}
                   clearCoverOverride={clearCoverOverride}
                   viewMode="grid"

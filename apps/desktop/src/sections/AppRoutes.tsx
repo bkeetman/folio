@@ -17,6 +17,7 @@ import { TagsView } from "./TagsView";
 import type { FilteredBook } from "../hooks/useLibrarySelectors";
 import type { ThemeMode } from "../hooks/useTheme";
 import type {
+  BatchMetadataUpdatePayload,
   DuplicateGroup,
   EnrichmentCandidate,
   FixFilter,
@@ -50,7 +51,12 @@ type AppRoutesProps = {
   sortedBooks: FilteredBook[];
   allBooks: FilteredBook[];
   selectedItemId: string | null;
+  selectedBatchItemIds: Set<string>;
   setSelectedItemId: Dispatch<SetStateAction<string | null>>;
+  onToggleBatchSelect: (id: string) => void;
+  onSetBatchSelection: (ids: string[]) => void;
+  onClearBatchSelection: () => void;
+  onApplyBatchMetadata: (payload: BatchMetadataUpdatePayload) => Promise<void>;
   libraryFilter: LibraryFilter;
   setLibraryFilter: Dispatch<SetStateAction<LibraryFilter>>;
   librarySort: LibrarySort;
@@ -87,9 +93,7 @@ type AppRoutesProps = {
   setDuplicateKeepSelection: Dispatch<SetStateAction<Record<string, string>>>;
   handleResolveDuplicate: (group: DuplicateGroup, keepFileId: string) => void | Promise<void>;
   handleAutoSelectAll: (groups: DuplicateGroup[]) => void;
-  handleResolveAll: (groups: DuplicateGroup[], applyNow: boolean) => void | Promise<void>;
-  duplicateApplyNow: boolean;
-  setDuplicateApplyNow: Dispatch<SetStateAction<boolean>>;
+  handleResolveAll: (groups: DuplicateGroup[]) => void | Promise<void>;
   allFixItems: LibraryItem[];
   fixIssues: InboxItem[];
   selectedFixItemId: string | null;
@@ -135,7 +139,6 @@ type AppRoutesProps = {
   organizePlan: OrganizePlan | null;
   handlePlanOrganize: () => void | Promise<OrganizePlan | null>;
   handleApplyOrganize: () => void | Promise<void>;
-  handleQueueOrganize: () => void | Promise<void>;
   organizeStatus: string | null;
   organizeProgress: OperationProgress | null;
   organizing: boolean;
@@ -205,7 +208,12 @@ export function AppRoutes(props: AppRoutesProps) {
     sortedBooks,
     allBooks,
     selectedItemId,
+    selectedBatchItemIds,
     setSelectedItemId,
+    onToggleBatchSelect,
+    onSetBatchSelection,
+    onClearBatchSelection,
+    onApplyBatchMetadata,
     libraryFilter,
     setLibraryFilter,
     librarySort,
@@ -243,8 +251,6 @@ export function AppRoutes(props: AppRoutesProps) {
     handleResolveDuplicate,
     handleAutoSelectAll,
     handleResolveAll,
-    duplicateApplyNow,
-    setDuplicateApplyNow,
     allFixItems,
     fixIssues,
     selectedFixItemId,
@@ -290,7 +296,6 @@ export function AppRoutes(props: AppRoutesProps) {
     organizePlan,
     handlePlanOrganize,
     handleApplyOrganize,
-    handleQueueOrganize,
     organizeStatus,
     organizeProgress,
     organizing,
@@ -365,7 +370,12 @@ export function AppRoutes(props: AppRoutesProps) {
           libraryItemsLength={libraryItemsLength}
           filteredBooks={sortedBooks}
           selectedItemId={selectedItemId}
+          selectedBatchItemIds={selectedBatchItemIds}
           setSelectedItemId={setSelectedItemId}
+          onToggleBatchSelect={onToggleBatchSelect}
+          onSetBatchSelection={onSetBatchSelection}
+          onClearBatchSelection={onClearBatchSelection}
+          onApplyBatchMetadata={onApplyBatchMetadata}
           libraryFilter={libraryFilter}
           setLibraryFilter={setLibraryFilter}
           librarySort={librarySort}
@@ -434,9 +444,7 @@ export function AppRoutes(props: AppRoutesProps) {
             void handleResolveDuplicate(group, keepFileId)
           }
           handleAutoSelectAll={handleAutoSelectAll}
-          handleResolveAll={(groups, applyNow) => void handleResolveAll(groups, applyNow)}
-          applyNow={duplicateApplyNow}
-          setApplyNow={setDuplicateApplyNow}
+          handleResolveAll={(groups) => void handleResolveAll(groups)}
         />
       ) : null}
 
@@ -509,7 +517,6 @@ export function AppRoutes(props: AppRoutesProps) {
           organizePlan={organizePlan}
           handlePlanOrganize={() => void handlePlanOrganize()}
           handleApplyOrganize={() => void handleApplyOrganize()}
-          handleQueueOrganize={() => void handleQueueOrganize()}
           organizeStatus={organizeStatus}
           organizeProgress={organizeProgress}
           organizing={organizing}

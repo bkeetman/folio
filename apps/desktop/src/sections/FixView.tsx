@@ -57,6 +57,17 @@ function getIssueReason(item: LibraryItem, inboxItems: InboxItem[]) {
   return match?.reason ?? null;
 }
 
+function buildDefaultMetadataQuery(item: LibraryItem): string {
+  const isbn = item.isbn?.trim();
+  if (isbn) return isbn;
+  const title = item.title?.trim() ?? "";
+  const author = item.authors[0]?.trim() ?? "";
+  if (title && author) {
+    return `${title} by ${author}`;
+  }
+  return title || author;
+}
+
 export function FixView({
   items,
   inboxItems,
@@ -139,7 +150,7 @@ export function FixView({
       setSearchQuery("");
       return;
     }
-    setSearchQuery(item.title ?? "");
+    setSearchQuery(buildDefaultMetadataQuery(item));
     if (isDesktop && selectedItemId && !coverUrl) {
       void onFetchCover(selectedItemId);
     }
@@ -261,7 +272,10 @@ export function FixView({
               return (
                 <button
                   key={item.id}
-                  onClick={() => setSelectedItemId(item.id)}
+                  onClick={() => {
+                    setSelectedItemId(item.id);
+                    setSearchQuery(buildDefaultMetadataQuery(item));
+                  }}
                   className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--app-bg)] transition-colors ${item.id === selectedItemId ? "bg-[var(--app-accent)]/10 border-l-2 border-[var(--app-accent)]" : ""
                     }`}
                 >

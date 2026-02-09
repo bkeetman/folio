@@ -1,4 +1,4 @@
-import { FileText } from "lucide-react";
+import { Check, FileText } from "lucide-react";
 import { memo } from "react";
 import { getLanguageFlag } from "../lib/languageFlags";
 import { getTagColorClass } from "../lib/tagColors";
@@ -9,7 +9,9 @@ import { ProcessingOverlay } from "./ProgressBar";
 type BookCardProps = {
     book: BookDisplay;
     selected: boolean;
+    selectedForBatch: boolean;
     onSelect: (id: string) => void;
+    onToggleBatchSelect: (id: string) => void;
     fetchCoverOverride: (id: string) => void;
     clearCoverOverride: (id: string) => void;
     viewMode?: "grid" | "list";
@@ -19,7 +21,9 @@ type BookCardProps = {
 function BookCardComponent({
     book,
     selected,
+    selectedForBatch,
     onSelect,
+    onToggleBatchSelect,
     fetchCoverOverride,
     clearCoverOverride,
     viewMode = "grid",
@@ -31,20 +35,56 @@ function BookCardComponent({
         return (
             <div
                 className={cn(
-                    "grid cursor-pointer grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr] gap-4 border-b border-app-border px-4 py-3 transition-colors last:border-0",
+                    "group grid cursor-pointer grid-cols-[56px_2fr_1.5fr_0.6fr_0.8fr] gap-4 border-b border-app-border px-4 py-3 transition-colors last:border-0",
                     selected
                         ? "bg-app-accent/10"
+                        : selectedForBatch
+                            ? "bg-app-accent/5 hover:bg-app-accent/10"
                         : "hover:bg-app-surface-hover bg-transparent"
                 )}
-                onClick={() => onSelect(book.id)}
+                onClick={(event) => {
+                    if (event.metaKey || event.ctrlKey) {
+                        onToggleBatchSelect(book.id);
+                        return;
+                    }
+                    onSelect(book.id);
+                }}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(event) => {
                     if (event.key === "Enter") onSelect(book.id);
+                    if (event.key === " ") {
+                        event.preventDefault();
+                        onToggleBatchSelect(book.id);
+                    }
                 }}
             >
                 {/* Thumbnail */}
                 <div className="relative grid h-14 w-10 shrink-0 place-items-center overflow-hidden rounded border border-app-border bg-app-bg shadow-sm">
+                    <button
+                        type="button"
+                        aria-label={selectedForBatch ? "Remove from selection" : "Add to selection"}
+                        className={cn(
+                            "absolute left-1 top-1 z-10 grid h-4 w-4 place-items-center rounded border text-[var(--app-ink)] transition",
+                            selectedForBatch
+                                ? "border-[var(--app-accent)] bg-[var(--app-accent)] text-white"
+                                : "border-[var(--app-border-soft)] bg-black/45 text-transparent hover:border-[var(--app-accent)]"
+                        )}
+                        onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            onToggleBatchSelect(book.id);
+                        }}
+                    >
+                        <Check
+                            size={10}
+                            className={cn(
+                                selectedForBatch
+                                    ? "opacity-100"
+                                    : "opacity-0 group-hover:opacity-60"
+                            )}
+                        />
+                    </button>
                     {book.cover ? (
                         <img
                             className="h-full w-full object-cover"
@@ -129,17 +169,46 @@ function BookCardComponent({
                 "group flex cursor-pointer flex-col overflow-hidden rounded-lg border transition-all duration-200",
                 selected
                     ? "border-[color:color-mix(in_srgb,var(--app-accent),transparent_60%)] ring-2 ring-[color:color-mix(in_srgb,var(--app-accent),transparent_90%)] bg-[color:color-mix(in_srgb,var(--app-accent),transparent_95%)]"
+                    : selectedForBatch
+                        ? "border-[color:color-mix(in_srgb,var(--app-accent),transparent_75%)] bg-[color:color-mix(in_srgb,var(--app-accent),transparent_97%)]"
                     : "border-transparent bg-transparent shadow-none hover:bg-app-surface/10"
             )}
-            onClick={() => onSelect(book.id)}
+            onClick={(event) => {
+                if (event.metaKey || event.ctrlKey) {
+                    onToggleBatchSelect(book.id);
+                    return;
+                }
+                onSelect(book.id);
+            }}
             role="button"
             tabIndex={0}
             onKeyDown={(event) => {
                 if (event.key === "Enter") onSelect(book.id);
+                if (event.key === " ") {
+                    event.preventDefault();
+                    onToggleBatchSelect(book.id);
+                }
             }}
         >
             {/* Cover Area */}
             <div className="relative aspect-[2/3] w-full overflow-hidden bg-app-bg/10">
+                <button
+                    type="button"
+                    aria-label={selectedForBatch ? "Remove from selection" : "Add to selection"}
+                    className={cn(
+                        "absolute left-2 top-2 z-20 grid h-5 w-5 place-items-center rounded border text-[var(--app-ink)] transition",
+                        selectedForBatch
+                            ? "border-[var(--app-accent)] bg-[var(--app-accent)] text-white"
+                            : "border-[var(--app-border-soft)] bg-black/45 text-transparent hover:border-[var(--app-accent)] group-hover:text-app-ink-muted"
+                    )}
+                    onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onToggleBatchSelect(book.id);
+                    }}
+                >
+                    <Check size={12} className={selectedForBatch ? "opacity-100" : "opacity-0 group-hover:opacity-70"} />
+                </button>
                 {book.cover ? (
                     <img
                         className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"

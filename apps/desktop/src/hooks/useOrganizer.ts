@@ -2,7 +2,6 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
-  ActivityLogItem,
   OperationProgress,
   OperationStats,
   OrganizerLog,
@@ -12,14 +11,10 @@ import type {
 
 type UseOrganizerArgs = {
   isDesktop: boolean;
-  refreshLibrary: () => Promise<void>;
-  setActivityLog: React.Dispatch<React.SetStateAction<ActivityLogItem[]>>;
 };
 
 export function useOrganizer({
   isDesktop,
-  refreshLibrary,
-  setActivityLog,
 }: UseOrganizerArgs) {
   const [organizePlan, setOrganizePlan] = useState<OrganizePlan | null>(null);
   const [organizeStatus, setOrganizeStatus] = useState<string | null>(null);
@@ -160,42 +155,17 @@ export function useOrganizer({
   const handleApplyOrganize = useCallback(async () => {
     if (!organizePlan || !isTauri()) return;
     try {
-      setOrganizeStatus("Organizing files...");
-      setOrganizing(true);
-      await invoke<string>("apply_organize", {
-        plan: organizePlan,
-      });
-      setOrganizeStatus("Organized files. Review details below.");
-      const log = await invoke<OrganizerLog | null>("get_latest_organizer_log");
-      setOrganizeLog(log);
-      await refreshLibrary();
-      setActivityLog((prev) => [
-        {
-          id: `organize-${Date.now()}`,
-          type: "organize",
-          message: `Organized ${organizePlan.entries.length} items`,
-          timestamp: Date.now(),
-        },
-        ...prev,
-      ]);
-      await refreshLibrary();
-    } catch (err) {
-      console.error("Organize error:", err);
-      setOrganizeStatus(`Error: ${err}`);
-    }
-  }, [organizePlan, refreshLibrary, setActivityLog]);
-
-  const handleQueueOrganize = useCallback(async () => {
-    if (!organizePlan || !isTauri()) return null;
-    try {
       const created = await invoke<number>("generate_pending_changes_from_organize", {
         plan: organizePlan,
       });
-      setOrganizeStatus(`Queued ${created} changes for review.`);
-      return created;
-    } catch {
-      setOrganizeStatus("Could not queue organize plan.");
-      return null;
+      setOrganizeStatus(
+        created > 0
+          ? `Queued ${created} organize changes for review.`
+          : "No organize changes to queue."
+      );
+    } catch (err) {
+      console.error("Organize error:", err);
+      setOrganizeStatus(`Error: ${err}`);
     }
   }, [organizePlan]);
 
@@ -213,6 +183,5 @@ export function useOrganizer({
     setOrganizeTemplate,
     handlePlanOrganize,
     handleApplyOrganize,
-    handleQueueOrganize,
   };
 }

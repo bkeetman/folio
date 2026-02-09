@@ -11,9 +11,7 @@ type DuplicatesViewProps = {
   setDuplicateKeepSelection: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   handleResolveDuplicate: (group: DuplicateGroup, keepFileId: string) => void;
   handleAutoSelectAll: (groups: DuplicateGroup[]) => void;
-  handleResolveAll: (groups: DuplicateGroup[], applyNow: boolean) => void;
-  applyNow: boolean;
-  setApplyNow: React.Dispatch<React.SetStateAction<boolean>>;
+  handleResolveAll: (groups: DuplicateGroup[]) => void;
 };
 
 function splitPath(value: string) {
@@ -50,8 +48,6 @@ export function DuplicatesView({
   handleResolveDuplicate,
   handleAutoSelectAll,
   handleResolveAll,
-  applyNow,
-  setApplyNow,
 }: DuplicatesViewProps) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<"hash" | "title" | "fuzzy">("hash");
@@ -137,17 +133,9 @@ export function DuplicatesView({
         <Button variant="outline" onClick={() => handleAutoSelectAll(visibleGroups)}>
           {t("duplicates.autoSelectBest")}
         </Button>
-        <Button variant="primary" onClick={() => handleResolveAll(visibleGroups, applyNow)}>
+        <Button variant="primary" onClick={() => handleResolveAll(visibleGroups)}>
           {t("duplicates.resolveAll")}
         </Button>
-        <label className="flex items-center gap-2 text-xs text-[var(--app-ink-muted)]">
-          <input
-            type="checkbox"
-            checked={applyNow}
-            onChange={(event) => setApplyNow(event.target.checked)}
-          />
-          {t("duplicates.applyNow")}
-        </label>
         {mode === "hash" ? (
           <label className="flex items-center gap-2 text-xs text-[var(--app-ink-muted)]">
             <input

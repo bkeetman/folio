@@ -57,6 +57,34 @@ export type ItemMetadata = {
   genres?: string[];
 };
 
+export type BatchAuthorMode = "replace" | "append";
+export type BatchTagMode = "append" | "replace" | "remove";
+
+export type BatchMetadataUpdatePayload = {
+  itemIds: string[];
+  authors?: string[];
+  genres?: string[];
+  authorMode?: BatchAuthorMode;
+  language?: string;
+  clearLanguage?: boolean;
+  publishedYear?: number;
+  clearPublishedYear?: boolean;
+  tagIds?: string[];
+  tagMode?: BatchTagMode;
+  clearTags?: boolean;
+};
+
+export type BatchMetadataUpdateResult = {
+  itemsUpdated: number;
+  authorsUpdated: number;
+  categoriesUpdated: number;
+  languageUpdated: number;
+  yearsUpdated: number;
+  tagsUpdated: number;
+  changesQueued: number;
+  filesQueued: number;
+};
+
 export type Tag = { id: string; name: string; color?: string | null };
 
 export type Author = {

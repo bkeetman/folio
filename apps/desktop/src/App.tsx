@@ -26,6 +26,8 @@ import { TopToolbar } from "./sections/TopToolbar";
 import type {
   ActivityLogItem,
   ApplyMetadataProgress,
+  BatchMetadataUpdatePayload,
+  BatchMetadataUpdateResult,
   DuplicateGroup,
   EnrichmentCandidate,
   FixFilter,
@@ -118,6 +120,7 @@ function App() {
   const [fixCandidates, setFixCandidates] = useState<EnrichmentCandidate[]>([]);
   const [fixLoading, setFixLoading] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [selectedBatchItemIds, setSelectedBatchItemIds] = useState<Set<string>>(new Set());
   const [editMatchQuery, setEditMatchQuery] = useState("");
   const [editMatchLoading, setEditMatchLoading] = useState(false);
   const [editMatchCandidates, setEditMatchCandidates] = useState<EnrichmentCandidate[]>([]);
@@ -153,8 +156,8 @@ function App() {
   const [duplicateKeepSelection, setDuplicateKeepSelection] = useState<
     Record<string, string>
   >({});
-  const [duplicateApplyNow, setDuplicateApplyNow] = useState(false);
   const [pendingChanges, setPendingChanges] = useState<PendingChange[]>([]);
+  const [pendingChangesCount, setPendingChangesCount] = useState(0);
   const [pendingChangesLoading, setPendingChangesLoading] = useState(false);
   const [pendingChangesApplying, setPendingChangesApplying] = useState(false);
   const [pendingChangesStatus, setPendingChangesStatus] = useState<
@@ -227,8 +230,7 @@ function App() {
     setOrganizeTemplate,
     handlePlanOrganize,
     handleApplyOrganize,
-    handleQueueOrganize,
-  } = useOrganizer({ isDesktop, refreshLibrary, setActivityLog });
+  } = useOrganizer({ isDesktop });
 
   const {
     ereaderDevices,
@@ -297,6 +299,22 @@ function App() {
   );
 
   useEffect(() => {
+    const visibleIds = new Set(sortedBooks.map((item) => item.id));
+    setSelectedBatchItemIds((previous) => {
+      if (previous.size === 0) return previous;
+      const next = new Set(
+        Array.from(previous).filter((itemId) => visibleIds.has(itemId))
+      );
+      return next.size === previous.size ? previous : next;
+    });
+  }, [sortedBooks]);
+
+  useEffect(() => {
+    if (view === "library" || view === "library-books") return;
+    setSelectedBatchItemIds(new Set());
+  }, [view]);
+
+  useEffect(() => {
     pendingChangesStatusRef.current = pendingChangesStatus;
   }, [pendingChangesStatus]);
 
@@ -306,6 +324,7 @@ function App() {
       const result = await invoke<PendingChange[]>("get_pending_changes", {
         status: "pending",
       });
+      setPendingChangesCount(result.length);
       if (pendingChangesStatus === "pending") {
         setPendingChanges(result);
       }
@@ -314,6 +333,11 @@ function App() {
       return 0;
     }
   }, [pendingChangesStatus]);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    void refreshPendingChanges();
+  }, [isDesktop, refreshPendingChanges]);
 
   const toggleChangeSelection = (id: string) => {
     setSelectedChangeIds((prev) => {
@@ -330,6 +354,26 @@ function App() {
   const clearChangeSelection = () => {
     setSelectedChangeIds(new Set());
   };
+
+  const handleToggleBatchSelection = useCallback((itemId: string) => {
+    setSelectedBatchItemIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleSetBatchSelection = useCallback((itemIds: string[]) => {
+    setSelectedBatchItemIds(new Set(itemIds));
+  }, []);
+
+  const handleClearBatchSelection = useCallback(() => {
+    setSelectedBatchItemIds(new Set());
+  }, []);
 
   const refreshTags = useCallback(async () => {
     if (!isTauri()) {
@@ -416,6 +460,49 @@ function App() {
       return next;
     });
   }, []);
+
+  const refreshCoverForItem = useCallback(
+    async (itemId: string) => {
+      clearCoverOverride(itemId);
+      await fetchCoverOverride(itemId, true);
+    },
+    [clearCoverOverride, fetchCoverOverride]
+  );
+
+  const runLibraryMutationPipeline = useCallback(
+    async <T,>(
+      mutation: () => Promise<T>,
+      options?: {
+        refreshCoverItemId?: string | null;
+        refreshLibrary?: boolean | ((result: T) => boolean);
+        refreshPendingChanges?: boolean | ((result: T) => boolean);
+      }
+    ): Promise<{ result: T; pendingChangesCount: number }> => {
+      const result = await mutation();
+
+      const shouldRefreshLibrary =
+        typeof options?.refreshLibrary === "function"
+          ? options.refreshLibrary(result)
+          : options?.refreshLibrary ?? true;
+      if (options?.refreshCoverItemId) {
+        await refreshCoverForItem(options.refreshCoverItemId);
+      }
+      if (shouldRefreshLibrary) {
+        await refreshLibrary();
+      }
+
+      const shouldRefreshPendingChanges =
+        typeof options?.refreshPendingChanges === "function"
+          ? options.refreshPendingChanges(result)
+          : options?.refreshPendingChanges ?? false;
+      const pendingChangesCount = shouldRefreshPendingChanges
+        ? await refreshPendingChanges()
+        : 0;
+
+      return { result, pendingChangesCount };
+    },
+    [refreshCoverForItem, refreshLibrary, refreshPendingChanges]
+  );
 
   const drainVisibleCoverQueue = useCallback(() => {
     if (!isTauri()) return;
@@ -517,9 +604,19 @@ function App() {
         const result = await invoke<PendingChange[]>("get_pending_changes", {
           status: pendingChangesStatus,
         });
-        if (active) setPendingChanges(result);
+        if (active) {
+          setPendingChanges(result);
+          if (pendingChangesStatus === "pending") {
+            setPendingChangesCount(result.length);
+          }
+        }
       } catch {
-        if (active) setPendingChanges([]);
+        if (active) {
+          setPendingChanges([]);
+          if (pendingChangesStatus === "pending") {
+            setPendingChangesCount(0);
+          }
+        }
       } finally {
         if (active) setPendingChangesLoading(false);
       }
@@ -541,6 +638,11 @@ function App() {
         status: pendingChangesStatus,
       });
       setPendingChanges(result);
+      if (pendingChangesStatus === "pending") {
+        setPendingChangesCount(result.length);
+      } else {
+        void refreshPendingChanges();
+      }
     } catch {
       setScanStatus("Could not apply change.");
     } finally {
@@ -568,6 +670,11 @@ function App() {
         status: pendingChangesStatus,
       });
       setPendingChanges(result);
+      if (pendingChangesStatus === "pending") {
+        setPendingChangesCount(result.length);
+      } else {
+        void refreshPendingChanges();
+      }
       clearChangeSelection();
     } catch {
       setScanStatus("Could not apply changes.");
@@ -585,6 +692,11 @@ function App() {
         status: pendingChangesStatus,
       });
       setPendingChanges(result);
+      if (pendingChangesStatus === "pending") {
+        setPendingChangesCount(result.length);
+      } else {
+        void refreshPendingChanges();
+      }
       clearChangeSelection();
     } catch {
       setScanStatus("Could not apply delete changes.");
@@ -604,6 +716,11 @@ function App() {
         status: pendingChangesStatus,
       });
       setPendingChanges(result);
+      if (pendingChangesStatus === "pending") {
+        setPendingChangesCount(result.length);
+      } else {
+        void refreshPendingChanges();
+      }
     } catch {
       setScanStatus("Could not apply changes.");
     } finally {
@@ -619,6 +736,11 @@ function App() {
         status: pendingChangesStatus,
       });
       setPendingChanges(result);
+      if (pendingChangesStatus === "pending") {
+        setPendingChangesCount(result.length);
+      } else {
+        void refreshPendingChanges();
+      }
       setSelectedChangeIds((prev) => {
         const next = new Set(prev);
         next.delete(changeId);
@@ -637,6 +759,11 @@ function App() {
         status: pendingChangesStatus,
       });
       setPendingChanges(result);
+      if (pendingChangesStatus === "pending") {
+        setPendingChangesCount(result.length);
+      } else {
+        void refreshPendingChanges();
+      }
       setSelectedChangeIds(new Set());
     } catch {
       setScanStatus("Could not remove changes.");
@@ -651,6 +778,11 @@ function App() {
         status: pendingChangesStatus,
       });
       setPendingChanges(result);
+      if (pendingChangesStatus === "pending") {
+        setPendingChangesCount(result.length);
+      } else {
+        void refreshPendingChanges();
+      }
       setSelectedChangeIds(new Set());
     } catch {
       setScanStatus("Could not remove changes.");
@@ -671,13 +803,20 @@ function App() {
       if (!selectedItemId) return;
       if (!isTauri()) return;
       try {
-        await invoke("add_tag_to_item", { itemId: selectedItemId, tagId });
-        await refreshLibrary();
+        const { pendingChangesCount } = await runLibraryMutationPipeline(
+          () => invoke("add_tag_to_item", { itemId: selectedItemId, tagId }),
+          { refreshPendingChanges: true }
+        );
+        setScanStatus(
+          pendingChangesCount > 0
+            ? "Tag updated in library. Change queued in Changes."
+            : "Tag updated."
+        );
       } catch {
         return;
       }
     },
-    [selectedItemId, refreshLibrary]
+    [runLibraryMutationPipeline, selectedItemId]
   );
 
   const handleRemoveTag = useCallback(
@@ -685,13 +824,20 @@ function App() {
       if (!selectedItemId) return;
       if (!isTauri()) return;
       try {
-        await invoke("remove_tag_from_item", { itemId: selectedItemId, tagId });
-        await refreshLibrary();
+        const { pendingChangesCount } = await runLibraryMutationPipeline(
+          () => invoke("remove_tag_from_item", { itemId: selectedItemId, tagId }),
+          { refreshPendingChanges: true }
+        );
+        setScanStatus(
+          pendingChangesCount > 0
+            ? "Tag updated in library. Change queued in Changes."
+            : "Tag updated."
+        );
       } catch {
         return;
       }
     },
-    [selectedItemId, refreshLibrary]
+    [runLibraryMutationPipeline, selectedItemId]
   );
 
   const handleScan = useCallback(async () => {
@@ -798,13 +944,21 @@ function App() {
     if (!isTauri() || normalizingDescriptions) return;
     setNormalizingDescriptions(true);
     try {
-      const result = await invoke<{ itemsUpdated: number; filesQueued: number }>(
-        "normalize_item_descriptions"
+      const { result } = await runLibraryMutationPipeline(
+        () =>
+          invoke<{ itemsUpdated: number; filesQueued: number }>(
+            "normalize_item_descriptions"
+          ),
+        {
+          refreshLibrary: (cleanupResult) => cleanupResult.itemsUpdated > 0,
+          refreshPendingChanges: (cleanupResult) => cleanupResult.filesQueued > 0,
+        }
       );
-      await refreshLibrary();
       if (result.itemsUpdated > 0) {
         setScanStatus(
-          `Cleaned descriptions for ${result.itemsUpdated} items and queued ${result.filesQueued} EPUB file updates.`
+          result.filesQueued > 0
+            ? `Updated descriptions for ${result.itemsUpdated} books. ${result.filesQueued} EPUB update(s) queued in Changes.`
+            : `Updated descriptions for ${result.itemsUpdated} books.`
         );
       } else {
         setScanStatus("Descriptions were already clean.");
@@ -816,25 +970,33 @@ function App() {
     } finally {
       setNormalizingDescriptions(false);
     }
-  }, [normalizingDescriptions, refreshLibrary]);
+  }, [normalizingDescriptions, runLibraryMutationPipeline]);
 
   const handleBatchFixTitles = useCallback(async () => {
     if (!isTauri() || batchFixingTitles) return;
     setBatchFixingTitles(true);
     try {
-      const result = await invoke<{
-        itemsUpdated: number;
-        titlesCleaned: number;
-        yearsInferred: number;
-        authorsInferred: number;
-        isbnsNormalized: number;
-        isbnsRemoved: number;
-        filesQueued: number;
-      }>("batch_cleanup_titles");
-      await refreshLibrary();
+      const { result } = await runLibraryMutationPipeline(
+        () =>
+          invoke<{
+            itemsUpdated: number;
+            titlesCleaned: number;
+            yearsInferred: number;
+            authorsInferred: number;
+            isbnsNormalized: number;
+            isbnsRemoved: number;
+            filesQueued: number;
+          }>("batch_cleanup_titles"),
+        {
+          refreshLibrary: (cleanupResult) => cleanupResult.itemsUpdated > 0,
+          refreshPendingChanges: (cleanupResult) => cleanupResult.filesQueued > 0,
+        }
+      );
       if (result.itemsUpdated > 0) {
         setScanStatus(
-          `Batch title fix: ${result.itemsUpdated} updated, ${result.titlesCleaned} titles cleaned, ${result.yearsInferred} years inferred, ${result.authorsInferred} authors inferred, ${result.isbnsNormalized} ISBNs normalized, ${result.isbnsRemoved} ISBNs removed, ${result.filesQueued} EPUB updates queued.`
+          result.filesQueued > 0
+            ? `Updated ${result.itemsUpdated} books (${result.titlesCleaned} titles, ${result.yearsInferred} years, ${result.authorsInferred} authors, ${result.isbnsNormalized} ISBN normalized, ${result.isbnsRemoved} ISBN removed). ${result.filesQueued} EPUB update(s) queued in Changes.`
+            : `Updated ${result.itemsUpdated} books (${result.titlesCleaned} titles, ${result.yearsInferred} years, ${result.authorsInferred} authors, ${result.isbnsNormalized} ISBN normalized, ${result.isbnsRemoved} ISBN removed).`
         );
       } else {
         setScanStatus("No titles needed batch cleanup.");
@@ -846,7 +1008,7 @@ function App() {
     } finally {
       setBatchFixingTitles(false);
     }
-  }, [batchFixingTitles, refreshLibrary]);
+  }, [batchFixingTitles, runLibraryMutationPipeline]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -954,9 +1116,15 @@ function App() {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const selection = await open({ multiple: false });
       if (typeof selection !== "string") return;
-      await invoke("relink_missing_file", { fileId, newPath: selection });
-      await refreshLibrary();
-      setScanStatus("File relinked.");
+      const { pendingChangesCount } = await runLibraryMutationPipeline(
+        () => invoke("relink_missing_file", { fileId, newPath: selection }),
+        { refreshPendingChanges: true }
+      );
+      setScanStatus(
+        pendingChangesCount > 0
+          ? "Missing file relinked in library. Change queued in Changes."
+          : "Missing file relinked."
+      );
     } catch (err) {
       console.error("Failed to relink file", err);
       setScanStatus("Could not relink file.");
@@ -966,9 +1134,15 @@ function App() {
   const handleRemoveMissing = async (fileId: string) => {
     if (!isTauri()) return;
     try {
-      await invoke("remove_missing_file", { fileId });
-      await refreshLibrary();
-      setScanStatus("Missing file removed.");
+      const { pendingChangesCount } = await runLibraryMutationPipeline(
+        () => invoke("remove_missing_file", { fileId }),
+        { refreshPendingChanges: true }
+      );
+      setScanStatus(
+        pendingChangesCount > 0
+          ? "Missing file removed in library. Change queued in Changes."
+          : "Missing file removed from library."
+      );
     } catch (err) {
       console.error("Failed to remove missing file", err);
       setScanStatus("Could not remove missing file.");
@@ -987,10 +1161,19 @@ function App() {
     );
     if (!ok) return;
     try {
-      const removed = await invoke<number>("remove_all_missing_files");
-      await refreshLibrary();
+      const { result: removed, pendingChangesCount } = await runLibraryMutationPipeline(
+        () => invoke<number>("remove_all_missing_files"),
+        {
+          refreshLibrary: (count) => count > 0,
+          refreshPendingChanges: (count) => count > 0,
+        }
+      );
       setScanStatus(
-        removed > 0 ? `Removed ${removed} missing file entries.` : "No missing file entries to remove."
+        removed > 0
+          ? pendingChangesCount > 0
+            ? `Removed ${removed} missing-file entries in library. Changes queued in Changes.`
+            : `Removed ${removed} missing-file entries from library.`
+          : "No missing file entries to remove."
       );
     } catch (err) {
       console.error("Failed to remove all missing files", err);
@@ -1233,6 +1416,11 @@ function App() {
           status: pendingChangesStatusRef.current,
         });
         setPendingChanges(result);
+        if (pendingChangesStatusRef.current === "pending") {
+          setPendingChangesCount(result.length);
+        } else {
+          await refreshPendingChanges();
+        }
         await refreshLibrary();
       } catch {
         // ignore
@@ -1245,7 +1433,7 @@ function App() {
       if (unlistenProgress) unlistenProgress();
       if (unlistenComplete) unlistenComplete();
     };
-  }, [isDesktop, refreshLibrary]);
+  }, [isDesktop, refreshLibrary, refreshPendingChanges]);
 
   useEffect(() => {
     if (!isDesktop) return;
@@ -1302,26 +1490,29 @@ function App() {
     if (!selectedFixItemId || !isTauri()) return;
     if (fixApplyingCandidateId) return;
     setFixApplyingCandidateId(candidate.id);
-    setScanStatus("Applying metadata...");
+    setScanStatus("Applying metadata change...");
     try {
-      await invoke("apply_fix_candidate", {
-        itemId: selectedFixItemId,
-        candidate,
-      });
-      const queued = await refreshPendingChanges();
-      setScanStatus(
-        queued > 0
-          ? `Metadata updated. ${queued} file changes queued.`
-          : "Metadata updated."
+      const { pendingChangesCount } = await runLibraryMutationPipeline(
+        () =>
+          invoke("apply_fix_candidate", {
+            itemId: selectedFixItemId,
+            candidate,
+          }),
+        {
+          refreshCoverItemId: selectedFixItemId,
+          refreshPendingChanges: true,
+        }
       );
-      await refreshLibrary();
-      clearCoverOverride(selectedFixItemId);
-      await fetchCoverOverride(selectedFixItemId, true);
+      setScanStatus(
+        pendingChangesCount > 0
+          ? "Metadata updated in library. Changes are queued in Changes."
+          : "Metadata updated in library."
+      );
       setFixCandidates([]);
     } catch (error) {
       console.error("Failed to apply metadata candidate", error);
       const message = error instanceof Error ? error.message : String(error);
-      setScanStatus(`Could not apply metadata: ${message}`);
+      setScanStatus(`Could not apply metadata change: ${message}`);
     } finally {
       setFixApplyingCandidateId(null);
     }
@@ -1329,18 +1520,78 @@ function App() {
 
   const handleSaveFixMetadata = async (id: string, data: ItemMetadata) => {
     if (!isDesktop) return;
-    setScanStatus("Saving metadata...");
+    setScanStatus("Applying metadata change...");
     try {
-      await invoke("save_item_metadata", { itemId: id, metadata: data });
-      setScanStatus("Metadata saved.");
-      await refreshLibrary();
-      clearCoverOverride(id);
-      await fetchCoverOverride(id, true);
+      const { pendingChangesCount } = await runLibraryMutationPipeline(
+        () => invoke("save_item_metadata", { itemId: id, metadata: data }),
+        {
+          refreshCoverItemId: id,
+          refreshPendingChanges: true,
+        }
+      );
+      setScanStatus(
+        pendingChangesCount > 0
+          ? "Metadata updated in library. Changes are queued in Changes."
+          : "Metadata updated in library."
+      );
     } catch (e) {
       console.error("Failed to save metadata", e);
-      setScanStatus("Could not save metadata.");
+      setScanStatus("Could not apply metadata change.");
     }
   };
+
+  const handleApplyBatchMetadata = useCallback(
+    async (payload: BatchMetadataUpdatePayload) => {
+      if (!isTauri()) return;
+      if (!payload.itemIds.length) return;
+      setScanStatus(`Applying batch update for ${payload.itemIds.length} books...`);
+      try {
+        const { result } = await runLibraryMutationPipeline(
+          () =>
+            invoke<BatchMetadataUpdateResult>("apply_batch_metadata_update", {
+              payload,
+            }),
+          {
+            refreshLibrary: (batchResult) => batchResult.itemsUpdated > 0,
+            refreshPendingChanges: (batchResult) => batchResult.itemsUpdated > 0,
+          }
+        );
+        const details: string[] = [];
+        if (payload.genres) {
+          details.push(`${result.categoriesUpdated} category updates`);
+        }
+        if (payload.authors) {
+          details.push(`${result.authorsUpdated} author updates`);
+        }
+        if (payload.language || payload.clearLanguage) {
+          details.push(`${result.languageUpdated} language updates`);
+        }
+        if (payload.publishedYear !== undefined || payload.clearPublishedYear) {
+          details.push(`${result.yearsUpdated} year updates`);
+        }
+        if ((payload.tagIds && payload.tagIds.length > 0) || payload.clearTags) {
+          details.push(`${result.tagsUpdated} tag updates`);
+        }
+        const detailSuffix = details.length > 0 ? ` (${details.join(", ")})` : "";
+        setScanStatus(
+          result.itemsUpdated > 0
+            ? result.filesQueued > 0
+              ? `Updated ${result.itemsUpdated} books${detailSuffix}. ${result.filesQueued} EPUB update(s) queued in Changes.`
+              : result.changesQueued > 0
+                ? `Updated ${result.itemsUpdated} books${detailSuffix}. ${result.changesQueued} change(s) queued in Changes.`
+                : `Updated ${result.itemsUpdated} books${detailSuffix}.`
+            : "No books required a batch update."
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : String(error ?? "Batch metadata update failed.");
+        setScanStatus(`Could not apply batch update: ${message}`);
+      }
+    },
+    [runLibraryMutationPipeline]
+  );
 
   const loadEditMatchCandidates = async (itemId: string) => {
     if (!isTauri()) {
@@ -1396,21 +1647,19 @@ function App() {
         itemId: selectedItemId,
         candidate,
       });
+      await refreshCoverForItem(selectedItemId);
+      await refreshLibrary();
       const queued = await refreshPendingChanges();
       setScanStatus(
         queued > 0
-          ? `Metadata updated. ${queued} file changes queued.`
-          : "Metadata updated."
+          ? "Metadata updated in library. EPUB/file updates are queued in Changes."
+          : "Metadata updated in library."
       );
-      // Clear cached cover and fetch the updated one
-      clearCoverOverride(selectedItemId);
-      await fetchCoverOverride(selectedItemId);
-      await refreshLibrary();
       setEditDetailsVersion((value) => value + 1);
     } catch (error) {
       console.error("Failed to apply metadata candidate (edit view)", error);
       const message = error instanceof Error ? error.message : String(error);
-      setScanStatus(`Could not apply metadata: ${message}`);
+      setScanStatus(`Could not apply metadata change: ${message}`);
     } finally {
       setEditMatchApplying(null);
     }
@@ -1418,23 +1667,20 @@ function App() {
 
   const handleQueueRemoveItem = useCallback(async (itemId: string) => {
     if (!isTauri()) return;
-    setScanStatus("Queueing delete change...");
+    setScanStatus("Removing book from library...");
     try {
       const queued = await invoke<number>("queue_remove_item", { itemId });
-      const pending = await refreshPendingChanges();
       await refreshLibrary();
+      await refreshPendingChanges();
       setScanStatus(
         queued > 0
-          ? `Removed from library. ${queued} delete change(s) queued.`
-          : "Removed from library. Delete was already queued."
+          ? `Book removed from library. ${queued} file delete change(s) queued in Changes.`
+          : "Book removed from library."
       );
-      if (pending > 0) {
-        setView("changes");
-      }
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : String(error ?? "Could not queue delete.");
-      setScanStatus(`Could not queue delete: ${message}`);
+        error instanceof Error ? error.message : String(error ?? "Could not remove book.");
+      setScanStatus(`Could not remove book: ${message}`);
     }
   }, [refreshLibrary, refreshPendingChanges]);
 
@@ -1487,8 +1733,9 @@ function App() {
           fileIds: group.file_ids,
         });
       }
-      setScanStatus("Duplicate resolved.");
       await refreshLibrary();
+      await refreshPendingChanges();
+      setScanStatus("Duplicate resolved in library. File delete changes are queued in Changes.");
       setDuplicateKeepSelection((prev) => {
         const next = { ...prev };
         delete next[group.id];
@@ -1511,7 +1758,7 @@ function App() {
   );
 
   const handleResolveAllDuplicates = useCallback(
-    async (groups: DuplicateGroup[], applyNow: boolean) => {
+    async (groups: DuplicateGroup[]) => {
       if (!isTauri()) return;
       try {
         let resolved = 0;
@@ -1528,28 +1775,22 @@ function App() {
           }
           resolved += 1;
         }
-        if (applyNow) {
-          await invoke("apply_pending_changes", { ids: [] });
-          setView("changes");
-        }
-        setScanStatus(`Resolved ${resolved} duplicate groups.`);
         await refreshLibrary();
+        await refreshPendingChanges();
+        setScanStatus(
+          resolved > 0
+            ? `Resolved ${resolved} duplicate groups in library. File delete changes are queued in Changes.`
+            : "No duplicate groups were resolved."
+        );
       } catch {
         setScanStatus("Could not resolve duplicates.");
       }
     },
-    [duplicateKeepSelection, pickBestDuplicate, refreshLibrary]
+    [duplicateKeepSelection, pickBestDuplicate, refreshLibrary, refreshPendingChanges]
   );
 
   const handleOpenSyncDialog = () => {
     setEreaderSyncDialogOpen(true);
-  };
-
-  const handleQueueOrganizeAndView = async () => {
-    const created = await handleQueueOrganize();
-    if (created !== null) {
-      setView("changes");
-    }
   };
 
   const duplicateActionCount = useMemo(() => {
@@ -1641,7 +1882,7 @@ function App() {
         scanning={scanning}
         handleScan={() => setView("import")}
         libraryHealth={libraryHealth}
-        pendingChangesCount={pendingChangesStatus === "pending" ? pendingChanges.length : 0}
+        pendingChangesCount={pendingChangesCount}
         duplicateCount={duplicateActionCount}
         missingFilesCount={missingFiles.length}
         fixActionCount={fixActionCount}
@@ -1694,7 +1935,12 @@ function App() {
             sortedBooks={sortedBooks}
             allBooks={allBooks}
             selectedItemId={selectedItemId}
+            selectedBatchItemIds={selectedBatchItemIds}
             setSelectedItemId={setSelectedItemId}
+            onToggleBatchSelect={handleToggleBatchSelection}
+            onSetBatchSelection={handleSetBatchSelection}
+            onClearBatchSelection={handleClearBatchSelection}
+            onApplyBatchMetadata={handleApplyBatchMetadata}
             libraryFilter={libraryFilter}
             setLibraryFilter={setLibraryFilter}
             librarySort={librarySort}
@@ -1732,8 +1978,6 @@ function App() {
             handleResolveDuplicate={handleResolveDuplicate}
             handleAutoSelectAll={handleAutoSelectDuplicates}
             handleResolveAll={handleResolveAllDuplicates}
-            duplicateApplyNow={duplicateApplyNow}
-            setDuplicateApplyNow={setDuplicateApplyNow}
             allFixItems={allFixItems}
             fixIssues={fixIssues}
             selectedFixItemId={selectedFixItemId}
@@ -1779,7 +2023,6 @@ function App() {
             organizePlan={organizePlan}
             handlePlanOrganize={handlePlanOrganize}
             handleApplyOrganize={handleApplyOrganize}
-            handleQueueOrganize={handleQueueOrganizeAndView}
             organizeStatus={organizeStatus}
             organizeProgress={organizeProgress}
             organizing={organizing}
@@ -1803,7 +2046,10 @@ function App() {
             onRescanMissing={handleRescanMissing}
             libraryItems={libraryItems}
             previousView={previousView}
-            onEditItemUpdate={refreshLibrary}
+            onEditItemUpdate={async () => {
+              await refreshLibrary();
+              await refreshPendingChanges();
+            }}
             editCoverUrl={selectedItemId ? coverOverrides[selectedItemId] : null}
             detailsVersion={editDetailsVersion}
             matchQuery={editMatchQuery}
