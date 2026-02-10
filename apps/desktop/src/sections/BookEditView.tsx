@@ -101,6 +101,7 @@ export function BookEditView({
     const [error, setError] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const [isUploadingCover, setIsUploadingCover] = useState(false);
+    const [isRemovingCover, setIsRemovingCover] = useState(false);
     const [isApplyingEmbeddedCover, setIsApplyingEmbeddedCover] = useState(false);
     const [isQueueingRemove, setIsQueueingRemove] = useState(false);
     const [isLoadingEmbeddedPreview, setIsLoadingEmbeddedPreview] = useState(false);
@@ -134,6 +135,7 @@ export function BookEditView({
 
     const selectedItem = libraryItems.find((item) => item.id === selectedItemId);
     const displayCoverUrl = localCoverUrl ?? coverUrl;
+    const hasCover = Boolean(displayCoverUrl || selectedItem?.cover_path);
     const activeItemIdRef = useRef<string | null>(selectedItemId);
     const embeddedPreviewUrlRef = useRef<string | null>(null);
     const localCoverUrlRef = useRef<string | null>(null);
@@ -412,6 +414,31 @@ export function BookEditView({
         }
     };
 
+    const handleRemoveCover = async () => {
+        if (!selectedItemId) return;
+        setIsRemovingCover(true);
+        setError(null);
+        setInfoMessage(t("bookEdit.removingCover"));
+        try {
+            await invoke("remove_cover", { itemId: selectedItemId });
+            onClearCover(selectedItemId);
+            setLocalCoverUrl((previous) => {
+                if (previous) URL.revokeObjectURL(previous);
+                return null;
+            });
+            if (onItemUpdate) {
+                await onItemUpdate();
+            }
+            setInfoMessage(t("bookEdit.coverRemoved"));
+        } catch (err) {
+            console.error("Failed to remove cover", err);
+            setError(err instanceof Error ? err.message : t("bookEdit.failedRemoveCover"));
+            setInfoMessage(null);
+        } finally {
+            setIsRemovingCover(false);
+        }
+    };
+
     const loadEmbeddedCoverCandidates = useCallback(async (itemId: string) => {
         setIsLoadingEmbeddedPreview(true);
         setError(null);
@@ -600,16 +627,29 @@ export function BookEditView({
                             variant="outline"
                             className="w-full"
                             onClick={handleChangeCover}
-                            disabled={isUploadingCover || isApplyingEmbeddedCover || isSaving}
+                            disabled={isUploadingCover || isRemovingCover || isApplyingEmbeddedCover || isSaving}
                         >
                             <ImageIcon size={14} className="mr-2" />
-                            {coverUrl ? t("bookEdit.changeCover") : t("bookEdit.addCover")}
+                            {hasCover ? t("bookEdit.changeCover") : t("bookEdit.addCover")}
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            className="w-full text-red-400 hover:text-red-300 disabled:text-app-ink-muted"
+                            onClick={handleRemoveCover}
+                            disabled={!hasCover || isUploadingCover || isRemovingCover || isApplyingEmbeddedCover || isSaving}
+                        >
+                            {isRemovingCover ? (
+                                <Loader2 size={14} className="mr-2 animate-spin" />
+                            ) : (
+                                <Trash2 size={14} className="mr-2" />
+                            )}
+                            {t("bookEdit.removeCover")}
                         </Button>
                         <Button
                             variant="ghost"
                             className="w-full"
                             onClick={handleUseEmbeddedCover}
-                            disabled={isUploadingCover || isApplyingEmbeddedCover || isSaving || isLoadingEmbeddedPreview}
+                            disabled={isUploadingCover || isRemovingCover || isApplyingEmbeddedCover || isSaving || isLoadingEmbeddedPreview}
                         >
                             {isApplyingEmbeddedCover ? (
                                 <Loader2 size={14} className="mr-2 animate-spin" />

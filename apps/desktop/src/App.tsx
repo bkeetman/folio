@@ -4,6 +4,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -139,6 +140,10 @@ function App() {
   const [editMatchApplying, setEditMatchApplying] = useState<string | null>(null);
   const [editDetailsVersion, setEditDetailsVersion] = useState(0);
   const mainScrollRef = useRef<HTMLElement | null>(null);
+  const savedScrollByViewRef = useRef<Partial<Record<View, number>>>({});
+  const pendingScrollRestoreRef = useRef<{ view: View; top: number } | null>(null);
+  const editReturnScrollRef = useRef<{ view: View; top: number } | null>(null);
+  const scrollRestoreRafRef = useRef<number | null>(null);
   const [inspectorWidth, setInspectorWidth] = useState<number>(readInitialInspectorWidth);
   const [inspectorResizing, setInspectorResizing] = useState(false);
 
@@ -207,6 +212,34 @@ function App() {
           : nextView;
       if (resolvedView === view) return;
 
+      const scrollContainer = mainScrollRef.current;
+      if (scrollContainer) {
+        savedScrollByViewRef.current[view] = scrollContainer.scrollTop;
+      }
+
+      // Restore previous scroll position for views that were already visited.
+      const editReturnTarget = editReturnScrollRef.current;
+      if (
+        view === "edit" &&
+        editReturnTarget &&
+        editReturnTarget.view === resolvedView
+      ) {
+        pendingScrollRestoreRef.current = {
+          view: resolvedView,
+          top: editReturnTarget.top,
+        };
+      } else {
+        const savedTop = savedScrollByViewRef.current[resolvedView];
+        if (typeof savedTop === "number") {
+          pendingScrollRestoreRef.current = { view: resolvedView, top: savedTop };
+        } else {
+          pendingScrollRestoreRef.current = null;
+        }
+      }
+      if (view !== "edit") {
+        editReturnScrollRef.current = null;
+      }
+
       setPendingView(resolvedView);
       startViewTransition(() => {
         setView(resolvedView);
@@ -214,6 +247,40 @@ function App() {
     },
     [startViewTransition, view]
   );
+
+  const restoreScrollPosition = useCallback((top: number) => {
+    const scrollContainer = mainScrollRef.current;
+    if (!scrollContainer) return;
+    if (typeof window === "undefined") {
+      scrollContainer.scrollTo({ top, behavior: "auto" });
+      return;
+    }
+
+    if (scrollRestoreRafRef.current !== null) {
+      window.cancelAnimationFrame(scrollRestoreRafRef.current);
+      scrollRestoreRafRef.current = null;
+    }
+
+    const maxAttempts = 18;
+    let attempts = 0;
+    const run = () => {
+      const container = mainScrollRef.current;
+      if (!container) return;
+      container.scrollTo({ top, behavior: "auto" });
+      attempts += 1;
+
+      const maxScrollableTop = Math.max(0, container.scrollHeight - container.clientHeight);
+      const reachedTarget = Math.abs(container.scrollTop - top) <= 2;
+      const targetIsReachable = maxScrollableTop >= top - 2;
+      if (reachedTarget || (targetIsReachable && attempts >= 2) || attempts >= maxAttempts) {
+        scrollRestoreRafRef.current = null;
+        return;
+      }
+      scrollRestoreRafRef.current = window.requestAnimationFrame(run);
+    };
+
+    scrollRestoreRafRef.current = window.requestAnimationFrame(run);
+  }, []);
 
   const isDesktop =
     isTauri() ||
@@ -1902,11 +1969,30 @@ function App() {
     [ereaderSyncQueue]
   );
 
-  useEffect(() => {
-    if (mainScrollRef.current) {
-      mainScrollRef.current.scrollTo({ top: 0, behavior: "auto" });
+  useLayoutEffect(() => {
+    const scrollContainer = mainScrollRef.current;
+    if (!scrollContainer) return;
+    const pendingRestore = pendingScrollRestoreRef.current;
+    if (pendingRestore && pendingRestore.view === view) {
+      restoreScrollPosition(pendingRestore.top);
+      pendingScrollRestoreRef.current = null;
+      if (editReturnScrollRef.current?.view === view) {
+        editReturnScrollRef.current = null;
+      }
+      return;
     }
-  }, [view]);
+    scrollContainer.scrollTo({ top: 0, behavior: "auto" });
+  }, [restoreScrollPosition, view]);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window === "undefined") return;
+      if (scrollRestoreRafRef.current !== null) {
+        window.cancelAnimationFrame(scrollRestoreRafRef.current);
+        scrollRestoreRafRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (pendingView === view) {
@@ -2238,6 +2324,8 @@ function App() {
             })() : null}
             onQueueEreaderAdd={(itemId) => void handleQueueEreaderAdd(itemId)}
             onNavigateToEdit={() => {
+              const currentTop = mainScrollRef.current?.scrollTop ?? 0;
+              editReturnScrollRef.current = { view, top: currentTop };
               setPreviousView(view);
               setViewWithTransition("edit");
             }}

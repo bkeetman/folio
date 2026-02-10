@@ -1,6 +1,9 @@
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ItemSpinner, ProgressBar } from "../components/ProgressBar";
+import { cn } from "../lib/utils";
 import type { OperationProgress, PendingChange } from "../types/library";
 import { Button } from "../components/ui";
 
@@ -30,6 +33,16 @@ type ChangesViewProps = {
 type MetadataField = {
   key: string;
   labelKey: string;
+};
+
+type CoverBlob = {
+  mime: string;
+  bytes: number[];
+};
+
+type PendingCoverPreview = {
+  fromCover?: CoverBlob | null;
+  toCover?: CoverBlob | null;
 };
 
 const METADATA_FIELDS: MetadataField[] = [
@@ -124,6 +137,116 @@ function formatFileName(path: string | null | undefined): string {
   return parts[parts.length - 1] || path;
 }
 
+function PendingCoverDiff({ changeId }: { changeId: string }) {
+  const { t } = useTranslation();
+  const [loading, setLoading] = useState(false);
+  const [fromCoverUrl, setFromCoverUrl] = useState<string | null>(null);
+  const [toCoverUrl, setToCoverUrl] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let nextFromUrl: string | null = null;
+    let nextToUrl: string | null = null;
+
+    const loadPreview = async () => {
+      if (!isTauri()) {
+        if (!active) return;
+        setLoaded(true);
+        return;
+      }
+      setLoading(true);
+      try {
+        const preview = await invoke<PendingCoverPreview | null>("get_pending_cover_preview", {
+          changeId,
+        });
+        if (!active) return;
+        if (preview?.fromCover?.bytes?.length) {
+          const blob = new Blob([new Uint8Array(preview.fromCover.bytes)], {
+            type: preview.fromCover.mime || "image/jpeg",
+          });
+          nextFromUrl = URL.createObjectURL(blob);
+        }
+        if (preview?.toCover?.bytes?.length) {
+          const blob = new Blob([new Uint8Array(preview.toCover.bytes)], {
+            type: preview.toCover.mime || "image/jpeg",
+          });
+          nextToUrl = URL.createObjectURL(blob);
+        }
+        setFromCoverUrl(nextFromUrl);
+        setToCoverUrl(nextToUrl);
+      } catch {
+        if (!active) return;
+        setFromCoverUrl(null);
+        setToCoverUrl(null);
+      } finally {
+        if (active) {
+          setLoading(false);
+          setLoaded(true);
+        }
+      }
+    };
+
+    void loadPreview();
+
+    return () => {
+      active = false;
+      if (nextFromUrl) URL.revokeObjectURL(nextFromUrl);
+      if (nextToUrl) URL.revokeObjectURL(nextToUrl);
+    };
+  }, [changeId]);
+
+  if (loading) {
+    return (
+      <div className="text-[11px] text-[var(--app-ink-muted)]">
+        {t("changes.loadingCoverPreview")}
+      </div>
+    );
+  }
+
+  if (!fromCoverUrl && !toCoverUrl) {
+    return loaded ? (
+      <div className="text-[11px] text-[var(--app-ink-muted)]">
+        {t("changes.coverPreviewUnavailable")}
+      </div>
+    ) : null;
+  }
+
+  return (
+    <div className="mt-1 rounded-md border border-[var(--app-border-soft)] bg-[var(--app-bg-secondary)] p-1.5">
+      <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--app-ink-muted)]">
+        {t("changes.coverWillChange")}
+      </div>
+      <div className="mt-1.5 grid max-w-[180px] grid-cols-2 gap-1.5">
+        <div>
+          <div className="mb-1 text-[9px] uppercase tracking-[0.08em] text-[var(--app-ink-muted)]">
+            {t("changes.coverBefore")}
+          </div>
+          <div className="flex h-20 w-14 items-center justify-center overflow-hidden rounded border border-[var(--app-border-soft)] bg-[var(--app-surface)]">
+            {fromCoverUrl ? (
+              <img src={fromCoverUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <span className="text-[10px] text-[var(--app-ink-muted)]">—</span>
+            )}
+          </div>
+        </div>
+        <div>
+          <div className="mb-1 text-[9px] uppercase tracking-[0.08em] text-[var(--app-ink-muted)]">
+            {t("changes.coverAfter")}
+          </div>
+          <div className="flex h-20 w-14 items-center justify-center overflow-hidden rounded border border-[var(--app-border-soft)] bg-[var(--app-surface)]">
+            {toCoverUrl ? (
+              <img src={toCoverUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <span className="text-[10px] text-[var(--app-ink-muted)]">—</span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ChangesView({
   pendingChangesStatus,
   setPendingChangesStatus,
@@ -147,9 +270,10 @@ export function ChangesView({
   changeProgress,
 }: ChangesViewProps) {
   const { t } = useTranslation();
+
   return (
     <section className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2 rounded-md border border-[var(--app-border)] bg-white/70 p-2">
+      <div className="flex flex-wrap items-center gap-2 rounded-md border border-[var(--app-border)] bg-app-surface/70 p-2">
         <div className="flex gap-2">
           <Button
             variant="ghost"
@@ -219,7 +343,7 @@ export function ChangesView({
         show={pendingChangesApplying && changeProgress !== null}
       />
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-1.5">
         {pendingChanges.length ? (
           pendingChanges.map((change) => {
             const isApplying = applyingChangeIds.has(change.id);
@@ -229,6 +353,9 @@ export function ChangesView({
               change.change_type === "epub_meta" ||
               change.change_type === "item_metadata" ||
               change.change_type === "fix_candidate";
+            const hasCoverUpdate =
+              change.change_type === "epub_cover" ||
+              (change.change_type === "epub_meta" && parsedChanges?.apply_cover === true);
             const shownMetadataFields = METADATA_FIELDS.filter(({ key }, index, fields) => {
               if (!metadataPayload) return false;
               if (!(key in metadataPayload)) return false;
@@ -238,98 +365,127 @@ export function ChangesView({
               return fields.findIndex((field) => field.key === key) === index;
             });
             const hasMetadataDetails = shownMetadataFields.length > 0;
+            const statusLabel = isApplying
+              ? t("changes.applying")
+              : change.status === "error"
+                ? t("changes.error")
+                : change.status === "applied"
+                  ? t("changes.applied")
+                  : t("changes.pending");
             return (
               <div
                 key={change.id}
-                className={
+                className={cn(
+                  "rounded-md border p-2",
                   isApplying
-                    ? "flex items-start gap-3 rounded-md border border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.08)] p-3"
-                    : "flex items-start gap-3 rounded-md border border-[var(--app-border)] bg-white/70 p-3"
-                }
+                    ? "border-[rgba(208,138,70,0.6)] bg-[rgba(208,138,70,0.08)]"
+                    : "border-[var(--app-border)] bg-app-surface/70"
+                )}
               >
-                <label className="mt-1">
-                  {isApplying ? (
-                    <ItemSpinner isProcessing={true} size={16} variant="accent" />
-                  ) : (
-                    <input
-                      type="checkbox"
-                      checked={selectedChangeIds.has(change.id)}
-                      onChange={() => toggleChangeSelection(change.id)}
-                      disabled={change.status !== "pending"}
-                    />
-                  )}
-                </label>
-                <div className="flex flex-1 flex-col gap-1">
-                  <div className="text-[13px] font-semibold">
-                    {changeTypeLabel(change.change_type, t)}
-                  </div>
-                  <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
-                    {isApplying
-                      ? t("changes.applying")
-                      : change.status === "error"
-                        ? t("changes.error")
-                        : change.status === "applied"
-                          ? t("changes.applied")
-                          : t("changes.pending")}
-                  </div>
-                  <div className="text-xs text-[var(--app-ink-muted)]">
-                    {change.from_path ? formatFileName(change.from_path) : ""}
-                  </div>
-                  {change.from_path ? (
-                    <div className="text-[11px] text-[var(--app-ink-muted)]">{change.from_path}</div>
-                  ) : null}
-                  {change.to_path ? (
-                    <>
-                      <div className="text-xs text-[var(--app-ink-muted)]">
-                        {t("changes.newPath")}: {formatFileName(change.to_path)}
-                      </div>
-                      <div className="text-[11px] text-[var(--app-ink-muted)]">{change.to_path}</div>
-                    </>
-                  ) : null}
-                  {hasMetadataDetails ? (
-                    <div className="mt-1 rounded-md border border-[var(--app-border-soft)] bg-[var(--app-bg-secondary)] p-2">
-                      <div className="text-[11px] font-medium text-[var(--app-ink)]">
-                        {t("changes.plannedMetadataUpdates")}
-                      </div>
-                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                        {shownMetadataFields.map((field) => (
-                          <div key={field.key} className="rounded-sm border border-[var(--app-border-soft)] bg-[var(--app-surface)] p-2">
-                            <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--app-ink-muted)]">
-                              {t(field.labelKey)}
-                            </div>
-                            <div className="mt-1 text-xs text-[var(--app-ink)]">
-                              {formatMetadataValue(metadataPayload?.[field.key], t)}
-                            </div>
+                <div className="flex items-start gap-2">
+                  <label className="mt-1 shrink-0">
+                    {isApplying ? (
+                      <ItemSpinner isProcessing={true} size={14} variant="accent" />
+                    ) : (
+                      <input
+                        type="checkbox"
+                        checked={selectedChangeIds.has(change.id)}
+                        onChange={() => toggleChangeSelection(change.id)}
+                        disabled={change.status !== "pending"}
+                      />
+                    )}
+                  </label>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <div className="text-[12px] font-semibold text-[var(--app-ink)]">
+                            {changeTypeLabel(change.change_type, t)}
                           </div>
-                        ))}
+                          <span className="rounded-full border border-[var(--app-border-soft)] bg-app-bg px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[var(--app-ink-muted)]">
+                            {statusLabel}
+                          </span>
+                        </div>
+                        {change.from_path ? (
+                          <div className="mt-0.5 truncate text-[11px] text-[var(--app-ink-muted)]">
+                            {formatFileName(change.from_path)}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2"
+                          onClick={() => handleApplyChange(change.id)}
+                          disabled={pendingChangesApplying || change.status !== "pending"}
+                        >
+                          {isApplying ? <Loader2 size={13} className="animate-spin" /> : t("changes.apply")}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2"
+                          onClick={() => handleRemoveChange(change.id)}
+                          disabled={pendingChangesApplying || change.status !== "pending"}
+                        >
+                          {t("changes.remove")}
+                        </Button>
                       </div>
                     </div>
-                  ) : isMetadataChange && change.changes_json ? (
-                    <div className="text-xs text-[var(--app-ink-muted)]">
-                      {t("changes.unreadableMetadata")}
+
+                    <div className="mt-1.5 flex flex-col gap-1.5">
+                      {change.from_path ? (
+                        <div className="truncate text-[10px] text-[var(--app-ink-muted)]">
+                          {change.from_path}
+                        </div>
+                      ) : null}
+                      {change.to_path ? (
+                        <div className="truncate text-[10px] text-[var(--app-ink-muted)]">
+                          {t("changes.newPath")}: {change.to_path}
+                        </div>
+                      ) : null}
+
+                      {hasMetadataDetails ? (
+                        <div className="rounded-md border border-[var(--app-border-soft)] bg-[var(--app-bg-secondary)] p-1.5">
+                          <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--app-ink-muted)]">
+                            {t("changes.plannedMetadataUpdates")}
+                          </div>
+                          <div className="mt-1 grid gap-1 sm:grid-cols-3 lg:grid-cols-4">
+                            {shownMetadataFields.map((field) => (
+                              <div
+                                key={field.key}
+                                className="rounded-sm border border-[var(--app-border-soft)] bg-[var(--app-surface)] p-1.5"
+                              >
+                                <div className="text-[9px] uppercase tracking-[0.08em] text-[var(--app-ink-muted)]">
+                                  {t(field.labelKey)}
+                                </div>
+                                <div className="mt-0.5 text-[11px] text-[var(--app-ink)]">
+                                  {formatMetadataValue(metadataPayload?.[field.key], t)}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : isMetadataChange && change.changes_json ? (
+                        <div className="text-[11px] text-[var(--app-ink-muted)]">
+                          {t("changes.unreadableMetadata")}
+                        </div>
+                      ) : null}
+
+                      {hasCoverUpdate ? (
+                        <PendingCoverDiff changeId={change.id} />
+                      ) : null}
+
+                      {change.error ? (
+                        <div className="rounded border border-red-500/30 bg-red-500/10 px-1.5 py-1 text-[11px] text-red-300">
+                          {t("changes.errorLabel")}: {change.error}
+                        </div>
+                      ) : null}
                     </div>
-                  ) : null}
-                  {change.error ? (
-                    <div className="text-xs text-[var(--app-ink-muted)]">{t("changes.errorLabel")}: {change.error}</div>
-                  ) : null}
-                </div>
-                <div className="flex gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleApplyChange(change.id)}
-                    disabled={pendingChangesApplying || change.status !== "pending"}
-                  >
-                    {isApplying ? <Loader2 size={14} className="animate-spin" /> : t("changes.apply")}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleRemoveChange(change.id)}
-                    disabled={pendingChangesApplying || change.status !== "pending"}
-                  >
-                    {t("changes.remove")}
-                  </Button>
+                  </div>
                 </div>
               </div>
             );
@@ -343,7 +499,7 @@ export function ChangesView({
 
       {confirmDeleteOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-          <div className="w-full max-w-sm rounded-md border border-[var(--app-border)] bg-white p-4 shadow-panel">
+          <div className="w-full max-w-sm rounded-md border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-panel">
             <div className="text-[13px] font-semibold">{t("changes.deleteFilesQuestion")}</div>
             <div className="text-xs text-[var(--app-ink-muted)]">
               {t("changes.deleteFilesCount", { count: confirmDeleteIds.length })}

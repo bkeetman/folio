@@ -449,6 +449,13 @@ struct CoverBlob {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct PendingCoverPreview {
+    from_cover: Option<CoverBlob>,
+    to_cover: Option<CoverBlob>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct EmbeddedCoverCandidate {
     path: String,
     mime: String,
@@ -1357,21 +1364,131 @@ fn get_cover_blob(app: tauri::AppHandle, item_id: String) -> Result<Option<Cover
     if bytes.is_empty() {
         return Ok(None);
     }
-    let mime = match std::path::Path::new(&path)
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or("")
-        .to_lowercase()
-        .as_str()
-    {
-        "png" => "image/png",
-        "webp" => "image/webp",
-        "jpg" | "jpeg" => "image/jpeg",
-        _ => "image/jpeg",
-    }
+    let mime = mime_from_extension(
+        std::path::Path::new(&path)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or(""),
+    )
     .to_string();
 
     Ok(Some(CoverBlob { mime, bytes }))
+}
+
+fn mime_from_extension(extension: &str) -> &'static str {
+    match extension.to_lowercase().as_str() {
+        "png" => "image/png",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "jpg" | "jpeg" => "image/jpeg",
+        _ => "image/jpeg",
+    }
+}
+
+fn cover_blob_from_path(path: &str) -> Result<Option<CoverBlob>, String> {
+    let bytes = std::fs::read(path).map_err(|err| err.to_string())?;
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    let extension = std::path::Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    Ok(Some(CoverBlob {
+        mime: mime_from_extension(extension).to_string(),
+        bytes,
+    }))
+}
+
+#[tauri::command]
+fn get_pending_cover_preview(
+    app: tauri::AppHandle,
+    change_id: String,
+) -> Result<Option<PendingCoverPreview>, String> {
+    let conn = open_db(&app)?;
+
+    let record: Option<(String, String, Option<String>)> = conn
+        .query_row(
+            "SELECT type, file_id, from_path FROM pending_changes WHERE id = ?1 LIMIT 1",
+            params![change_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+
+    let (change_type, file_id, from_path) = match record {
+        Some(value) => value,
+        None => return Ok(None),
+    };
+
+    if change_type != "epub_cover" {
+        if change_type != "epub_meta" {
+            return Ok(None);
+        }
+        let changes_json: Option<String> = conn
+            .query_row(
+                "SELECT changes_json FROM pending_changes WHERE id = ?1 LIMIT 1",
+                params![change_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?
+            .flatten();
+        let Some(changes_json) = changes_json else {
+            return Ok(None);
+        };
+        let changes: EpubChangeSet = serde_json::from_str(&changes_json).map_err(|err| err.to_string())?;
+        if !changes.apply_cover {
+            return Ok(None);
+        }
+    }
+
+    let from_cover = if let Some(path) = from_path.as_deref() {
+        if let Some((bytes, extension)) =
+            extract_epub_cover(std::path::Path::new(path)).ok().flatten()
+        {
+            Some(CoverBlob {
+                mime: mime_from_extension(&extension).to_string(),
+                bytes,
+            })
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let item_id: Option<String> = conn
+        .query_row(
+            "SELECT item_id FROM files WHERE id = ?1 LIMIT 1",
+            params![file_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+
+    let to_cover = match item_id {
+        Some(item_id) => {
+            let path: Option<String> = conn
+                .query_row(
+                    "SELECT local_path FROM covers WHERE item_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                    params![item_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|err| err.to_string())?;
+            match path {
+                Some(path) => cover_blob_from_path(&path).ok().flatten(),
+                None => None,
+            }
+        }
+        None => None,
+    };
+
+    Ok(Some(PendingCoverPreview {
+        from_cover,
+        to_cover,
+    }))
 }
 
 #[tauri::command]
@@ -1560,6 +1677,10 @@ fn get_pending_changes(
 ) -> Result<Vec<PendingChange>, String> {
     let conn = open_db(&app)?;
     let status = status.unwrap_or_else(|| "pending".to_string());
+    if status == "pending" {
+        cleanup_duplicate_pending_cover_changes(&conn)?;
+        cleanup_redundant_pending_item_metadata_changes(&conn)?;
+    }
     let mut stmt = conn
     .prepare(
       "SELECT id, file_id, type, from_path, to_path, changes_json, status, created_at, applied_at, error \
@@ -1589,6 +1710,73 @@ fn get_pending_changes(
         changes.push(row.map_err(|err| err.to_string())?);
     }
     Ok(changes)
+}
+
+fn cleanup_redundant_pending_item_metadata_changes(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT im.id \
+             FROM pending_changes im \
+             WHERE im.status = 'pending' \
+               AND im.type = 'item_metadata' \
+               AND EXISTS ( \
+                 SELECT 1 \
+                 FROM pending_changes em \
+                 WHERE em.status = 'pending' \
+                   AND em.type = 'epub_meta' \
+                   AND em.file_id = im.file_id \
+               )",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(params![], |row| row.get::<_, String>(0))
+        .map_err(|err| err.to_string())?;
+    let mut ids = Vec::new();
+    for row in rows {
+        ids.push(row.map_err(|err| err.to_string())?);
+    }
+    for id in ids {
+        conn.execute("DELETE FROM pending_changes WHERE id = ?1", params![id])
+            .map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
+fn cleanup_duplicate_pending_cover_changes(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT pc.id, f.item_id \
+             FROM pending_changes pc \
+             JOIN files f ON f.id = pc.file_id \
+             WHERE pc.status = 'pending' AND pc.type = 'epub_cover' \
+             ORDER BY pc.created_at ASC, pc.id ASC",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(params![], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|err| err.to_string())?;
+
+    let mut keep_by_item: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut duplicate_ids: Vec<String> = Vec::new();
+
+    for row in rows {
+        let (change_id, item_id) = row.map_err(|err| err.to_string())?;
+        match keep_by_item.get(&item_id) {
+            Some(_) => duplicate_ids.push(change_id),
+            None => {
+                keep_by_item.insert(item_id, change_id);
+            }
+        }
+    }
+
+    for change_id in duplicate_ids {
+        conn.execute("DELETE FROM pending_changes WHERE id = ?1", params![change_id])
+            .map_err(|err| err.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -2060,10 +2248,6 @@ fn apply_epub_change(conn: &Connection, change: &PendingChange, _now: i64) -> Re
 }
 
 fn apply_epub_cover_change(conn: &Connection, change: &PendingChange) -> Result<(), String> {
-    let path = change
-        .from_path
-        .as_ref()
-        .ok_or_else(|| "Missing EPUB path".to_string())?;
     let item_id: String = conn
         .query_row(
             "SELECT item_id FROM files WHERE id = ?1",
@@ -2085,7 +2269,32 @@ fn apply_epub_cover_change(conn: &Connection, change: &PendingChange) -> Result<
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or("jpg");
-    crate::parser::epub::write_epub_cover(std::path::Path::new(path), &cover_bytes, extension)?;
+
+    let file_records = get_active_epub_file_records(conn, &item_id)?;
+    let mut seen_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut target_paths: Vec<String> = file_records
+        .into_iter()
+        .map(|(_, path)| path)
+        .filter(|path| seen_paths.insert(path.clone()))
+        .collect();
+
+    if target_paths.is_empty() {
+        if let Some(path) = change.from_path.clone() {
+            target_paths.push(path);
+        }
+    }
+
+    if target_paths.is_empty() {
+        return Err("No active EPUB files found for cover update.".to_string());
+    }
+
+    for target_path in target_paths {
+        crate::parser::epub::write_epub_cover(
+            std::path::Path::new(&target_path),
+            &cover_bytes,
+            extension,
+        )?;
+    }
     Ok(())
 }
 
@@ -3368,12 +3577,14 @@ fn apply_enrichment_for_batch(
     now: i64,
 ) -> Result<(), String> {
     apply_enrichment_candidate(app, conn, item_id, candidate, now)?;
-    let _ = queue_epub_changes(conn, item_id, candidate, now);
+    let base_changes = epub_changes_from_candidate(candidate, false);
+    let _ = queue_epub_changes_for_item(conn, item_id, &base_changes, now);
 
     // Try to fetch cover
+    let cover_url = resolve_candidate_cover_url(candidate);
     let mut cover_fetched = false;
     let mut cover_updated = false;
-    if let Some(url) = candidate.cover_url.as_deref() {
+    if let Some(url) = cover_url.as_deref() {
         cover_fetched = fetch_cover_from_url(app, conn, item_id, url, now).unwrap_or(false);
         cover_updated = cover_fetched;
     }
@@ -3381,7 +3592,8 @@ fn apply_enrichment_for_batch(
         cover_updated = fetch_cover_fallback(app, conn, item_id, now).unwrap_or(false);
     }
     if cover_updated {
-        let _ = queue_epub_cover_changes_for_item(conn, item_id, now);
+        let changes_with_cover = epub_changes_from_candidate(candidate, true);
+        let _ = queue_epub_changes_for_item(conn, item_id, &changes_with_cover, now);
     }
 
     conn.execute(
@@ -3531,43 +3743,6 @@ fn queue_pending_change(
     Ok(id)
 }
 
-fn queue_item_metadata_change(
-    conn: &Connection,
-    item_id: &str,
-    mut metadata: ItemMetadata,
-    now: i64,
-    replace_existing: bool,
-) -> Result<(), String> {
-    let (file_id, from_path) = get_item_reference_file(conn, item_id)?;
-    metadata.authors = normalize_author_values(&metadata.authors);
-    metadata.description = normalize_optional_description(metadata.description);
-    let payload = QueuedItemMetadataChange {
-        item_id: item_id.to_string(),
-        metadata,
-    };
-    let changes_json = serde_json::to_string(&payload).map_err(|err| err.to_string())?;
-    queue_pending_change(
-        conn,
-        &file_id,
-        "item_metadata",
-        Some(&from_path),
-        None,
-        Some(&changes_json),
-        now,
-        replace_existing,
-    )?;
-    Ok(())
-}
-
-fn queue_metadata_review_change(
-    conn: &Connection,
-    item_id: &str,
-    now: i64,
-) -> Result<(), String> {
-    let metadata = get_item_details_from_conn(conn, item_id)?;
-    queue_item_metadata_change(conn, item_id, metadata, now, true)
-}
-
 fn queue_tag_review_change(
     conn: &Connection,
     item_id: &str,
@@ -3673,8 +3848,9 @@ fn apply_fix_candidate_sync(
     );
     let mut cover_fetched = false;
     let mut cover_updated = false;
-    let candidate_had_cover_url = candidate.cover_url.is_some();
-    if let Some(url) = candidate.cover_url.as_deref() {
+    let resolved_cover_url = resolve_candidate_cover_url(&candidate);
+    let candidate_had_cover_url = resolved_cover_url.is_some();
+    if let Some(url) = resolved_cover_url.as_deref() {
         cover_fetched = fetch_cover_from_url(&app, &conn, &item_id, url, now)?;
         cover_updated = cover_fetched;
     }
@@ -3703,18 +3879,12 @@ fn apply_fix_candidate_sync(
     }
 
     if cover_updated {
-        let queued_cover_changes = queue_epub_cover_changes_for_item(&conn, &item_id, now)?;
+        let changes_with_cover = epub_changes_from_candidate(&candidate, true);
+        let queued_with_cover = queue_epub_changes_for_item(&conn, &item_id, &changes_with_cover, now)?;
         log::info!(
-            "queued epub cover changes: {} for item {}",
-            queued_cover_changes,
+            "queued epub changes with cover for {} files after candidate apply for {}",
+            queued_with_cover,
             item_id
-        );
-    }
-    if let Err(err) = queue_metadata_review_change(&conn, &item_id, now) {
-        log::warn!(
-            "failed to queue metadata review change after candidate apply for {}: {}",
-            item_id,
-            err
         );
     }
 
@@ -3989,13 +4159,6 @@ fn save_item_metadata_sync(
     params![now, item_id],
   )
   .map_err(|err| err.to_string())?;
-    if let Err(err) = queue_metadata_review_change(&conn, &item_id, now) {
-        log::warn!(
-            "failed to queue metadata review change after manual save for {}: {}",
-            item_id,
-            err
-        );
-    }
     log::info!("resolved missing_metadata issues for item {}", item_id);
 
     Ok(queued_epub_changes)
@@ -4483,15 +4646,6 @@ fn apply_batch_metadata_update_sync(
             params![now, item_id],
         )
         .map_err(|err| err.to_string())?;
-        if let Err(err) = queue_metadata_review_change(&conn, &item_id, now) {
-            log::warn!(
-                "failed to queue metadata review change for batch-updated item {}: {}",
-                item_id,
-                err
-            );
-        } else {
-            result.changes_queued += 1;
-        }
         result.files_queued += file_changes_for_item;
         result.items_updated += 1;
     }
@@ -7262,6 +7416,58 @@ fn upload_cover(app: tauri::AppHandle, item_id: String, path: String) -> Result<
         item_id,
         queued_cover_changes
     );
+
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_cover(app: tauri::AppHandle, item_id: String) -> Result<(), String> {
+    let conn = open_db(&app)?;
+    let mut stmt = conn
+        .prepare("SELECT local_path FROM covers WHERE item_id = ?1")
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(params![&item_id], |row| row.get::<_, Option<String>>(0))
+        .map_err(|err| err.to_string())?;
+
+    let mut cover_paths: Vec<String> = Vec::new();
+    for row in rows {
+        if let Some(path) = row.map_err(|err| err.to_string())? {
+            cover_paths.push(path);
+        }
+    }
+
+    conn.execute("DELETE FROM covers WHERE item_id = ?1", params![&item_id])
+        .map_err(|err| err.to_string())?;
+
+    // Cover is gone, so remove direct cover updates and keep metadata updates without cover apply.
+    conn.execute(
+        "DELETE FROM pending_changes \
+         WHERE item_id = ?1 AND status = 'pending' AND type = 'epub_cover'",
+        params![&item_id],
+    )
+    .map_err(|err| err.to_string())?;
+    conn.execute(
+        "UPDATE pending_changes \
+         SET changes = json_set(COALESCE(changes, '{}'), '$.apply_cover', 0) \
+         WHERE item_id = ?1 \
+           AND status = 'pending' \
+           AND type = 'epub_meta' \
+           AND COALESCE(json_extract(changes, '$.apply_cover'), 0) = 1",
+        params![&item_id],
+    )
+    .map_err(|err| err.to_string())?;
+
+    for path in cover_paths {
+        if path.trim().is_empty() {
+            continue;
+        }
+        if let Err(err) = std::fs::remove_file(&path) {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                log::warn!("failed to remove cover file {}: {}", path, err);
+            }
+        }
+    }
 
     Ok(())
 }
@@ -10827,20 +11033,24 @@ fn queue_epub_changes(
     candidate: &EnrichmentCandidate,
     now: i64,
 ) -> Result<i64, String> {
+    let changes = epub_changes_from_candidate(candidate, false);
+    queue_epub_changes_for_item(conn, item_id, &changes, now)
+}
+
+fn epub_changes_from_candidate(candidate: &EnrichmentCandidate, apply_cover: bool) -> EpubChangeSet {
     let isbn = candidate
         .identifiers
         .iter()
         .filter_map(|raw| normalize_isbn(raw).or_else(|| Some(raw.to_string())))
         .find(|value| value.len() == 10 || value.len() == 13);
 
-    let changes = EpubChangeSet {
+    EpubChangeSet {
         title: candidate.title.clone(),
         author: candidate.authors.first().cloned(),
         isbn,
         description: None,
-        apply_cover: false,
-    };
-    queue_epub_changes_for_item(conn, item_id, &changes, now)
+        apply_cover,
+    }
 }
 
 fn queue_epub_changes_for_item(
@@ -10858,6 +11068,15 @@ fn queue_epub_changes_for_item(
         return Ok(0);
     }
 
+    let preserve_cover_update = has_pending_cover_update_for_item(conn, item_id)?;
+    let effective_changes = EpubChangeSet {
+        title: changes.title.clone(),
+        author: changes.author.clone(),
+        isbn: changes.isbn.clone(),
+        description: changes.description.clone(),
+        apply_cover: changes.apply_cover || preserve_cover_update,
+    };
+
     let mut stmt = conn
     .prepare(
       "SELECT id, path FROM files WHERE item_id = ?1 AND status = 'active' AND LOWER(extension) IN ('epub', '.epub')",
@@ -10869,7 +11088,7 @@ fn queue_epub_changes_for_item(
         })
         .map_err(|err| err.to_string())?;
 
-    let changes_json = serde_json::to_string(changes).map_err(|err| err.to_string())?;
+    let changes_json = serde_json::to_string(&effective_changes).map_err(|err| err.to_string())?;
 
     let mut created = 0i64;
     for row in rows {
@@ -10892,6 +11111,73 @@ fn queue_epub_changes_for_item(
     Ok(created)
 }
 
+fn has_pending_cover_update_for_item(conn: &Connection, item_id: &str) -> Result<bool, String> {
+    let pending_cover_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) \
+             FROM pending_changes pc \
+             JOIN files f ON f.id = pc.file_id \
+             WHERE pc.status = 'pending' \
+               AND pc.type = 'epub_cover' \
+               AND f.item_id = ?1",
+            params![item_id],
+            |row| row.get(0),
+        )
+        .map_err(|err| err.to_string())?;
+    if pending_cover_count > 0 {
+        return Ok(true);
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT pc.changes_json \
+             FROM pending_changes pc \
+             JOIN files f ON f.id = pc.file_id \
+             WHERE pc.status = 'pending' \
+               AND pc.type = 'epub_meta' \
+               AND f.item_id = ?1",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(params![item_id], |row| row.get::<_, Option<String>>(0))
+        .map_err(|err| err.to_string())?;
+
+    for row in rows {
+        let Some(raw) = row.map_err(|err| err.to_string())? else {
+            continue;
+        };
+        let parsed: EpubChangeSet = match serde_json::from_str(&raw) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        if parsed.apply_cover {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn resolve_candidate_cover_url(candidate: &EnrichmentCandidate) -> Option<String> {
+    if let Some(url) = candidate.cover_url.as_ref() {
+        let trimmed = url.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    let isbn = candidate
+        .identifiers
+        .iter()
+        .filter_map(|raw| normalize_isbn(raw))
+        .find(|value| value.len() == 10 || value.len() == 13)?;
+
+    Some(format!(
+        "https://covers.openlibrary.org/b/isbn/{}-L.jpg",
+        isbn
+    ))
+}
+
 fn queue_epub_cover_changes_for_item(
     conn: &Connection,
     item_id: &str,
@@ -10901,9 +11187,43 @@ fn queue_epub_cover_changes_for_item(
         return Ok(0);
     }
 
+    let file_records = get_active_epub_file_records(conn, item_id)?;
+    if file_records.is_empty() {
+        return Ok(0);
+    }
+
+    for (file_id, _) in &file_records {
+        conn.execute(
+            "DELETE FROM pending_changes WHERE file_id = ?1 AND type = 'epub_cover' AND status = 'pending'",
+            params![file_id],
+        )
+        .map_err(|err| err.to_string())?;
+    }
+
+    let (reference_file_id, reference_path) = file_records[0].clone();
+    let change_id = Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO pending_changes (id, file_id, type, from_path, to_path, changes_json, status, created_at) \
+         VALUES (?1, ?2, 'epub_cover', ?3, NULL, NULL, 'pending', ?4)",
+        params![change_id, reference_file_id, reference_path, now],
+    )
+    .map_err(|err| err.to_string())?;
+
+    Ok(file_records.len() as i64)
+}
+
+fn get_active_epub_file_records(
+    conn: &Connection,
+    item_id: &str,
+) -> Result<Vec<(String, String)>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, path FROM files WHERE item_id = ?1 AND status = 'active' AND LOWER(extension) IN ('epub', '.epub')",
+            "SELECT id, path \
+             FROM files \
+             WHERE item_id = ?1 \
+               AND status = 'active' \
+               AND LOWER(extension) IN ('epub', '.epub') \
+             ORDER BY created_at ASC, id ASC",
         )
         .map_err(|err| err.to_string())?;
     let rows = stmt
@@ -10911,26 +11231,11 @@ fn queue_epub_cover_changes_for_item(
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })
         .map_err(|err| err.to_string())?;
-
-    let mut created = 0i64;
+    let mut records = Vec::new();
     for row in rows {
-        let (file_id, path) = row.map_err(|err| err.to_string())?;
-        conn.execute(
-            "DELETE FROM pending_changes WHERE file_id = ?1 AND type = 'epub_cover' AND status = 'pending'",
-            params![file_id],
-        )
-        .map_err(|err| err.to_string())?;
-        let change_id = Uuid::new_v4().to_string();
-        conn.execute(
-            "INSERT INTO pending_changes (id, file_id, type, from_path, to_path, changes_json, status, created_at) \
-             VALUES (?1, ?2, 'epub_cover', ?3, NULL, NULL, 'pending', ?4)",
-            params![change_id, file_id, path, now],
-        )
-        .map_err(|err| err.to_string())?;
-        created += 1;
+        records.push(row.map_err(|err| err.to_string())?);
     }
-
-    Ok(created)
+    Ok(records)
 }
 
 fn insert_field_source_with_source(
@@ -11830,6 +12135,7 @@ pub fn run() {
             add_tag_to_item,
             remove_tag_from_item,
             get_cover_blob,
+            get_pending_cover_preview,
             get_duplicate_groups,
             get_title_duplicate_groups,
             get_fuzzy_duplicate_groups,
@@ -11884,6 +12190,7 @@ pub fn run() {
             remove_missing_file,
             remove_all_missing_files,
             upload_cover,
+            remove_cover,
             get_embedded_cover_preview,
             list_embedded_cover_candidates,
             use_embedded_cover_from_bytes,
