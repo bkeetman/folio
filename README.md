@@ -2,7 +2,7 @@
 
 [![release](https://github.com/bkeetman/folio/actions/workflows/release.yml/badge.svg)](https://github.com/bkeetman/folio/actions/workflows/release.yml)
 
-Calm, modern, Mac-first personal book library.
+Calm, modern, desktop personal book library.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
