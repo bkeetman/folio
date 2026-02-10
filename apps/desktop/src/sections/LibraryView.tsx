@@ -24,6 +24,7 @@ type LibraryViewProps = {
   onSetBatchSelection: (ids: string[]) => void;
   onClearBatchSelection: () => void;
   onApplyBatchMetadata: (payload: BatchMetadataUpdatePayload) => Promise<void>;
+  onRemoveSelectedBooks: (itemIds: string[]) => Promise<boolean>;
   libraryFilter: LibraryFilter;
   setLibraryFilter: Dispatch<SetStateAction<LibraryFilter>>;
   librarySort: LibrarySort;
@@ -58,6 +59,7 @@ export function LibraryView({
   onSetBatchSelection,
   onClearBatchSelection,
   onApplyBatchMetadata,
+  onRemoveSelectedBooks,
   libraryFilter,
   setLibraryFilter,
   librarySort,
@@ -174,6 +176,7 @@ export function LibraryView({
             onSetBatchSelection={onSetBatchSelection}
             onClearBatchSelection={onClearBatchSelection}
             onApplyBatchMetadata={onApplyBatchMetadata}
+            onRemoveSelectedBooks={onRemoveSelectedBooks}
             tags={tags}
             onClose={() => setBatchPanelOpen(false)}
           />

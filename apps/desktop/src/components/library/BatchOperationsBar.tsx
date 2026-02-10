@@ -27,6 +27,7 @@ type BatchOperationsBarProps = {
     onSetBatchSelection: (ids: string[]) => void;
     onClearBatchSelection: () => void;
     onApplyBatchMetadata: (payload: BatchMetadataUpdatePayload) => Promise<void>;
+    onRemoveSelectedBooks: (itemIds: string[]) => Promise<boolean>;
     tags: Tag[];
     onClose: () => void;
 };
@@ -37,6 +38,7 @@ export function BatchOperationsBar({
     onSetBatchSelection,
     onClearBatchSelection,
     onApplyBatchMetadata,
+    onRemoveSelectedBooks,
     tags,
     onClose,
 }: BatchOperationsBarProps) {
@@ -46,6 +48,7 @@ export function BatchOperationsBar({
 
     // Batch State
     const [batchApplying, setBatchApplying] = useState(false);
+    const [batchRemoving, setBatchRemoving] = useState(false);
     const [batchCategories, setBatchCategories] = useState<string[]>([]);
     const [batchTagIds, setBatchTagIds] = useState<string[]>([]);
 
@@ -61,7 +64,7 @@ export function BatchOperationsBar({
     const [batchClearSeriesIndex, setBatchClearSeriesIndex] = useState(false);
     const [batchYearInput, setBatchYearInput] = useState("");
     const [batchClearPublishedYear, setBatchClearPublishedYear] = useState(false);
-    const [batchTagMode] = useState<BatchTagMode>("append");
+    const [batchTagMode, setBatchTagMode] = useState<BatchTagMode>("append");
     const [batchClearTags] = useState(false);
 
     // Computed
@@ -111,7 +114,7 @@ export function BatchOperationsBar({
         batchTagIds.length > 0;
 
     const handleApplyBatch = async () => {
-        if (batchApplying || selectedBatchCount === 0) return;
+        if (batchApplying || batchRemoving || selectedBatchCount === 0) return;
         if (!batchClearPublishedYear && parsedBatchYear.invalid) return;
         if (!batchClearSeriesIndex && parsedBatchSeriesIndex.invalid) return;
 
@@ -163,10 +166,24 @@ export function BatchOperationsBar({
             setBatchSeries("");
             setBatchSeriesIndexInput("");
             setBatchYearInput("");
+            setBatchTagMode("append");
             setShowAdvanced(false);
             onClose(); // Optional: close panel on success
         } finally {
             setBatchApplying(false);
+        }
+    };
+
+    const handleRemoveSelected = async () => {
+        if (batchApplying || batchRemoving || selectedBatchCount === 0) return;
+        setBatchRemoving(true);
+        try {
+            const removed = await onRemoveSelectedBooks(Array.from(selectedBatchItemIds));
+            if (removed) {
+                onClose();
+            }
+        } finally {
+            setBatchRemoving(false);
         }
     };
 
@@ -243,6 +260,19 @@ export function BatchOperationsBar({
                         <ChevronDown size={12} className="absolute right-2 text-app-ink-muted pointer-events-none" />
                     </div>
 
+                    <div className="group relative inline-flex items-center">
+                        <select
+                            value={batchTagMode}
+                            onChange={(e) => setBatchTagMode(e.target.value as BatchTagMode)}
+                            className="h-8 rounded-md border border-app-border-soft bg-app-bg px-2 pr-8 text-[11px] text-app-ink focus:border-app-accent focus:ring-1 focus:ring-app-accent outline-none appearance-none cursor-pointer hover:bg-app-surface-hover transition-colors min-w-[92px]"
+                        >
+                            <option value="append">{t("library.batchTagModeAppend")}</option>
+                            <option value="replace">{t("library.batchTagModeReplace")}</option>
+                            <option value="remove">{t("library.batchTagModeRemove")}</option>
+                        </select>
+                        <ChevronDown size={12} className="absolute right-2 text-app-ink-muted pointer-events-none" />
+                    </div>
+
                     <button
                         onClick={() => setShowAdvanced(!showAdvanced)}
                         className={cn(
@@ -265,8 +295,17 @@ export function BatchOperationsBar({
                         </span>
                     )}
                     <Button
+                        variant="danger"
+                        size="sm"
+                        disabled={selectedBatchCount === 0 || batchApplying || batchRemoving}
+                        onClick={() => void handleRemoveSelected()}
+                    >
+                        {batchRemoving ? "Removing..." : t("changes.removeSelected")}
+                    </Button>
+                    <Button
                         variant="ghost"
                         size="sm"
+                        disabled={batchApplying || batchRemoving}
                         onClick={() => {
                             setBatchCategories([]);
                             setBatchTagIds([]);
@@ -275,6 +314,7 @@ export function BatchOperationsBar({
                             setBatchSeries("");
                             setBatchSeriesIndexInput("");
                             setBatchYearInput("");
+                            setBatchTagMode("append");
                             setShowAdvanced(false);
                             onClose();
                         }}
@@ -284,7 +324,12 @@ export function BatchOperationsBar({
                     <Button
                         variant="primary"
                         size="sm"
-                        disabled={!hasBatchDraft || selectedBatchCount === 0 || batchApplying}
+                        disabled={
+                            !hasBatchDraft ||
+                            selectedBatchCount === 0 ||
+                            batchApplying ||
+                            batchRemoving
+                        }
                         onClick={() => void handleApplyBatch()}
                     >
                         {batchApplying ? t("library.saving") : t("library.apply")}

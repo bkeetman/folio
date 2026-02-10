@@ -1635,8 +1635,32 @@ fn remove_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<i64
 fn queue_remove_item(app: tauri::AppHandle, item_id: String) -> Result<i64, String> {
     let conn = open_db(&app)?;
     let now = chrono::Utc::now().timestamp_millis();
-    let mut queued = 0i64;
+    queue_remove_item_with_conn(&conn, &item_id, now)
+}
 
+#[tauri::command]
+fn queue_remove_items(app: tauri::AppHandle, item_ids: Vec<String>) -> Result<i64, String> {
+    let conn = open_db(&app)?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut queued = 0i64;
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for item_id in item_ids {
+        let trimmed = item_id.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !seen.insert(trimmed.to_string()) {
+            continue;
+        }
+        queued += queue_remove_item_with_conn(&conn, trimmed, now)?;
+    }
+
+    Ok(queued)
+}
+
+fn queue_remove_item_with_conn(conn: &Connection, item_id: &str, now: i64) -> Result<i64, String> {
+    let mut queued = 0i64;
     let mut stmt = conn
         .prepare("SELECT id, path FROM files WHERE item_id = ?1 AND status = 'active'")
         .map_err(|err| err.to_string())?;
@@ -1649,13 +1673,13 @@ fn queue_remove_item(app: tauri::AppHandle, item_id: String) -> Result<i64, Stri
     for row in rows {
         let (file_id, path) = row.map_err(|err| err.to_string())?;
         let existing: Option<String> = conn
-      .query_row(
-        "SELECT id FROM pending_changes WHERE file_id = ?1 AND type = 'delete' AND status = 'pending' LIMIT 1",
-        params![file_id],
-        |r| r.get(0),
-      )
-      .optional()
-      .map_err(|err| err.to_string())?;
+            .query_row(
+                "SELECT id FROM pending_changes WHERE file_id = ?1 AND type = 'delete' AND status = 'pending' LIMIT 1",
+                params![file_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?;
         if existing.is_some() {
             conn.execute(
                 "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE id = ?2",
@@ -1674,11 +1698,11 @@ fn queue_remove_item(app: tauri::AppHandle, item_id: String) -> Result<i64, Stri
 
         let change_id = Uuid::new_v4().to_string();
         conn.execute(
-      "INSERT INTO pending_changes (id, file_id, type, from_path, to_path, changes_json, status, created_at) \
-       VALUES (?1, ?2, 'delete', ?3, NULL, NULL, 'pending', ?4)",
-      params![change_id, file_id, path, now],
-    )
-    .map_err(|err| err.to_string())?;
+            "INSERT INTO pending_changes (id, file_id, type, from_path, to_path, changes_json, status, created_at) \
+             VALUES (?1, ?2, 'delete', ?3, NULL, NULL, 'pending', ?4)",
+            params![change_id, file_id, path, now],
+        )
+        .map_err(|err| err.to_string())?;
         conn.execute(
             "UPDATE files SET status = 'inactive', updated_at = ?1 WHERE id = ?2",
             params![now, file_id],
@@ -11814,6 +11838,7 @@ pub fn run() {
             apply_pending_changes,
             remove_pending_changes,
             queue_remove_item,
+            queue_remove_items,
             generate_pending_changes_from_organize,
             resolve_duplicate_group,
             get_library_health,

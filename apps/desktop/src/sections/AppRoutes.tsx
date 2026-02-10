@@ -58,6 +58,7 @@ type AppRoutesProps = {
   onSetBatchSelection: (ids: string[]) => void;
   onClearBatchSelection: () => void;
   onApplyBatchMetadata: (payload: BatchMetadataUpdatePayload) => Promise<void>;
+  onRemoveSelectedBooks: (itemIds: string[]) => Promise<boolean>;
   libraryFilter: LibraryFilter;
   setLibraryFilter: Dispatch<SetStateAction<LibraryFilter>>;
   librarySort: LibrarySort;
@@ -217,6 +218,7 @@ export function AppRoutes(props: AppRoutesProps) {
     onSetBatchSelection,
     onClearBatchSelection,
     onApplyBatchMetadata,
+    onRemoveSelectedBooks,
     libraryFilter,
     setLibraryFilter,
     librarySort,
@@ -381,6 +383,7 @@ export function AppRoutes(props: AppRoutesProps) {
           onSetBatchSelection={onSetBatchSelection}
           onClearBatchSelection={onClearBatchSelection}
           onApplyBatchMetadata={onApplyBatchMetadata}
+          onRemoveSelectedBooks={onRemoveSelectedBooks}
           libraryFilter={libraryFilter}
           setLibraryFilter={setLibraryFilter}
           librarySort={librarySort}

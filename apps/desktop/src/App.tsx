@@ -1719,6 +1719,54 @@ function App() {
     }
   }, [refreshLibrary, refreshPendingChanges]);
 
+  const handleBatchRemoveItems = useCallback(
+    async (itemIds: string[]) => {
+      if (!isTauri() || itemIds.length === 0) return false;
+      const count = itemIds.length;
+      const noun = count === 1 ? "book" : "books";
+      const { confirm } = await import("@tauri-apps/plugin-dialog");
+      const confirmed = await confirm(
+        `Remove ${count} ${noun} from your library? This queues file deletes in Changes. Files are only deleted after Apply in Changes.`,
+        {
+          title: "Remove selected books",
+          kind: "warning",
+        }
+      );
+      if (!confirmed) {
+        return false;
+      }
+
+      setScanStatus(`Removing ${count} selected ${noun} from library...`);
+      try {
+        const { result: queued } = await runLibraryMutationPipeline(
+          () => invoke<number>("queue_remove_items", { itemIds }),
+          {
+            refreshLibrary: true,
+            refreshPendingChanges: true,
+          }
+        );
+        setSelectedBatchItemIds(new Set());
+        setSelectedItemId((previous) =>
+          previous && itemIds.includes(previous) ? null : previous
+        );
+        setScanStatus(
+          queued > 0
+            ? `Removed ${count} ${noun}. ${queued} file delete change(s) queued in Changes.`
+            : `Removed ${count} ${noun} from library.`
+        );
+        return true;
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : String(error ?? "Could not remove selected books.");
+        setScanStatus(`Could not remove selected books: ${message}`);
+        return false;
+      }
+    },
+    [runLibraryMutationPipeline]
+  );
+
   useEffect(() => {
     if (view !== "edit") return;
     if (!selectedItemId) return;
@@ -1983,6 +2031,7 @@ function App() {
             onSetBatchSelection={handleSetBatchSelection}
             onClearBatchSelection={handleClearBatchSelection}
             onApplyBatchMetadata={handleApplyBatchMetadata}
+            onRemoveSelectedBooks={handleBatchRemoveItems}
             libraryFilter={libraryFilter}
             setLibraryFilter={setLibraryFilter}
             librarySort={librarySort}
