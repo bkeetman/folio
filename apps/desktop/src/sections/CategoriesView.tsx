@@ -1,4 +1,19 @@
-import { Search } from "lucide-react";
+import {
+  Baby,
+  BookOpenText,
+  Feather,
+  Ghost,
+  GraduationCap,
+  Heart,
+  Landmark,
+  Rocket,
+  Search,
+  ShieldAlert,
+  Sparkles,
+  Tag,
+  UserSquare2,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -27,6 +42,36 @@ export function CategoriesView({
   const handleCategoryClick = (categoryName: string) => {
     setSelectedGenres([categoryName]);
     setView("library-books");
+  };
+
+  const getCategoryIcon = (name: string): LucideIcon => {
+    const normalized = name.trim().toLowerCase();
+    switch (normalized) {
+      case "science fiction":
+        return Rocket;
+      case "fantasy":
+        return Sparkles;
+      case "horror":
+        return Ghost;
+      case "mystery & thriller":
+        return ShieldAlert;
+      case "romance":
+        return Heart;
+      case "historical":
+        return Landmark;
+      case "young adult":
+        return GraduationCap;
+      case "children":
+        return Baby;
+      case "poetry":
+        return Feather;
+      case "biography & memoir":
+        return UserSquare2;
+      case "nonfiction":
+        return BookOpenText;
+      default:
+        return Tag;
+    }
   };
 
   return (
@@ -75,7 +120,19 @@ export function CategoriesView({
               className="flex items-center justify-between rounded-lg border border-[var(--app-border)] bg-white/80 px-3 py-2 text-left text-sm transition hover:border-[rgba(208,138,70,0.4)] hover:bg-white"
               onClick={() => handleCategoryClick(category.name)}
             >
-              <span className="font-medium truncate">{category.name}</span>
+              <span className="flex min-w-0 items-center gap-2">
+                {(() => {
+                  const Icon = getCategoryIcon(category.name);
+                  return (
+                    <Icon
+                      size={14}
+                      className="shrink-0 text-[var(--app-ink-muted)]"
+                      aria-hidden="true"
+                    />
+                  );
+                })()}
+                <span className="font-medium truncate">{category.name}</span>
+              </span>
               <span className="ml-2 shrink-0 text-xs text-[var(--app-ink-muted)]">
                 {category.bookCount}
               </span>
