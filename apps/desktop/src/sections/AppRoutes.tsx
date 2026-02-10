@@ -1,4 +1,31 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
+import type { FilteredBook } from "../hooks/useLibrarySelectors";
+import type { ThemeMode } from "../hooks/useTheme";
+import type {
+  BatchMetadataUpdatePayload,
+  Category,
+  DuplicateGroup,
+  EnrichmentCandidate,
+  EReaderBook,
+  EReaderDevice,
+  FixFilter,
+  ImportRequest,
+  InboxItem,
+  ItemMetadata,
+  LibraryFilter,
+  LibraryItem,
+  LibrarySort,
+  MetadataSourceSetting,
+  MissingFileItem,
+  OperationProgress,
+  OrganizePlan,
+  OrganizerLog,
+  PendingChange,
+  SyncProgress,
+  SyncQueueItem,
+  Tag,
+  View,
+} from "../types/library";
 import { AuthorsView } from "./AuthorsView";
 import { BookEditView } from "./BookEditView";
 import { CategoriesView } from "./CategoriesView";
@@ -11,36 +38,9 @@ import { InboxView } from "./InboxView";
 import { LibraryView } from "./LibraryView";
 import { MissingFilesView } from "./MissingFilesView";
 import { OrganizerView } from "./OrganizerView";
-import { SettingsView } from "./SettingsView";
 import { SeriesView } from "./SeriesView";
+import { SettingsView } from "./SettingsView";
 import { TagsView } from "./TagsView";
-import type { FilteredBook } from "../hooks/useLibrarySelectors";
-import type { ThemeMode } from "../hooks/useTheme";
-import type {
-  BatchMetadataUpdatePayload,
-  DuplicateGroup,
-  EnrichmentCandidate,
-  FixFilter,
-  InboxItem,
-  ItemMetadata,
-  LibraryFilter,
-  LibraryItem,
-  LibrarySort,
-  Category,
-  MetadataSourceSetting,
-  MissingFileItem,
-  OperationProgress,
-  ImportRequest,
-  OrganizerLog,
-  OrganizePlan,
-  PendingChange,
-  SyncProgress,
-  SyncQueueItem,
-  Tag,
-  View,
-  EReaderDevice,
-  EReaderBook,
-} from "../types/library";
 
 type AppRoutesProps = {
   view: View;
@@ -65,6 +65,7 @@ type AppRoutesProps = {
   selectedTagIds: string[];
   setSelectedTagIds: Dispatch<SetStateAction<string[]>>;
   grid: boolean;
+  setGrid: Dispatch<SetStateAction<boolean>>;
   fetchCoverOverride: (itemId: string, force?: boolean) => Promise<void>;
   clearCoverOverride: (itemId: string) => void;
   onVisibleItemIdsChange: (ids: string[]) => void;
@@ -353,6 +354,7 @@ export function AppRoutes(props: AppRoutesProps) {
     ereaderSyncProgress,
     themeMode,
     setThemeMode,
+    setGrid,
   } = props;
 
   return (
@@ -384,6 +386,7 @@ export function AppRoutes(props: AppRoutesProps) {
           selectedTagIds={selectedTagIds}
           setSelectedTagIds={setSelectedTagIds}
           grid={grid}
+          setGrid={setGrid}
           fetchCoverOverride={(itemId) => void fetchCoverOverride(itemId)}
           clearCoverOverride={clearCoverOverride}
           onVisibleItemIdsChange={onVisibleItemIdsChange}

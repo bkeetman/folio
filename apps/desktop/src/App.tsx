@@ -8,8 +8,8 @@ import { useEreader } from "./hooks/useEreader";
 import { useLibraryData } from "./hooks/useLibraryData";
 import { useLibrarySelectors } from "./hooks/useLibrarySelectors";
 import { useOrganizer } from "./hooks/useOrganizer";
-import { useUpdater } from "./hooks/useUpdater";
 import { useTheme } from "./hooks/useTheme";
+import { useUpdater } from "./hooks/useUpdater";
 import {
   sampleBooks,
   sampleDuplicateGroups,
@@ -1868,10 +1868,10 @@ function App() {
       className="grid h-screen overflow-hidden bg-[var(--app-bg)] text-[var(--app-ink)]"
       style={
         view === "library" ||
-        view === "library-books" ||
-        view === "library-authors" ||
-        view === "library-series" ||
-        view === "library-categories"
+          view === "library-books" ||
+          view === "library-authors" ||
+          view === "library-series" ||
+          view === "library-categories"
           ? { gridTemplateColumns: `210px minmax(0,1fr) ${inspectorWidth}px` }
           : { gridTemplateColumns: "210px minmax(0,1fr)" }
       }
@@ -1949,6 +1949,7 @@ function App() {
             selectedTagIds={selectedTagIds}
             setSelectedTagIds={setSelectedTagIds}
             grid={grid}
+            setGrid={setGrid}
             fetchCoverOverride={fetchCoverOverride}
             clearCoverOverride={clearCoverOverride}
             onVisibleItemIdsChange={handleVisibleItemIdsChange}
@@ -2057,10 +2058,10 @@ function App() {
             matchLoading={editMatchLoading}
             matchCandidates={editMatchCandidates}
             onMatchSearch={handleEditMatchSearch}
-          onMatchApply={handleEditMatchApply}
-          matchApplyingId={editMatchApplying}
-          onQueueRemoveItem={handleQueueRemoveItem}
-          newTagName={newTagName}
+            onMatchApply={handleEditMatchApply}
+            matchApplyingId={editMatchApplying}
+            onQueueRemoveItem={handleQueueRemoveItem}
+            newTagName={newTagName}
             setNewTagName={setNewTagName}
             newTagColor={newTagColor}
             setNewTagColor={setNewTagColor}

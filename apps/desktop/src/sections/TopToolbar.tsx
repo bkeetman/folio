@@ -123,44 +123,48 @@ export function TopToolbar({
                 className="pl-8"
               />
             </div>
-            <div className="flex items-center rounded-md border border-transparent bg-[var(--app-panel)] p-1">
-              <Button
-                variant="toolbar"
-                size="sm"
-                data-active={grid}
-                className={
-                  grid
-                    ? "bg-app-accent/15 text-app-accent border-[var(--app-accent)] border-opacity-20"
-                    : "border-transparent bg-transparent hover:bg-app-surface-hover/50"
-                }
-                onClick={() => setGrid(true)}
-              >
-                <LayoutGrid size={14} />
-              </Button>
-              <Button
-                variant="toolbar"
-                size="sm"
-                data-active={!grid}
-                className={
-                  !grid
-                    ? "bg-app-accent/15 text-app-accent border-[var(--app-accent)] border-opacity-20"
-                    : "border-transparent bg-transparent hover:bg-app-surface-hover/50"
-                }
-                onClick={() => setGrid(false)}
-              >
-                <List size={14} />
-              </Button>
-            </div>
+            {!view.startsWith("library") && (
+              <div className="flex items-center rounded-md border border-transparent bg-[var(--app-panel)] p-1">
+                <Button
+                  variant="toolbar"
+                  size="sm"
+                  data-active={grid}
+                  className={
+                    grid
+                      ? "bg-app-accent/15 text-app-accent border-[var(--app-accent)] border-opacity-20"
+                      : "border-transparent bg-transparent hover:bg-app-surface-hover/50"
+                  }
+                  onClick={() => setGrid(true)}
+                >
+                  <LayoutGrid size={14} />
+                </Button>
+                <Button
+                  variant="toolbar"
+                  size="sm"
+                  data-active={!grid}
+                  className={
+                    !grid
+                      ? "bg-app-accent/15 text-app-accent border-[var(--app-accent)] border-opacity-20"
+                      : "border-transparent bg-transparent hover:bg-app-surface-hover/50"
+                  }
+                  onClick={() => setGrid(false)}
+                >
+                  <List size={14} />
+                </Button>
+              </div>
+            )}
           </div>
+        </div>
 
-          {(view === "library" || view === "library-books") && !libraryReady ? <Badge variant="muted">{t("topbar.loading")}</Badge> : null}
-        </div>
+        {(view === "library" || view === "library-books") && !libraryReady ? <Badge variant="muted">{t("topbar.loading")}</Badge> : null}
       </header>
-      {updateStatus ? (
-        <div className="rounded-md bg-[rgba(207,217,210,0.35)] px-2 py-1 text-xs text-[var(--app-ink-muted)]">
-          {updateStatus}
-        </div>
-      ) : null}
+      {
+        updateStatus ? (
+          <div className="rounded-md bg-[rgba(207,217,210,0.35)] px-2 py-1 text-xs text-[var(--app-ink-muted)]" >
+            {updateStatus}
+          </div>
+        ) : null
+      }
     </>
   );
 }
