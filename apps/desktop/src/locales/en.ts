@@ -257,6 +257,7 @@ export const enTranslation = {
         noBooksForFilter: "No books match the current filter.",
         table: {
           titleAuthor: "Title / Author",
+          format: "Format",
           status: "Status",
           action: "Action",
         },

@@ -1,9 +1,12 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { FileText, FolderOpen, HardDrive, Import, Minus, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { HardDrive, FolderOpen, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { SyncProgressBar } from "../components/ProgressBar";
-import { Button } from "../components/ui";
-import type { EReaderDevice, EReaderBook, SyncQueueItem, LibraryItem, SyncProgress } from "../types/library";
+import { Badge } from "../components/ui/Badge";
+import { Button } from "../components/ui/Button";
+import { Panel } from "../components/ui/Panel";
+import type { EReaderBook, EReaderDevice, LibraryItem, SyncProgress, SyncQueueItem } from "../types/library";
 
 type EReaderFilter = "all" | "in-library" | "on-device" | "not-on-device" | "device-only" | "queued";
 
@@ -36,6 +39,9 @@ type UnifiedItem = {
   confidence: "exact" | "isbn" | "title" | "fuzzy" | null;
   libraryItemId: string | null;
   ereaderPath: string | null;
+  cover?: string | null;
+  format?: string;
+  filename?: string | null;
 };
 
 export function EReaderView({
@@ -67,6 +73,11 @@ export function EReaderView({
   // Build unified list of items
   const unifiedItems: UnifiedItem[] = [];
 
+  // Helper to get extension/format
+  const getFormat = (filename: string) => {
+    return filename.split(".").pop()?.toUpperCase() || "UNKNOWN";
+  };
+
   // Add library items
   libraryItems.forEach((lib) => {
     const onDevice = ereaderBooks.find((eb) => eb.matchedItemId === lib.id);
@@ -77,6 +88,8 @@ export function EReaderView({
     else if (inQueue?.action === "remove") status = "queued-remove";
     else if (onDevice) status = "on-device";
 
+    const format = lib.formats.length > 0 ? lib.formats[0].toUpperCase() : "UNKNOWN";
+
     unifiedItems.push({
       id: `lib-${lib.id}`,
       title: lib.title,
@@ -85,11 +98,17 @@ export function EReaderView({
       confidence: (onDevice?.matchConfidence as "exact" | "isbn" | "title" | "fuzzy" | null) ?? null,
       libraryItemId: lib.id,
       ereaderPath: onDevice?.path ?? null,
+      cover: lib.cover_path ? convertFileSrc(lib.cover_path) : null,
+      format,
+      filename: onDevice?.filename ?? null,
     });
   });
 
   // Add device-only items
   ereaderBooks.forEach((eb) => {
+    // Filter out hidden/system files (like ._ files from macOS)
+    if (eb.filename.startsWith(".")) return;
+
     if (!eb.matchedItemId) {
       const inQueue = pendingQueue.find((q) => q.ereaderPath === eb.path);
       unifiedItems.push({
@@ -100,6 +119,9 @@ export function EReaderView({
         confidence: null,
         libraryItemId: null,
         ereaderPath: eb.path,
+        cover: null,
+        format: getFormat(eb.filename),
+        filename: eb.filename,
       });
     }
   });
@@ -127,71 +149,87 @@ export function EReaderView({
     const getOnDeviceBadge = () => {
       switch (confidence) {
         case "exact":
-          return { label: t("ereader.synced"), className: "bg-emerald-100 text-emerald-700", title: t("ereader.exactFileMatch") };
+          return { label: t("ereader.synced"), variant: "success", title: t("ereader.exactFileMatch") };
         case "isbn":
-          return { label: t("ereader.synced"), className: "bg-emerald-100 text-emerald-700", title: t("ereader.matchedByIsbn") };
+          return { label: t("ereader.synced"), variant: "success", title: t("ereader.matchedByIsbn") };
         case "title":
-          return { label: t("ereader.synced"), className: "bg-blue-100 text-blue-700", title: t("ereader.matchedByTitle") };
+          return { label: t("ereader.synced"), variant: "info", title: t("ereader.matchedByTitle") };
         case "fuzzy":
-          return { label: t("ereader.syncedMaybe"), className: "bg-sky-100 text-sky-700", title: t("ereader.fuzzyMatchVerify") };
+          return { label: t("ereader.syncedMaybe"), variant: "warning", title: t("ereader.fuzzyMatchVerify") };
         default:
-          return { label: t("ereader.synced"), className: "bg-blue-100 text-blue-700", title: t("ereader.onDevice") };
+          return { label: t("ereader.synced"), variant: "info", title: t("ereader.onDevice") };
       }
     };
 
-    const badges: Record<string, { label: string; className: string; title?: string }> = {
-      "on-device": getOnDeviceBadge(),
-      "library-only": { label: t("ereader.library"), className: "bg-gray-100 text-gray-600", title: t("ereader.onlyInLibrary") },
-      "device-only": { label: t("ereader.device"), className: "bg-amber-100 text-amber-700", title: t("ereader.onlyOnDevice") },
-      "queued-add": { label: t("ereader.queueAdd"), className: "bg-purple-100 text-purple-700", title: t("ereader.queuedToAdd") },
-      "queued-remove": { label: t("ereader.queueRemove"), className: "bg-red-100 text-red-700", title: t("ereader.queuedToRemove") },
+    const badges: Record<string, { label: string; variant: "default" | "muted" | "accent" | "success" | "warning" | "info" | "danger"; title?: string }> = {
+      "on-device": getOnDeviceBadge() as any,
+      "library-only": { label: t("ereader.library"), variant: "muted", title: t("ereader.onlyInLibrary") },
+      "device-only": { label: t("ereader.device"), variant: "warning", title: t("ereader.onlyOnDevice") },
+      "queued-add": { label: t("ereader.queueAdd"), variant: "muted", title: t("ereader.queuedToAdd") },
+      "queued-remove": { label: t("ereader.queueRemove"), variant: "danger", title: t("ereader.queuedToRemove") },
     };
     const badge = badges[status];
+
     return (
-      <span
-        className={`inline-block px-2 py-1 rounded text-xs font-medium whitespace-nowrap ${badge.className}`}
-        title={badge.title}
-      >
+      <Badge variant={badge.variant as any} className="whitespace-nowrap" title={badge.title}>
         {badge.label}
-      </span>
+      </Badge>
     );
   };
 
   const ActionButton = ({ item }: { item: UnifiedItem }) => {
-    if (item.status === "queued-add" || item.status === "queued-remove") {
-      return null;
+    if (item.status === "queued-add") {
+      return (
+        <span className="text-xs text-[var(--app-text-muted)] italic flex items-center gap-1">
+          <Plus size={12} /> {t("ereader.queueAdd")}
+        </span>
+      );
     }
+    if (item.status === "queued-remove") {
+      return (
+        <span className="text-xs text-[var(--app-text-muted)] italic flex items-center gap-1">
+          <Minus size={12} /> {t("ereader.queueRemove")}
+        </span>
+      );
+    }
+
     if (item.status === "library-only" && item.libraryItemId) {
       return (
-        <button
+        <Button
+          size="sm"
+          variant="ghost"
           onClick={() => onQueueAdd(item.libraryItemId!)}
-          className="px-2 py-1 rounded text-sm hover:bg-emerald-100 text-emerald-600 font-medium"
+          className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 p-0"
           title={t("ereader.addToDevice")}
         >
-          +
-        </button>
+          <Plus size={16} />
+        </Button>
       );
     }
     if (item.status === "on-device" && item.ereaderPath) {
       return (
-        <button
+        <Button
+          size="sm"
+          variant="ghost"
           onClick={() => onQueueRemove(item.ereaderPath!)}
-          className="px-2 py-1 rounded text-sm hover:bg-red-100 text-red-600 font-medium"
+          className="h-7 w-7 text-[var(--app-text-muted)] hover:text-red-600 hover:bg-red-50 p-0"
           title={t("ereader.removeFromDevice")}
         >
-          −
-        </button>
+          <Trash2 size={16} />
+        </Button>
       );
     }
     if (item.status === "device-only" && item.ereaderPath) {
       return (
-        <button
+        <Button
+          size="sm"
+          variant="outline"
           onClick={() => onQueueImport(item.ereaderPath!)}
-          className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-700 hover:bg-blue-200"
+          className="h-7 text-xs"
           title={t("ereader.addToLibrary")}
         >
-          {t("ereader.addToLibrary")}
-        </button>
+          {t("ereader.import")}
+        </Button>
       );
     }
     return null;
@@ -300,11 +338,10 @@ export function EReaderView({
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`px-3 py-1 text-xs rounded-full transition-colors ${
-              filter === f
-                ? "bg-[var(--app-accent)] text-white"
-                : "bg-[var(--app-bg-secondary)] hover:bg-[var(--app-bg-tertiary)]"
-            }`}
+            className={`px-3 py-1 text-xs rounded-full transition-colors ${filter === f
+              ? "bg-[var(--app-accent)] text-white"
+              : "bg-[var(--app-bg-secondary)] hover:bg-[var(--app-bg-tertiary)]"
+              }`}
           >
             {f === "all" && t("ereader.filters.all")}
             {f === "in-library" && t("ereader.filters.inLibrary")}
@@ -345,9 +382,9 @@ export function EReaderView({
                             : "text-blue-600"
                       }
                     >
-                      {item.action === "add" ? "+" : item.action === "remove" ? "−" : "↓"}
+                      {item.action === "add" ? <Plus size={14} /> : item.action === "remove" ? <Minus size={14} /> : <Import size={14} />}
                     </span>
-                    <span>{item.action === "add" ? t("ereader.add") : item.action === "remove" ? t("ereader.remove") : t("ereader.import")}</span>
+                    <span className="font-medium text-app-ink">{item.action === "add" ? t("ereader.add") : item.action === "remove" ? t("ereader.remove") : t("ereader.import")}</span>
                     <span className="text-[var(--app-text-muted)]">
                       {item.itemId
                         ? libraryItems.find((i) => i.id === item.itemId)?.title
@@ -368,46 +405,93 @@ export function EReaderView({
       )}
 
       {/* Book List */}
-      <div className="flex-1 overflow-auto">
-        {!selectedDevice?.isConnected ? (
-          <div className="text-center text-[var(--app-text-muted)] py-8">
-            {t("ereader.deviceDisconnected")}
-          </div>
-        ) : ereaderBooks.length === 0 && libraryItems.length === 0 ? (
-          <div className="text-center text-[var(--app-text-muted)] py-8">
-            {t("ereader.clickScanHint")}
-          </div>
-        ) : filteredItems.length === 0 ? (
-          <div className="text-center text-[var(--app-text-muted)] py-8">{t("ereader.noBooksForFilter")}</div>
-        ) : (
-          <table className="w-full">
-            <thead className="sticky top-0 bg-[var(--app-bg)] border-b border-[var(--app-border)]">
-              <tr className="text-left text-xs text-[var(--app-text-muted)]">
-                <th className="p-3 font-medium">{t("ereader.table.titleAuthor")}</th>
-                <th className="p-3 font-medium w-32">{t("ereader.table.status")}</th>
-                <th className="p-3 font-medium w-24">{t("ereader.table.action")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredItems.map((item) => (
-                <tr key={item.id} className="border-b border-[var(--app-border)] hover:bg-[var(--app-bg-secondary)]">
-                  <td className="p-3">
-                    <div className="font-medium">{item.title || t("ereader.unknownTitle")}</div>
-                    <div className="text-sm text-[var(--app-text-muted)]">
-                      {item.authors.length > 0 ? item.authors.join(", ") : t("ereader.unknownAuthor")}
+      <div className="flex-1 overflow-hidden p-4">
+        <Panel className="flex flex-col h-full overflow-hidden p-0 bg-app-surface/50">
+          {!selectedDevice?.isConnected ? (
+            <div className="flex flex-col items-center justify-center h-full text-[var(--app-text-muted)] py-8">
+              <HardDrive className="w-12 h-12 mb-4 opacity-20" />
+              <p>{t("ereader.deviceDisconnected")}</p>
+            </div>
+          ) : ereaderBooks.length === 0 && libraryItems.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-[var(--app-text-muted)] py-8">
+              <RefreshCw className="w-12 h-12 mb-4 opacity-20" />
+              <p>{t("ereader.clickScanHint")}</p>
+            </div>
+          ) : filteredItems.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-[var(--app-text-muted)] py-8">
+              <p>{t("ereader.noBooksForFilter")}</p>
+            </div>
+          ) : (
+            <div className="flex flex-col h-full">
+              {/* Table Header */}
+              {/* Table Body */}
+              <div className="flex-1 overflow-y-auto">
+                {/* Table Header */}
+                <div className="sticky top-0 z-10 grid grid-cols-[48px_2fr_100px_140px_100px] gap-4 border-b border-app-border bg-app-bg-secondary px-4 py-3 text-[10px] uppercase tracking-[0.12em] text-app-ink-muted backdrop-blur-sm">
+                  <div></div>
+                  <div>{t("ereader.table.titleAuthor")}</div>
+                  <div>{t("ereader.table.format")}</div>
+                  <div>{t("ereader.table.status")}</div>
+                  <div className="text-right">{t("ereader.table.action")}</div>
+                </div>
+
+                <div className="divide-y divide-app-border">
+                  {filteredItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className="group grid grid-cols-[48px_2fr_100px_140px_100px] items-center gap-4 px-4 py-3 hover:bg-app-surface-hover transition-colors"
+                    >
+                      {/* Cover */}
+                      <div className="relative aspect-[2/3] w-9 overflow-hidden rounded bg-app-bg-tertiary border border-app-border shadow-sm">
+                        {item.cover ? (
+                          <img
+                            src={item.cover}
+                            alt=""
+                            className="h-full w-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-app-ink-muted/30">
+                            <FileText size={16} />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Title & Author */}
+                      <div className="flex flex-col min-w-0 pr-4">
+                        <div className="truncate text-sm font-medium text-app-ink group-hover:text-app-accent-strong transition-colors">
+                          {item.title || item.filename || t("ereader.unknownTitle")}
+                        </div>
+                        <div className="truncate text-xs text-app-ink-muted">
+                          {item.authors.length > 0 ? item.authors.join(", ") : t("ereader.unknownAuthor")}
+                        </div>
+                      </div>
+
+                      {/* Format */}
+                      <div>
+                        {item.format && (
+                          <span className="inline-flex items-center rounded border border-[var(--app-border-soft)] bg-app-bg/50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-app-ink-muted/80">
+                            {item.format}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Status */}
+                      <div>
+                        <StatusBadge status={item.status} confidence={item.confidence} />
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex justify-end">
+                        <ActionButton item={item} />
+                      </div>
                     </div>
-                  </td>
-                  <td className="p-3">
-                    <StatusBadge status={item.status} confidence={item.confidence} />
-                  </td>
-                  <td className="p-3">
-                    <ActionButton item={item} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </Panel>
       </div>
     </div>
   );
