@@ -168,6 +168,34 @@ body {
   display: block;
 }
 
+/* Showcase Layout */
+.showcase-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  margin-top: 40px;
+}
+
+.showcase-item {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.showcase-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+@media (max-width: 800px) {
+  .showcase-container {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Platform Selector */
 .platform-selector {
   margin-bottom: 80px;
