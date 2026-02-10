@@ -4,6 +4,11 @@
 
 Calm, modern, Mac-first personal book library.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img alt="Folio Screenshot" src="docs/screenshot-light.png">
+</picture>
+
 ## Installation on macOS
 
 Since the app allows you to manage your local files but is not signed with a paid Apple Developer certificate, macOS will quarantine the downloaded file.
