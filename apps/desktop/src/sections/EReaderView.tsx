@@ -529,7 +529,7 @@ export function EReaderView({
             </div>
           ) : (
             <div className="flex flex-col h-full">
-              <div className="flex-1 overflow-y-auto" ref={listRef}>
+              <div className="flex-1 overflow-y-auto scrollbar-hide" ref={listRef}>
                 <div className="sticky top-0 z-10 grid grid-cols-[48px_2fr_100px_140px_100px] gap-4 border-b border-app-border bg-app-bg-secondary px-4 py-3 text-[10px] uppercase tracking-[0.12em] text-app-ink-muted backdrop-blur-sm">
                   <div></div>
                   <div>{t("ereader.table.titleAuthor")}</div>

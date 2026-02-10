@@ -266,7 +266,7 @@ export function FixView({
               )}
             </div>
           ) : null}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto scrollbar-hide">
             {items.map((item) => {
               const issueReason = getIssueReason(item, inboxItems);
               return (
@@ -296,7 +296,7 @@ export function FixView({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto rounded-lg border border-[var(--app-border)] bg-white/70 p-4">
+        <div className="flex-1 overflow-y-auto scrollbar-hide rounded-lg border border-[var(--app-border)] bg-white/70 p-4">
           <BookEditView
             selectedItemId={selectedItemId}
             libraryItems={items}

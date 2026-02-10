@@ -129,3 +129,13 @@ textarea {
 :root[data-theme="dark"] textarea::placeholder {
   color: var(--app-ink-muted);
 }
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}

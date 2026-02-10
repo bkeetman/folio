@@ -984,7 +984,7 @@ export function BookEditView({
                             </button>
                         </div>
 
-                        <div className="mt-4 flex-1 overflow-y-auto">
+                        <div className="mt-4 flex-1 overflow-y-auto scrollbar-hide">
                             {matchLoading ? (
                                 <div className="mb-3 flex items-center gap-2 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2.5 py-2 text-xs text-[var(--app-ink-muted)]">
                                     <Loader2 size={14} className="animate-spin" />

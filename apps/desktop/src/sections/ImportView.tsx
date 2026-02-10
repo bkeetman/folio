@@ -504,7 +504,7 @@ export function ImportView({ onCancel, onImportStart, libraryRoot, template }: I
       </div>
 
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto scrollbar-hide p-6">
         {/* New Books section */}
         {newBooks.length > 0 && (
           <div className="mb-6">
