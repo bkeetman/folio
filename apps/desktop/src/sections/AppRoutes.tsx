@@ -21,6 +21,7 @@ import type {
   OrganizePlan,
   OrganizerLog,
   PendingChange,
+  ScanProgress,
   SyncProgress,
   SyncQueueItem,
   Tag,
@@ -193,6 +194,7 @@ type AppRoutesProps = {
   onExecuteSync: () => void;
   onRefreshDevices: () => void | Promise<void>;
   ereaderScanning: boolean;
+  ereaderScanProgress: ScanProgress | null;
   ereaderSyncing: boolean;
   ereaderSyncProgress: SyncProgress | null;
   themeMode: ThemeMode;
@@ -350,6 +352,7 @@ export function AppRoutes(props: AppRoutesProps) {
     onExecuteSync,
     onRefreshDevices,
     ereaderScanning,
+    ereaderScanProgress,
     ereaderSyncing,
     ereaderSyncProgress,
     themeMode,
@@ -645,6 +648,7 @@ export function AppRoutes(props: AppRoutesProps) {
             await onRefreshDevices();
           }}
           scanning={ereaderScanning}
+          scanProgress={ereaderScanProgress}
           syncing={ereaderSyncing}
           syncProgress={ereaderSyncProgress}
         />

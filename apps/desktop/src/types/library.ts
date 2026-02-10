@@ -67,6 +67,10 @@ export type BatchMetadataUpdatePayload = {
   authorMode?: BatchAuthorMode;
   language?: string;
   clearLanguage?: boolean;
+  series?: string;
+  clearSeries?: boolean;
+  seriesIndex?: number;
+  clearSeriesIndex?: boolean;
   publishedYear?: number;
   clearPublishedYear?: boolean;
   tagIds?: string[];
@@ -79,6 +83,8 @@ export type BatchMetadataUpdateResult = {
   authorsUpdated: number;
   categoriesUpdated: number;
   languageUpdated: number;
+  seriesUpdated: number;
+  seriesIndexUpdated: number;
   yearsUpdated: number;
   tagsUpdated: number;
   changesQueued: number;

@@ -1,6 +1,16 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { ProgressBar, ScanProgressBar } from "./components/ProgressBar";
 import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
@@ -100,6 +110,8 @@ function App() {
     return Math.min(460, Math.max(260, parsed));
   };
   const [view, setView] = useState<View>("library-books");
+  const [isViewTransitionPending, startViewTransition] = useTransition();
+  const [pendingView, setPendingView] = useState<View | null>(null);
   const [previousView, setPreviousView] = useState<View>("library-books");
   const [activityLog, setActivityLog] = useState<ActivityLogItem[]>([]); // New State
   const [grid, setGrid] = useState(true);
@@ -187,6 +199,22 @@ function App() {
   const [selectedSeries, setSelectedSeries] = useState<string[]>([]);
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
 
+  const setViewWithTransition = useCallback<Dispatch<SetStateAction<View>>>(
+    (nextView) => {
+      const resolvedView =
+        typeof nextView === "function"
+          ? (nextView as (previous: View) => View)(view)
+          : nextView;
+      if (resolvedView === view) return;
+
+      setPendingView(resolvedView);
+      startViewTransition(() => {
+        setView(resolvedView);
+      });
+    },
+    [startViewTransition, view]
+  );
+
   const isDesktop =
     isTauri() ||
     (typeof window !== "undefined" &&
@@ -239,6 +267,7 @@ function App() {
     ereaderBooks,
     ereaderSyncQueue,
     ereaderScanning,
+    ereaderScanProgress,
     ereaderSyncDialogOpen,
     setEreaderSyncDialogOpen,
     ereaderSyncing,
@@ -1061,7 +1090,7 @@ function App() {
   );
 
   const handleImportCancel = () => {
-    setView("library-books");
+    setViewWithTransition("library-books");
   };
 
   const handleImportStart = useCallback(async (request: ImportRequest) => {
@@ -1083,7 +1112,7 @@ function App() {
     try {
       const result = await invoke<OperationStats>("import_books", { request });
       await refreshLibrary();
-      setView("library-books");
+      setViewWithTransition("library-books");
       setScanStatus(
         `Import complete: ${result.processed} imported, ${result.skipped} skipped, ${result.errors} errors.`
       );
@@ -1097,7 +1126,7 @@ function App() {
         setImportProgress(null);
       }, 1200);
     }
-  }, [importingBooks, refreshLibrary]);
+  }, [importingBooks, refreshLibrary, setViewWithTransition]);
 
   const handleChooseRoot = async () => {
     if (!isTauri()) return;
@@ -1566,6 +1595,12 @@ function App() {
         if (payload.language || payload.clearLanguage) {
           details.push(`${result.languageUpdated} language updates`);
         }
+        if (payload.series || payload.clearSeries) {
+          details.push(`${result.seriesUpdated} series updates`);
+        }
+        if (payload.seriesIndex !== undefined || payload.clearSeriesIndex) {
+          details.push(`${result.seriesIndexUpdated} series # updates`);
+        }
         if (payload.publishedYear !== undefined || payload.clearPublishedYear) {
           details.push(`${result.yearsUpdated} year updates`);
         }
@@ -1826,6 +1861,12 @@ function App() {
   }, [view]);
 
   useEffect(() => {
+    if (pendingView === view) {
+      setPendingView(null);
+    }
+  }, [pendingView, view]);
+
+  useEffect(() => {
     // Safety net: prevent ending up on Edit without a selected item (blank content state).
     if (view === "edit" && !selectedItemId) {
       setView("library-books");
@@ -1878,9 +1919,9 @@ function App() {
     >
       <Sidebar
         view={view}
-        setView={setView}
+        setView={setViewWithTransition}
         scanning={scanning}
-        handleScan={() => setView("import")}
+        handleScan={() => setViewWithTransition("import")}
         libraryHealth={libraryHealth}
         pendingChangesCount={pendingChangesCount}
         duplicateCount={duplicateActionCount}
@@ -1890,6 +1931,8 @@ function App() {
         handleClearLibrary={() => void handleClearLibrary()}
         appVersion={appVersion}
         ereaderConnected={ereaderDevices.some((d) => d.isConnected)}
+        navigationPending={isViewTransitionPending}
+        pendingView={pendingView}
       />
 
       <main ref={mainScrollRef} className="flex h-screen flex-col gap-4 overflow-y-auto px-6 py-4">
@@ -1924,11 +1967,10 @@ function App() {
           label="Importing"
           variant="blue"
         />
-
         <div className="flex flex-col gap-4">
           <AppRoutes
             view={view}
-            setView={setView}
+            setView={setViewWithTransition}
             isDesktop={isDesktop}
             libraryReady={libraryReady}
             libraryItemsLength={libraryItems.length}
@@ -2084,6 +2126,7 @@ function App() {
               await refreshEreaderDevices();
             }}
             ereaderScanning={ereaderScanning}
+            ereaderScanProgress={ereaderScanProgress}
             ereaderSyncing={ereaderSyncing}
             ereaderSyncProgress={ereaderSyncProgress}
           />
@@ -2130,7 +2173,7 @@ function App() {
             handleRemoveTag={(tagId) => void handleRemoveTag(tagId)}
             clearCoverOverride={clearCoverOverride}
             fetchCoverOverride={(itemId) => void fetchCoverOverride(itemId)}
-            setView={setView}
+            setView={setViewWithTransition}
             setSelectedAuthorNames={setSelectedAuthorNames}
             setSelectedSeries={setSelectedSeries}
             setSelectedGenres={setSelectedGenres}
@@ -2147,7 +2190,7 @@ function App() {
             onQueueEreaderAdd={(itemId) => void handleQueueEreaderAdd(itemId)}
             onNavigateToEdit={() => {
               setPreviousView(view);
-              setView("edit");
+              setViewWithTransition("edit");
             }}
             width={inspectorWidth}
           />

@@ -3431,6 +3431,14 @@ struct BatchMetadataUpdatePayload {
     #[serde(default)]
     clear_language: bool,
     #[serde(default)]
+    series: Option<String>,
+    #[serde(default)]
+    clear_series: bool,
+    #[serde(default)]
+    series_index: Option<f64>,
+    #[serde(default)]
+    clear_series_index: bool,
+    #[serde(default)]
     published_year: Option<i64>,
     #[serde(default)]
     clear_published_year: bool,
@@ -3449,6 +3457,8 @@ struct BatchMetadataUpdateResult {
     authors_updated: i64,
     categories_updated: i64,
     language_updated: i64,
+    series_updated: i64,
+    series_index_updated: i64,
     years_updated: i64,
     tags_updated: i64,
     changes_queued: i64,
@@ -4026,6 +4036,28 @@ fn apply_batch_metadata_update_sync(
     if clear_language && normalized_language.is_some() {
         return Err("Choose either set or clear for language, not both.".to_string());
     }
+    let normalized_series = payload.series.as_ref().and_then(|value| {
+        let cleaned = normalize_ws(value);
+        if cleaned.is_empty() {
+            None
+        } else {
+            Some(cleaned)
+        }
+    });
+    let clear_series = payload.clear_series;
+    if clear_series && normalized_series.is_some() {
+        return Err("Choose either set or clear for series, not both.".to_string());
+    }
+    let requested_series_index = payload.series_index;
+    let clear_series_index = payload.clear_series_index;
+    if clear_series_index && requested_series_index.is_some() {
+        return Err("Choose either set or clear for series number, not both.".to_string());
+    }
+    if let Some(series_index) = requested_series_index {
+        if !series_index.is_finite() || series_index <= 0.0 || series_index > 9999.0 {
+            return Err("Series number must be between 0 and 9999.".to_string());
+        }
+    }
     let requested_published_year = payload.published_year;
     let clear_published_year = payload.clear_published_year;
     if clear_published_year && requested_published_year.is_some() {
@@ -4095,6 +4127,10 @@ fn apply_batch_metadata_update_sync(
         && normalized_genres.is_none()
         && !clear_language
         && normalized_language.is_none()
+        && !clear_series
+        && normalized_series.is_none()
+        && !clear_series_index
+        && requested_series_index.is_none()
         && !clear_published_year
         && requested_published_year.is_none()
         && !clear_tags
@@ -4108,6 +4144,8 @@ fn apply_batch_metadata_update_sync(
         authors_updated: 0,
         categories_updated: 0,
         language_updated: 0,
+        series_updated: 0,
+        series_index_updated: 0,
         years_updated: 0,
         tags_updated: 0,
         changes_queued: 0,
@@ -4207,6 +4245,69 @@ fn apply_batch_metadata_update_sync(
                 .map_err(|err| err.to_string())?;
                 insert_field_source_with_source(&conn, &item_id, "language", "user", 1.0, now)?;
                 result.language_updated += 1;
+                touched = true;
+            }
+        }
+        if clear_series {
+            if current.series.is_some() {
+                conn.execute("UPDATE items SET series = NULL WHERE id = ?1", params![item_id])
+                    .map_err(|err| err.to_string())?;
+                insert_field_source_with_source(&conn, &item_id, "series", "user", 1.0, now)?;
+                result.series_updated += 1;
+                touched = true;
+            }
+        } else if let Some(series) = normalized_series.as_ref() {
+            let current_series = current.series.as_deref().map(normalize_ws);
+            if current_series.as_deref() != Some(series.as_str()) {
+                conn.execute(
+                    "UPDATE items SET series = ?1 WHERE id = ?2",
+                    params![series, item_id],
+                )
+                .map_err(|err| err.to_string())?;
+                insert_field_source_with_source(&conn, &item_id, "series", "user", 1.0, now)?;
+                result.series_updated += 1;
+                touched = true;
+            }
+        }
+        if clear_series_index {
+            if current.series_index.is_some() {
+                conn.execute(
+                    "UPDATE items SET series_index = NULL WHERE id = ?1",
+                    params![item_id],
+                )
+                .map_err(|err| err.to_string())?;
+                insert_field_source_with_source(
+                    &conn,
+                    &item_id,
+                    "series_index",
+                    "user",
+                    1.0,
+                    now,
+                )?;
+                result.series_index_updated += 1;
+                touched = true;
+            }
+        } else if let Some(series_index) = requested_series_index {
+            let current_series_index = current.series_index;
+            let is_different = match current_series_index {
+                Some(existing) => (existing - series_index).abs() > 0.000_001,
+                None => true,
+            };
+            if is_different {
+                conn.execute(
+                    "UPDATE items SET series_index = ?1 WHERE id = ?2",
+                    params![series_index, item_id],
+                )
+                .map_err(|err| err.to_string())?;
+                insert_field_source_with_source(
+                    &conn,
+                    &item_id,
+                    "series_index",
+                    "user",
+                    1.0,
+                    now,
+                )?;
+                result.series_index_updated += 1;
                 touched = true;
             }
         }
@@ -11037,7 +11138,23 @@ fn check_device_connected(app: tauri::AppHandle, device_id: String) -> Result<bo
 }
 
 #[tauri::command]
-fn scan_ereader(app: tauri::AppHandle, device_id: String) -> Result<Vec<EReaderBook>, String> {
+async fn scan_ereader(app: tauri::AppHandle, device_id: String) -> Result<Vec<EReaderBook>, String> {
+    let app_handle = app.clone();
+    let result =
+        tauri::async_runtime::spawn_blocking(move || scan_ereader_sync(app_handle, device_id))
+            .await
+            .map_err(|err| err.to_string())?;
+
+    match result {
+        Ok(books) => Ok(books),
+        Err(message) => {
+            log::error!("ereader scan failed: {}", message);
+            Err(message)
+        }
+    }
+}
+
+fn scan_ereader_sync(app: tauri::AppHandle, device_id: String) -> Result<Vec<EReaderBook>, String> {
     let conn = open_db(&app)?;
 
     // Get device info
@@ -11123,33 +11240,62 @@ fn scan_ereader(app: tauri::AppHandle, device_id: String) -> Result<Vec<EReaderB
         }
     }
 
-    let mut books: Vec<EReaderBook> = Vec::new();
-
-    for entry in WalkDir::new(&scan_path)
+    let scan_targets: Vec<std::path::PathBuf> = WalkDir::new(&scan_path)
         .into_iter()
         .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_file())
-    {
-        let path = entry.path();
+        .filter(|entry| entry.file_type().is_file())
+        .filter(|entry| {
+            let ext = entry
+                .path()
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            ext == "epub" || ext == "pdf" || ext == "mobi"
+        })
+        .map(|entry| entry.into_path())
+        .collect();
+
+    let total = scan_targets.len();
+    let _ = app.emit(
+        "ereader-scan-progress",
+        ScanProgressPayload {
+            processed: 0,
+            total,
+            current: if total > 0 {
+                "Starting device scan...".to_string()
+            } else {
+                "No supported files found.".to_string()
+            },
+        },
+    );
+
+    let mut books: Vec<EReaderBook> = Vec::new();
+
+    for (index, path) in scan_targets.into_iter().enumerate() {
         let ext = path
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_lowercase();
 
-        if ext != "epub" && ext != "pdf" && ext != "mobi" {
-            continue;
-        }
-
         let filename = path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_string();
+        let _ = app.emit(
+            "ereader-scan-progress",
+            ScanProgressPayload {
+                processed: index + 1,
+                total,
+                current: filename.clone(),
+            },
+        );
         let path_str = path.to_string_lossy().to_string();
 
         // Compute hash
-        let file_hash = match hash_file(path) {
+        let file_hash = match hash_file(&path) {
             Ok(h) => h,
             Err(_) => continue,
         };
@@ -11163,7 +11309,7 @@ fn scan_ereader(app: tauri::AppHandle, device_id: String) -> Result<Vec<EReaderB
         });
 
         let (title, authors): (Option<String>, Vec<String>) = if ext == "epub" {
-            match extract_epub_metadata(path) {
+            match extract_epub_metadata(&path) {
                 Ok(meta) => {
                     // Use metadata if available, otherwise fall back to filename
                     let t = meta.title.or(filename_title);
@@ -11195,7 +11341,7 @@ fn scan_ereader(app: tauri::AppHandle, device_id: String) -> Result<Vec<EReaderB
         } else {
             // Try to extract ISBNs from the ebook for ISBN matching
             let ebook_isbns: Vec<String> = if ext == "epub" {
-                extract_epub_metadata(path)
+                extract_epub_metadata(&path)
                     .map(|meta| meta.identifiers)
                     .unwrap_or_default()
                     .iter()
@@ -11247,6 +11393,15 @@ fn scan_ereader(app: tauri::AppHandle, device_id: String) -> Result<Vec<EReaderB
             match_confidence,
         });
     }
+
+    let _ = app.emit(
+        "ereader-scan-progress",
+        ScanProgressPayload {
+            processed: total,
+            total,
+            current: "Device scan complete.".to_string(),
+        },
+    );
 
     log::info!("scanned {} books from ereader", books.len());
 

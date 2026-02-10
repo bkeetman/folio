@@ -8,6 +8,7 @@ import {
   HardDrive,
   ImageIcon,
   Library,
+  Loader2,
   Shapes,
   Sparkles,
   Tag,
@@ -36,6 +37,8 @@ type SidebarProps = {
   handleClearLibrary: () => void;
   appVersion: string | null;
   ereaderConnected: boolean;
+  navigationPending: boolean;
+  pendingView: View | null;
 };
 
 export function Sidebar({
@@ -52,8 +55,24 @@ export function Sidebar({
   handleClearLibrary,
   appVersion,
   ereaderConnected,
+  navigationPending,
+  pendingView,
 }: SidebarProps) {
   const { t } = useTranslation();
+  const matchesView = (target: View | View[]) => {
+    const values = Array.isArray(target) ? target : [target];
+    return values.includes(view);
+  };
+  const matchesPendingView = (target: View | View[]) => {
+    if (!navigationPending || !pendingView) return false;
+    const values = Array.isArray(target) ? target : [target];
+    return values.includes(pendingView);
+  };
+  const pendingIndicator = (target: View | View[]) =>
+    matchesPendingView(target) ? (
+      <Loader2 size={13} className="ml-auto shrink-0 animate-spin text-app-accent" />
+    ) : null;
+
   return (
     <aside className="flex h-screen flex-col overflow-hidden border-r border-app-border bg-app-surface shadow-xl">
       <div className="flex-none flex items-center gap-3 border-b border-app-border px-4 py-5 bg-app-surface/50 backdrop-blur-md">
@@ -79,38 +98,49 @@ export function Sidebar({
             {t("sidebar.library").toUpperCase()}
           </div>
           <SidebarItem
-            active={view === "library" || view === "library-books"}
+            active={matchesView(["library", "library-books"]) || matchesPendingView("library-books")}
             onClick={() => setView("library-books")}
           >
             <BookOpen size={16} />
             <span className="min-w-0 truncate">{t("sidebar.books")}</span>
+            {pendingIndicator("library-books")}
           </SidebarItem>
           <SidebarItem
-            active={view === "library-authors"}
+            active={matchesView("library-authors") || matchesPendingView("library-authors")}
             onClick={() => setView("library-authors")}
           >
             <User size={16} />
             <span className="min-w-0 truncate">{t("sidebar.authors")}</span>
+            {pendingIndicator("library-authors")}
           </SidebarItem>
           <SidebarItem
-            active={view === "library-series"}
+            active={matchesView("library-series") || matchesPendingView("library-series")}
             onClick={() => setView("library-series")}
           >
             <Library size={16} />
             <span className="min-w-0 truncate">{t("sidebar.series")}</span>
+            {pendingIndicator("library-series")}
           </SidebarItem>
           <SidebarItem
-            active={view === "library-categories"}
+            active={matchesView("library-categories") || matchesPendingView("library-categories")}
             onClick={() => setView("library-categories")}
           >
             <Shapes size={16} />
             <span className="min-w-0 truncate">{t("sidebar.categories")}</span>
+            {pendingIndicator("library-categories")}
           </SidebarItem>
-          <SidebarItem active={view === "tags"} onClick={() => setView("tags")}>
+          <SidebarItem
+            active={matchesView("tags") || matchesPendingView("tags")}
+            onClick={() => setView("tags")}
+          >
             <Tag size={16} />
             <span className="min-w-0 truncate">{t("sidebar.tags")}</span>
+            {pendingIndicator("tags")}
           </SidebarItem>
-          <SidebarItem active={view === "ereader"} onClick={() => setView("ereader")}>
+          <SidebarItem
+            active={matchesView("ereader") || matchesPendingView("ereader")}
+            onClick={() => setView("ereader")}
+          >
             <HardDrive size={16} />
             <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
               <span className="flex min-w-0 items-center gap-1.5">
@@ -126,6 +156,7 @@ export function Sidebar({
                 </span>
               ) : null}
             </span>
+            {pendingIndicator("ereader")}
           </SidebarItem>
         </nav>
 
@@ -137,7 +168,10 @@ export function Sidebar({
             <FolderOpen size={16} />
             <span className="min-w-0 truncate">{t("sidebar.addBooks")}</span>
           </SidebarItem>
-          <SidebarItem active={view === "duplicates"} onClick={() => setView("duplicates")}>
+          <SidebarItem
+            active={matchesView("duplicates") || matchesPendingView("duplicates")}
+            onClick={() => setView("duplicates")}
+          >
             <Copy size={16} />
             <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
               <span className="min-w-0 truncate">{t("sidebar.duplicates")}</span>
@@ -147,8 +181,12 @@ export function Sidebar({
                 </span>
               ) : null}
             </span>
+            {pendingIndicator("duplicates")}
           </SidebarItem>
-          <SidebarItem active={view === "missing-files"} onClick={() => setView("missing-files")}>
+          <SidebarItem
+            active={matchesView("missing-files") || matchesPendingView("missing-files")}
+            onClick={() => setView("missing-files")}
+          >
             <HardDrive size={16} />
             <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
               <span className="min-w-0 truncate">{t("sidebar.missingFiles")}</span>
@@ -158,8 +196,12 @@ export function Sidebar({
                 </span>
               ) : null}
             </span>
+            {pendingIndicator("missing-files")}
           </SidebarItem>
-          <SidebarItem active={view === "fix"} onClick={() => setView("fix")}>
+          <SidebarItem
+            active={matchesView("fix") || matchesPendingView("fix")}
+            onClick={() => setView("fix")}
+          >
             <Sparkles size={16} />
             <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
               <span className="min-w-0 truncate">{t("sidebar.fixMetadata")}</span>
@@ -169,8 +211,12 @@ export function Sidebar({
                 </span>
               ) : null}
             </span>
+            {pendingIndicator("fix")}
           </SidebarItem>
-          <SidebarItem active={view === "changes"} onClick={() => setView("changes")}>
+          <SidebarItem
+            active={matchesView("changes") || matchesPendingView("changes")}
+            onClick={() => setView("changes")}
+          >
             <FileClock size={16} />
             <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
               <span className="min-w-0 truncate">{t("sidebar.changes")}</span>
@@ -180,14 +226,23 @@ export function Sidebar({
                 </span>
               ) : null}
             </span>
+            {pendingIndicator("changes")}
           </SidebarItem>
-          <SidebarItem active={view === "organize"} onClick={() => setView("organize")}>
+          <SidebarItem
+            active={matchesView("organize") || matchesPendingView("organize")}
+            onClick={() => setView("organize")}
+          >
             <FolderInput size={16} />
             <span className="min-w-0 truncate">{t("sidebar.organizer")}</span>
+            {pendingIndicator("organize")}
           </SidebarItem>
-          <SidebarItem active={view === "settings"} onClick={() => setView("settings")}>
+          <SidebarItem
+            active={matchesView("settings") || matchesPendingView("settings")}
+            onClick={() => setView("settings")}
+          >
             <Wrench size={16} />
             <span className="min-w-0 truncate">{t("sidebar.settings")}</span>
+            {pendingIndicator("settings")}
           </SidebarItem>
           <SidebarItem
             onClick={handleClearLibrary}

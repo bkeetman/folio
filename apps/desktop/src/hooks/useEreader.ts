@@ -5,6 +5,7 @@ import type {
   ActivityLogItem,
   EReaderBook,
   EReaderDevice,
+  ScanProgress,
   SyncProgress,
   SyncQueueItem,
 } from "../types/library";
@@ -27,6 +28,7 @@ export function useEreader({
   const [ereaderBooks, setEreaderBooks] = useState<EReaderBook[]>([]);
   const [ereaderSyncQueue, setEreaderSyncQueue] = useState<SyncQueueItem[]>([]);
   const [ereaderScanning, setEreaderScanning] = useState(false);
+  const [ereaderScanProgress, setEreaderScanProgress] = useState<ScanProgress | null>(null);
   const [ereaderSyncDialogOpen, setEreaderSyncDialogOpen] = useState(false);
   const [ereaderSyncing, setEreaderSyncing] = useState(false);
   const [ereaderSyncProgress, setEreaderSyncProgress] = useState<SyncProgress | null>(null);
@@ -75,6 +77,22 @@ export function useEreader({
     if (!isDesktop || !selectedEreaderDeviceId) return;
     void refreshQueue(selectedEreaderDeviceId);
   }, [isDesktop, selectedEreaderDeviceId, refreshQueue]);
+
+  // Listen for eReader scan progress events
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlistenScanProgress: (() => void) | undefined;
+
+    listen<ScanProgress>("ereader-scan-progress", (event) => {
+      setEreaderScanProgress(event.payload);
+    }).then((stop) => {
+      unlistenScanProgress = stop;
+    });
+
+    return () => {
+      if (unlistenScanProgress) unlistenScanProgress();
+    };
+  }, [isDesktop]);
 
   // Listen for eReader sync progress events
   useEffect(() => {
@@ -152,6 +170,7 @@ export function useEreader({
   const handleScanEreaderDevice = async (deviceId: string) => {
     if (!isTauri()) return;
     setEreaderScanning(true);
+    setEreaderScanProgress(null);
     try {
       const books = await invoke<EReaderBook[]>("scan_ereader", { deviceId });
       setEreaderBooks(books);
@@ -159,6 +178,9 @@ export function useEreader({
       setScanStatus("Could not scan eReader device.");
     } finally {
       setEreaderScanning(false);
+      setTimeout(() => {
+        setEreaderScanProgress(null);
+      }, 800);
     }
   };
 
@@ -259,6 +281,7 @@ export function useEreader({
     ereaderBooks,
     ereaderSyncQueue,
     ereaderScanning,
+    ereaderScanProgress,
     ereaderSyncDialogOpen,
     setEreaderSyncDialogOpen,
     ereaderSyncing,

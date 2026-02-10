@@ -1,12 +1,21 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { FileText, FolderOpen, HardDrive, Import, Minus, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type ComponentProps,
+} from "react";
 import { useTranslation } from "react-i18next";
-import { SyncProgressBar } from "../components/ProgressBar";
+import { ScanProgressBar, SyncProgressBar } from "../components/ProgressBar";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Panel } from "../components/ui/Panel";
-import type { EReaderBook, EReaderDevice, LibraryItem, SyncProgress, SyncQueueItem } from "../types/library";
+import type { EReaderBook, EReaderDevice, LibraryItem, ScanProgress, SyncProgress, SyncQueueItem } from "../types/library";
 
 type EReaderFilter = "all" | "in-library" | "on-device" | "not-on-device" | "device-only" | "queued";
 
@@ -27,6 +36,7 @@ type EReaderViewProps = {
   onExecuteSync: () => void;
   onRefreshDevices: () => Promise<void>;
   scanning: boolean;
+  scanProgress: ScanProgress | null;
   syncing: boolean;
   syncProgress: SyncProgress | null;
 };
@@ -39,9 +49,15 @@ type UnifiedItem = {
   confidence: "exact" | "isbn" | "title" | "fuzzy" | null;
   libraryItemId: string | null;
   ereaderPath: string | null;
-  cover?: string | null;
+  coverPath?: string | null;
   format?: string;
   filename?: string | null;
+};
+
+type BadgeConfig = {
+  label: string;
+  variant: NonNullable<ComponentProps<typeof Badge>["variant"]>;
+  title?: string;
 };
 
 export function EReaderView({
@@ -61,92 +77,164 @@ export function EReaderView({
   onExecuteSync,
   onRefreshDevices,
   scanning,
+  scanProgress,
   syncing,
   syncProgress,
 }: EReaderViewProps) {
   const { t } = useTranslation();
   const [filter, setFilter] = useState<EReaderFilter>("all");
+  const [isFilterPending, startFilterTransition] = useTransition();
 
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId) ?? null;
-  const pendingQueue = syncQueue.filter((q) => q.status === "pending");
-
-  // Build unified list of items
-  const unifiedItems: UnifiedItem[] = [];
+  const pendingQueue = useMemo(
+    () => syncQueue.filter((q) => q.status === "pending"),
+    [syncQueue]
+  );
+  const coverSrcCacheRef = useRef<Map<string, string>>(new Map());
 
   // Helper to get extension/format
-  const getFormat = (filename: string) => {
-    return filename.split(".").pop()?.toUpperCase() || "UNKNOWN";
-  };
+  const getFormat = (filename: string) => filename.split(".").pop()?.toUpperCase() || "UNKNOWN";
 
-  // Add library items
-  libraryItems.forEach((lib) => {
-    const onDevice = ereaderBooks.find((eb) => eb.matchedItemId === lib.id);
-    const inQueue = pendingQueue.find((q) => q.itemId === lib.id);
-
-    let status: UnifiedItem["status"] = "library-only";
-    if (inQueue?.action === "add") status = "queued-add";
-    else if (inQueue?.action === "remove") status = "queued-remove";
-    else if (onDevice) status = "on-device";
-
-    const format = lib.formats.length > 0 ? lib.formats[0].toUpperCase() : "UNKNOWN";
-
-    unifiedItems.push({
-      id: `lib-${lib.id}`,
-      title: lib.title,
-      authors: lib.authors,
-      status,
-      confidence: (onDevice?.matchConfidence as "exact" | "isbn" | "title" | "fuzzy" | null) ?? null,
-      libraryItemId: lib.id,
-      ereaderPath: onDevice?.path ?? null,
-      cover: lib.cover_path ? convertFileSrc(lib.cover_path) : null,
-      format,
-      filename: onDevice?.filename ?? null,
+  const pendingQueueByLibraryItemId = useMemo(() => {
+    const map = new Map<string, SyncQueueItem>();
+    pendingQueue.forEach((item) => {
+      if (item.itemId && !map.has(item.itemId)) {
+        map.set(item.itemId, item);
+      }
     });
-  });
+    return map;
+  }, [pendingQueue]);
 
-  // Add device-only items
-  ereaderBooks.forEach((eb) => {
-    // Filter out hidden/system files (like ._ files from macOS)
-    if (eb.filename.startsWith(".")) return;
+  const pendingQueueByDevicePath = useMemo(() => {
+    const map = new Map<string, SyncQueueItem>();
+    pendingQueue.forEach((item) => {
+      if (item.ereaderPath && !map.has(item.ereaderPath)) {
+        map.set(item.ereaderPath, item);
+      }
+    });
+    return map;
+  }, [pendingQueue]);
 
-    if (!eb.matchedItemId) {
-      const inQueue = pendingQueue.find((q) => q.ereaderPath === eb.path);
-      unifiedItems.push({
-        id: `dev-${eb.path}`,
-        title: eb.title,
-        authors: eb.authors,
-        status: inQueue?.action === "import" ? "queued-add" : "device-only",
+  const onDeviceByLibraryItemId = useMemo(() => {
+    const map = new Map<string, EReaderBook>();
+    ereaderBooks.forEach((book) => {
+      if (!book.matchedItemId || book.filename.startsWith(".")) return;
+      if (!map.has(book.matchedItemId)) {
+        map.set(book.matchedItemId, book);
+      }
+    });
+    return map;
+  }, [ereaderBooks]);
+
+  const unifiedItems = useMemo(() => {
+    const items: UnifiedItem[] = [];
+
+    libraryItems.forEach((libraryItem) => {
+      const onDevice = onDeviceByLibraryItemId.get(libraryItem.id);
+      const queued = pendingQueueByLibraryItemId.get(libraryItem.id);
+
+      let status: UnifiedItem["status"] = "library-only";
+      if (queued?.action === "add") status = "queued-add";
+      else if (queued?.action === "remove") status = "queued-remove";
+      else if (onDevice) status = "on-device";
+
+      const format =
+        libraryItem.formats.length > 0 ? libraryItem.formats[0].toUpperCase() : "UNKNOWN";
+
+      items.push({
+        id: `lib-${libraryItem.id}`,
+        title: libraryItem.title,
+        authors: libraryItem.authors,
+        status,
+        confidence:
+          (onDevice?.matchConfidence as "exact" | "isbn" | "title" | "fuzzy" | null) ?? null,
+        libraryItemId: libraryItem.id,
+        ereaderPath: onDevice?.path ?? null,
+        coverPath: libraryItem.cover_path ?? null,
+        format,
+        filename: onDevice?.filename ?? null,
+      });
+    });
+
+    ereaderBooks.forEach((book) => {
+      // Filter out hidden/system files (like ._ files from macOS)
+      if (book.filename.startsWith(".") || book.matchedItemId) return;
+      const queued = pendingQueueByDevicePath.get(book.path);
+
+      items.push({
+        id: `dev-${book.path}`,
+        title: book.title,
+        authors: book.authors,
+        status: queued?.action === "import" ? "queued-add" : "device-only",
         confidence: null,
         libraryItemId: null,
-        ereaderPath: eb.path,
-        cover: null,
-        format: getFormat(eb.filename),
-        filename: eb.filename,
+        ereaderPath: book.path,
+        coverPath: null,
+        format: getFormat(book.filename),
+        filename: book.filename,
       });
-    }
-  });
+    });
+
+    return items;
+  }, [ereaderBooks, libraryItems, onDeviceByLibraryItemId, pendingQueueByDevicePath, pendingQueueByLibraryItemId]);
 
   // Apply filter
-  const filteredItems = unifiedItems.filter((item) => {
-    switch (filter) {
-      case "in-library":
-        return item.libraryItemId !== null;
-      case "on-device":
-        return item.status === "on-device"; // Both in library AND on device
-      case "not-on-device":
-        return item.status === "library-only" || item.status === "queued-add";
-      case "device-only":
-        return item.status === "device-only";
-      case "queued":
-        return item.status === "queued-add" || item.status === "queued-remove";
-      default:
-        return true;
-    }
+  const itemsByFilter = useMemo(() => {
+    const buckets: Record<EReaderFilter, UnifiedItem[]> = {
+      all: [],
+      "in-library": [],
+      "on-device": [],
+      "not-on-device": [],
+      "device-only": [],
+      queued: [],
+    };
+
+    unifiedItems.forEach((item) => {
+      buckets.all.push(item);
+
+      if (item.libraryItemId !== null) buckets["in-library"].push(item);
+      if (item.status === "on-device") buckets["on-device"].push(item);
+      if (item.status === "library-only" || item.status === "queued-add") {
+        buckets["not-on-device"].push(item);
+      }
+      if (item.status === "device-only") buckets["device-only"].push(item);
+      if (item.status === "queued-add" || item.status === "queued-remove") {
+        buckets.queued.push(item);
+      }
+    });
+
+    return buckets;
+  }, [unifiedItems]);
+
+  const filteredItems = itemsByFilter[filter];
+  const getCoverSrc = useCallback((coverPath: string | null | undefined) => {
+    if (!coverPath) return null;
+
+    const cached = coverSrcCacheRef.current.get(coverPath);
+    if (cached) return cached;
+
+    const src = convertFileSrc(coverPath);
+    coverSrcCacheRef.current.set(coverPath, src);
+    return src;
+  }, []);
+
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: filteredItems.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => 76,
+    overscan: 8,
+    enabled: filteredItems.length > 0,
   });
+  const virtualRows = rowVirtualizer.getVirtualItems();
+
+  useEffect(() => {
+    rowVirtualizer.scrollToIndex(0, { align: "start" });
+  }, [filter, rowVirtualizer]);
 
   const StatusBadge = ({ status, confidence }: { status: UnifiedItem["status"]; confidence: UnifiedItem["confidence"] }) => {
     // Different labels/colors based on match confidence
-    const getOnDeviceBadge = () => {
+    const getOnDeviceBadge = (): BadgeConfig => {
       switch (confidence) {
         case "exact":
           return { label: t("ereader.synced"), variant: "success", title: t("ereader.exactFileMatch") };
@@ -161,8 +249,8 @@ export function EReaderView({
       }
     };
 
-    const badges: Record<string, { label: string; variant: "default" | "muted" | "accent" | "success" | "warning" | "info" | "danger"; title?: string }> = {
-      "on-device": getOnDeviceBadge() as any,
+    const badges: Record<UnifiedItem["status"], BadgeConfig> = {
+      "on-device": getOnDeviceBadge(),
       "library-only": { label: t("ereader.library"), variant: "muted", title: t("ereader.onlyInLibrary") },
       "device-only": { label: t("ereader.device"), variant: "warning", title: t("ereader.onlyOnDevice") },
       "queued-add": { label: t("ereader.queueAdd"), variant: "muted", title: t("ereader.queuedToAdd") },
@@ -171,7 +259,7 @@ export function EReaderView({
     const badge = badges[status];
 
     return (
-      <Badge variant={badge.variant as any} className="whitespace-nowrap" title={badge.title}>
+      <Badge variant={badge.variant} className="whitespace-nowrap" title={badge.title}>
         {badge.label}
       </Badge>
     );
@@ -333,11 +421,23 @@ export function EReaderView({
 
       {/* Filters */}
       <div className="flex items-center gap-2 p-4 border-b border-[var(--app-border)]">
-        <span className="text-sm text-[var(--app-text-muted)]">{t("ereader.filter")}</span>
+        <span className="inline-flex items-center gap-2 text-sm text-[var(--app-text-muted)]">
+          {t("ereader.filter")}
+          <span className="inline-flex h-3 w-3 items-center justify-center">
+            <RefreshCw
+              size={12}
+              className={`text-app-accent transition-opacity duration-150 ${isFilterPending ? "animate-spin opacity-100" : "opacity-0"}`}
+            />
+          </span>
+        </span>
         {(["all", "in-library", "on-device", "not-on-device", "device-only", "queued"] as const).map((f) => (
           <button
             key={f}
-            onClick={() => setFilter(f)}
+            onClick={() =>
+              startFilterTransition(() => {
+                setFilter(f);
+              })
+            }
             className={`px-3 py-1 text-xs rounded-full transition-colors ${filter === f
               ? "bg-[var(--app-accent)] text-white"
               : "bg-[var(--app-bg-secondary)] hover:bg-[var(--app-bg-tertiary)]"
@@ -354,6 +454,12 @@ export function EReaderView({
       </div>
 
       {/* Sync Progress */}
+      {scanning && (
+        <div className="p-4 border-b border-[var(--app-border)]">
+          <ScanProgressBar scanning={scanning} progress={scanProgress} variant="accent" />
+        </div>
+      )}
+
       {syncing && syncProgress && (
         <div className="p-4 border-b border-[var(--app-border)]">
           <SyncProgressBar
@@ -423,10 +529,7 @@ export function EReaderView({
             </div>
           ) : (
             <div className="flex flex-col h-full">
-              {/* Table Header */}
-              {/* Table Body */}
-              <div className="flex-1 overflow-y-auto">
-                {/* Table Header */}
+              <div className="flex-1 overflow-y-auto" ref={listRef}>
                 <div className="sticky top-0 z-10 grid grid-cols-[48px_2fr_100px_140px_100px] gap-4 border-b border-app-border bg-app-bg-secondary px-4 py-3 text-[10px] uppercase tracking-[0.12em] text-app-ink-muted backdrop-blur-sm">
                   <div></div>
                   <div>{t("ereader.table.titleAuthor")}</div>
@@ -435,58 +538,64 @@ export function EReaderView({
                   <div className="text-right">{t("ereader.table.action")}</div>
                 </div>
 
-                <div className="divide-y divide-app-border">
-                  {filteredItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className="group grid grid-cols-[48px_2fr_100px_140px_100px] items-center gap-4 px-4 py-3 hover:bg-app-surface-hover transition-colors"
-                    >
-                      {/* Cover */}
-                      <div className="relative aspect-[2/3] w-9 overflow-hidden rounded bg-app-bg-tertiary border border-app-border shadow-sm">
-                        {item.cover ? (
-                          <img
-                            src={item.cover}
-                            alt=""
-                            className="h-full w-full object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center text-app-ink-muted/30">
-                            <FileText size={16} />
+                <div className="relative" style={{ height: rowVirtualizer.getTotalSize() }}>
+                  {virtualRows.map((virtualRow) => {
+                    const item = filteredItems[virtualRow.index];
+                    if (!item) return null;
+                    const coverSrc = getCoverSrc(item.coverPath);
+
+                    return (
+                      <div
+                        key={item.id}
+                        className="absolute left-0 top-0 w-full border-b border-app-border"
+                        style={{ transform: `translateY(${virtualRow.start}px)` }}
+                      >
+                        <div className="group grid grid-cols-[48px_2fr_100px_140px_100px] items-center gap-4 px-4 py-3 hover:bg-app-surface-hover transition-colors">
+                          <div className="relative aspect-[2/3] w-9 overflow-hidden rounded bg-app-bg-tertiary border border-app-border shadow-sm">
+                            {coverSrc ? (
+                              <img
+                                src={coverSrc}
+                                alt=""
+                                className="h-full w-full object-cover"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-app-ink-muted/30">
+                                <FileText size={16} />
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
 
-                      {/* Title & Author */}
-                      <div className="flex flex-col min-w-0 pr-4">
-                        <div className="truncate text-sm font-medium text-app-ink group-hover:text-app-accent-strong transition-colors">
-                          {item.title || item.filename || t("ereader.unknownTitle")}
+                          <div className="flex flex-col min-w-0 pr-4">
+                            <div className="truncate text-sm font-medium text-app-ink group-hover:text-app-accent-strong transition-colors">
+                              {item.title || item.filename || t("ereader.unknownTitle")}
+                            </div>
+                            <div className="truncate text-xs text-app-ink-muted">
+                              {item.authors.length > 0
+                                ? item.authors.join(", ")
+                                : t("ereader.unknownAuthor")}
+                            </div>
+                          </div>
+
+                          <div>
+                            {item.format ? (
+                              <span className="inline-flex items-center rounded border border-[var(--app-border-soft)] bg-app-bg/50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-app-ink-muted/80">
+                                {item.format}
+                              </span>
+                            ) : null}
+                          </div>
+
+                          <div>
+                            <StatusBadge status={item.status} confidence={item.confidence} />
+                          </div>
+
+                          <div className="flex justify-end">
+                            <ActionButton item={item} />
+                          </div>
                         </div>
-                        <div className="truncate text-xs text-app-ink-muted">
-                          {item.authors.length > 0 ? item.authors.join(", ") : t("ereader.unknownAuthor")}
-                        </div>
                       </div>
-
-                      {/* Format */}
-                      <div>
-                        {item.format && (
-                          <span className="inline-flex items-center rounded border border-[var(--app-border-soft)] bg-app-bg/50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-app-ink-muted/80">
-                            {item.format}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Status */}
-                      <div>
-                        <StatusBadge status={item.status} confidence={item.confidence} />
-                      </div>
-
-                      {/* Actions */}
-                      <div className="flex justify-end">
-                        <ActionButton item={item} />
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>

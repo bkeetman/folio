@@ -3,7 +3,7 @@ import { BookOpen, FileText, FolderOpen, Globe, HardDrive, PencilLine } from "lu
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Separator } from "../components/ui";
+import { Badge, Button, Separator } from "../components/ui";
 import { getLanguageFlag, getLanguageName, isKnownLanguageCode } from "../lib/languageFlags";
 import { getTagColorClass } from "../lib/tagColors";
 import type { FileItem, Tag, View } from "../types/library";
@@ -360,19 +360,25 @@ export function Inspector({
                 </div>
                 {ereaderSyncStatus?.isOnDevice ? (
                   <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-emerald-100 text-emerald-700">
+                    <Badge
+                      variant="success"
+                      className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-medium normal-case tracking-normal"
+                    >
                       <HardDrive size={12} />
                       {t("inspector.synced")}
-                    </span>
+                    </Badge>
                     {ereaderSyncStatus.matchConfidence === "fuzzy" && (
                       <span className="text-[10px] text-[var(--app-ink-muted)]">({t("inspector.fuzzyMatch")})</span>
                     )}
                   </div>
                 ) : ereaderSyncStatus?.isInQueue ? (
-                  <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-700">
+                  <Badge
+                    variant="info"
+                    className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-medium normal-case tracking-normal"
+                  >
                     <HardDrive size={12} />
                     {t("inspector.inQueue")}
-                  </span>
+                  </Badge>
                 ) : (
                   <Button
                     variant="toolbar"

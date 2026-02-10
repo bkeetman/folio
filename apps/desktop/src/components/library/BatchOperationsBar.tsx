@@ -55,6 +55,10 @@ export function BatchOperationsBar({
     const [batchAuthorMode, setBatchAuthorMode] = useState<BatchAuthorMode>("append");
     const [batchLanguage, setBatchLanguage] = useState("");
     const [batchClearLanguage, setBatchClearLanguage] = useState(false);
+    const [batchSeries, setBatchSeries] = useState("");
+    const [batchClearSeries, setBatchClearSeries] = useState(false);
+    const [batchSeriesIndexInput, setBatchSeriesIndexInput] = useState("");
+    const [batchClearSeriesIndex, setBatchClearSeriesIndex] = useState(false);
     const [batchYearInput, setBatchYearInput] = useState("");
     const [batchClearPublishedYear, setBatchClearPublishedYear] = useState(false);
     const [batchTagMode] = useState<BatchTagMode>("append");
@@ -82,11 +86,25 @@ export function BatchOperationsBar({
         return { value: parsed, invalid: false };
     }, [batchYearInput]);
 
+    const parsedBatchSeriesIndex = useMemo(() => {
+        const trimmed = batchSeriesIndexInput.trim();
+        if (!trimmed) return { value: null as number | null, invalid: false };
+        const parsed = Number.parseFloat(trimmed);
+        if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 9999) {
+            return { value: null, invalid: true };
+        }
+        return { value: parsed, invalid: false };
+    }, [batchSeriesIndexInput]);
+
     const hasBatchDraft =
         batchCategories.length > 0 ||
         batchAuthorInput.trim().length > 0 ||
         batchClearLanguage ||
         batchLanguage.trim().length > 0 ||
+        batchClearSeries ||
+        batchSeries.trim().length > 0 ||
+        batchClearSeriesIndex ||
+        parsedBatchSeriesIndex.value !== null ||
         batchClearPublishedYear ||
         parsedBatchYear.value !== null ||
         batchClearTags ||
@@ -95,6 +113,7 @@ export function BatchOperationsBar({
     const handleApplyBatch = async () => {
         if (batchApplying || selectedBatchCount === 0) return;
         if (!batchClearPublishedYear && parsedBatchYear.invalid) return;
+        if (!batchClearSeriesIndex && parsedBatchSeriesIndex.invalid) return;
 
         const parsedAuthors = batchAuthorInput
             .split(",")
@@ -112,6 +131,14 @@ export function BatchOperationsBar({
         }
         if (batchClearLanguage) payload.clearLanguage = true;
         else if (batchLanguage.trim()) payload.language = batchLanguage.trim();
+
+        if (batchClearSeries) payload.clearSeries = true;
+        else if (batchSeries.trim()) payload.series = batchSeries.trim();
+
+        if (batchClearSeriesIndex) payload.clearSeriesIndex = true;
+        else if (parsedBatchSeriesIndex.value !== null) {
+            payload.seriesIndex = parsedBatchSeriesIndex.value;
+        }
 
         if (batchClearPublishedYear) payload.clearPublishedYear = true;
         else if (parsedBatchYear.value !== null) payload.publishedYear = parsedBatchYear.value;
@@ -133,6 +160,8 @@ export function BatchOperationsBar({
             setBatchTagIds([]);
             setBatchAuthorInput("");
             setBatchLanguage("");
+            setBatchSeries("");
+            setBatchSeriesIndexInput("");
             setBatchYearInput("");
             setShowAdvanced(false);
             onClose(); // Optional: close panel on success
@@ -242,6 +271,10 @@ export function BatchOperationsBar({
                             setBatchCategories([]);
                             setBatchTagIds([]);
                             setBatchAuthorInput("");
+                            setBatchLanguage("");
+                            setBatchSeries("");
+                            setBatchSeriesIndexInput("");
+                            setBatchYearInput("");
                             setShowAdvanced(false);
                             onClose();
                         }}
@@ -350,6 +383,57 @@ export function BatchOperationsBar({
                                 <div className="absolute right-6 top-1/2 -translate-y-1/2">
                                     <label className="flex items-center gap-1 cursor-pointer" title={t("library.clearLanguage")}>
                                         <input type="checkbox" checked={batchClearLanguage} onChange={e => setBatchClearLanguage(e.target.checked)} className="w-3 h-3 rounded-sm border-app-border-muted accent-app-accent" />
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                            <div className="flex-1 relative">
+                                <input
+                                    type="text"
+                                    value={batchSeries}
+                                    onChange={(e) => setBatchSeries(e.target.value)}
+                                    className={cn(
+                                        "w-full h-8 rounded-md border border-app-border-soft bg-app-surface px-2.5 text-[11px] placeholder:text-app-ink-muted/50 focus:border-app-accent focus:ring-1 focus:ring-app-accent outline-none",
+                                        batchClearSeries && "opacity-50 pointer-events-none"
+                                    )}
+                                    placeholder="Series name"
+                                />
+                                <div className="absolute right-1 top-1/2 -translate-y-1/2">
+                                    <label className="flex items-center gap-1 cursor-pointer" title="Clear series">
+                                        <input
+                                            type="checkbox"
+                                            checked={batchClearSeries}
+                                            onChange={e => setBatchClearSeries(e.target.checked)}
+                                            className="w-3 h-3 rounded-sm border-app-border-muted accent-app-accent"
+                                        />
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div className="flex-1 relative">
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0.1"
+                                    value={batchSeriesIndexInput}
+                                    onChange={(e) => setBatchSeriesIndexInput(e.target.value)}
+                                    className={cn(
+                                        "w-full h-8 rounded-md border border-app-border-soft bg-app-surface px-2.5 text-[11px] placeholder:text-app-ink-muted/50 focus:border-app-accent focus:ring-1 focus:ring-app-accent outline-none",
+                                        batchClearSeriesIndex && "opacity-50 pointer-events-none",
+                                        !batchClearSeriesIndex && parsedBatchSeriesIndex.invalid && "border-red-500/70"
+                                    )}
+                                    placeholder="Series # (e.g. 1)"
+                                />
+                                <div className="absolute right-1 top-1/2 -translate-y-1/2">
+                                    <label className="flex items-center gap-1 cursor-pointer" title="Clear series number">
+                                        <input
+                                            type="checkbox"
+                                            checked={batchClearSeriesIndex}
+                                            onChange={e => setBatchClearSeriesIndex(e.target.checked)}
+                                            className="w-3 h-3 rounded-sm border-app-border-muted accent-app-accent"
+                                        />
                                     </label>
                                 </div>
                             </div>
