@@ -1,22 +1,18 @@
 {
-  "version": "0.1.47",
-  "notes": "Release 0.1.47",
-  "pub_date": "2026-02-11T07:04:43.373Z",
+  "version": "0.1.48",
+  "notes": "Release 0.1.48",
+  "pub_date": "2026-02-11T16:39:46.297Z",
   "platforms": {
     "darwin-aarch64": {
-      "url": "https://github.com/bkeetman/folio/releases/download/v0.1.47/Folio_aarch64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTTnVFRUU5eldVYTR3MnhkVXhYb2dWRmo0U3Zzay8zNHV4N2ZmSFRXT2h6NDhMS2pkV3BOc1kwcG81eVhqN2xxSG1wOEFNOHQydXdPNERZVFFDNnFTaGJIbDZYclZuL1FJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcwNzkzNDc2CWZpbGU6Rm9saW8uYXBwLnRhci5negpLL3hwS0VLVnlEWTNUNm5wV01oS3ZERDg4THVNUDFIT052K1dDbEFKU2lYVFFEMVY5YlpJVG9ackljTW5lVmZQK2NkdlFyNUhmVE1DbU1PUWJRL3VEUT09Cg=="
+      "url": "https://github.com/bkeetman/folio/releases/download/v0.1.48/Folio_aarch64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTTnVFRUU5eldVYTI1bVBmQ1RNaXdwSENKVUNCOVdaR09KTHVmR1FQQUdTR0g4U20vV2ZHdkMraE40azZQZ0tFTjZsNnFBdHUvWTcycW12ekNMc2U3ZytQdCtNN0J5d0FRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcwODI3OTgwCWZpbGU6Rm9saW8uYXBwLnRhci5negpET2k1bzFjT0x0dTdCRFRnendKZng4U3Q3Zk9QTVRzb0l1aVVCUWJzRlRCWURrc1l0dGMveitOLzhneEdha2tXNHdoeEtnbW9yenZnS00zQ0hkRzJBdz09Cg=="
     }
   },
   "downloads": {
     "macos": {
-      "arm64": "https://github.com/bkeetman/folio/releases/download/v0.1.47/Folio_0.1.47_aarch64.dmg",
-      "dmg": "https://github.com/bkeetman/folio/releases/download/v0.1.47/Folio_0.1.47_aarch64.dmg"
-    },
-    "linux": {
-      "appimage": "https://github.com/bkeetman/folio/releases/download/v0.1.47/Folio_0.1.46_amd64.AppImage",
-      "deb": "https://github.com/bkeetman/folio/releases/download/v0.1.47/Folio_0.1.46_amd64.deb",
-      "rpm": "https://github.com/bkeetman/folio/releases/download/v0.1.47/Folio-0.1.46-1.x86_64.rpm"
+      "arm64": "https://github.com/bkeetman/folio/releases/download/v0.1.48/Folio_0.1.48_aarch64.dmg",
+      "x64": "https://github.com/bkeetman/folio/releases/download/v0.1.48/Folio_0.1.48_x64.dmg",
+      "dmg": "https://github.com/bkeetman/folio/releases/download/v0.1.48/Folio_0.1.48_aarch64.dmg"
     }
   }
 }
