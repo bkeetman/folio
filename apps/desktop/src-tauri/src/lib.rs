@@ -8907,46 +8907,43 @@ fn fetch_cover_from_url(
     now: i64,
 ) -> Result<bool, String> {
     log::info!("fetching cover from url: {} for item {}", url, item_id);
-    let response = match reqwest::blocking::get(url) {
-        Ok(resp) => resp,
+    let client = match build_cover_http_client() {
+        Ok(value) => value,
         Err(err) => {
-            log::warn!("cover fetch failed for {}: {}", url, err);
+            log::warn!("cover fetch client init failed: {}", err);
             return Ok(false);
         }
     };
-    if !response.status().is_success() {
-        log::warn!(
-            "cover fetch returned status {} for {}",
-            response.status(),
-            url
-        );
-        return Ok(false);
+    let mut resolved_payload = download_cover_bytes_with_retry(&client, url)?;
+    if resolved_payload.is_none() {
+        if let Some(volume_id) = extract_google_volume_id_from_cover_url(url) {
+            let fallback_urls = fetch_google_cover_urls_by_volume_id(&volume_id);
+            for fallback_url in fallback_urls {
+                if fallback_url == url {
+                    continue;
+                }
+                log::info!(
+                    "trying google cover fallback url for volume {}: {}",
+                    volume_id,
+                    fallback_url
+                );
+                if let Some(payload) = download_cover_bytes_with_retry(&client, &fallback_url)? {
+                    resolved_payload = Some(payload);
+                    break;
+                }
+            }
+        }
     }
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("image/jpeg");
-    let extension = map_cover_extension(content_type).unwrap_or("jpg");
-    let bytes = response.bytes().map_err(|err| err.to_string())?.to_vec();
-
-    // Check for empty or placeholder images (Open Library returns tiny placeholders)
-    // A real cover image should be at least 1KB
-    if bytes.len() < 1024 {
-        log::info!(
-            "cover too small ({} bytes), likely a placeholder: {}",
-            bytes.len(),
-            url
-        );
+    let Some((bytes, extension)) = resolved_payload else {
         return Ok(false);
-    }
+    };
 
     save_cover(
         app,
         conn,
         item_id,
         bytes.clone(),
-        extension,
+        &extension,
         now,
         "candidate",
         Some(url),
@@ -9005,38 +9002,16 @@ fn fetch_cover_fallback_with_mode(
 
     let url = format!("https://covers.openlibrary.org/b/isbn/{}-L.jpg", isbn);
     log::info!("fetching cover fallback from Open Library: {}", url);
-    let response = match reqwest::blocking::get(&url) {
-        Ok(resp) => resp,
+    let client = match build_cover_http_client() {
+        Ok(value) => value,
         Err(err) => {
-            log::warn!("cover fallback fetch failed for {}: {}", url, err);
+            log::warn!("cover fallback client init failed: {}", err);
             return Ok(false);
         }
     };
-    if !response.status().is_success() {
-        log::warn!(
-            "cover fallback returned status {} for {}",
-            response.status(),
-            url
-        );
+    let Some((bytes, extension)) = download_cover_bytes_with_retry(&client, &url)? else {
         return Ok(false);
-    }
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("image/jpeg");
-    let extension = map_cover_extension(content_type).unwrap_or("jpg");
-    let bytes = response.bytes().map_err(|err| err.to_string())?.to_vec();
-
-    // Check for empty or placeholder images (Open Library returns tiny placeholders)
-    if bytes.len() < 1024 {
-        log::info!(
-            "cover fallback too small ({} bytes), likely a placeholder: {}",
-            bytes.len(),
-            url
-        );
-        return Ok(false);
-    }
+    };
 
     log::info!(
         "cover fetched from Open Library: {} ({} bytes)",
@@ -9048,13 +9023,222 @@ fn fetch_cover_fallback_with_mode(
         conn,
         item_id,
         bytes.clone(),
-        extension,
+        &extension,
         now,
         "openlibrary",
         Some(&url),
     )?;
 
     Ok(true)
+}
+
+fn build_cover_http_client() -> Result<reqwest::blocking::Client, reqwest::Error> {
+    reqwest::blocking::Client::builder()
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+        .timeout(std::time::Duration::from_secs(20))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::limited(8))
+        .build()
+}
+
+fn extract_google_volume_id_from_cover_url(url: &str) -> Option<String> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let host = parsed.host_str()?.to_ascii_lowercase();
+    if !host.contains("books.google.") {
+        return None;
+    }
+    parsed
+        .query_pairs()
+        .find(|(key, _)| key == "id")
+        .map(|(_, value)| value.into_owned())
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn fetch_google_cover_urls_by_volume_id(volume_id: &str) -> Vec<String> {
+    let detail_url = format!(
+        "https://www.googleapis.com/books/v1/volumes/{}",
+        urlencoding::encode(volume_id)
+    );
+    let data = match fetch_json_with_retry(&detail_url) {
+        Some(value) => value,
+        None => return Vec::new(),
+    };
+    let image_links = match data
+        .get("volumeInfo")
+        .and_then(|value| value.get("imageLinks"))
+    {
+        Some(value) => value,
+        None => return Vec::new(),
+    };
+
+    let mut urls: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let priorities = [
+        "extraLarge",
+        "large",
+        "medium",
+        "small",
+        "thumbnail",
+        "smallThumbnail",
+    ];
+
+    for key in priorities {
+        let Some(raw) = image_links.get(key).and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let normalized = raw
+            .replace("&amp;", "&")
+            .replace("http://", "https://");
+        if seen.insert(normalized.clone()) {
+            urls.push(normalized);
+        }
+    }
+
+    let page_urls = [
+        format!(
+            "https://books.google.com/books?id={}&source=gbs_api",
+            urlencoding::encode(volume_id)
+        ),
+        format!(
+            "https://books.google.nl/books?id={}&source=gbs_api",
+            urlencoding::encode(volume_id)
+        ),
+    ];
+    let og_image_regex =
+        Regex::new(r#"property=["']og:image["'][^>]*content=["']([^"']+)["']"#).ok();
+    let frontcover_regex =
+        Regex::new(r#"id=["']summary-frontcover["'][^>]*src=["']([^"']+)["']"#).ok();
+
+    for page_url in page_urls {
+        let Ok(html) = fetch_text_with_retry(&page_url) else {
+            continue;
+        };
+
+        if let Some(regex) = og_image_regex.as_ref() {
+            for capture in regex.captures_iter(&html) {
+                let Some(raw) = capture.get(1).map(|value| value.as_str()) else {
+                    continue;
+                };
+                let normalized = raw
+                    .replace("&amp;", "&")
+                    .replace("http://", "https://");
+                if seen.insert(normalized.clone()) {
+                    urls.push(normalized);
+                }
+            }
+        }
+
+        if let Some(regex) = frontcover_regex.as_ref() {
+            for capture in regex.captures_iter(&html) {
+                let Some(raw) = capture.get(1).map(|value| value.as_str()) else {
+                    continue;
+                };
+                let normalized = raw
+                    .replace("&amp;", "&")
+                    .replace("http://", "https://");
+                if seen.insert(normalized.clone()) {
+                    urls.push(normalized);
+                }
+            }
+        }
+    }
+
+    urls
+}
+
+fn download_cover_bytes_with_retry(
+    client: &reqwest::blocking::Client,
+    url: &str,
+) -> Result<Option<(Vec<u8>, String)>, String> {
+    const MAX_ATTEMPTS: usize = 4;
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        let response = match client
+            .get(url)
+            .header(
+                reqwest::header::ACCEPT,
+                "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            )
+            .header(reqwest::header::REFERER, "https://books.google.com/")
+            .header(reqwest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.9")
+            .send()
+        {
+            Ok(resp) => resp,
+            Err(err) => {
+                if attempt == MAX_ATTEMPTS {
+                    log::warn!(
+                        "cover fetch failed for {} after {} attempts: {}",
+                        url,
+                        MAX_ATTEMPTS,
+                        err
+                    );
+                    return Ok(None);
+                }
+                let backoff_ms = 300 * attempt as u64;
+                std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+                continue;
+            }
+        };
+
+        let status = response.status();
+        if status.is_success() {
+            let content_type = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("image/jpeg")
+                .split(';')
+                .next()
+                .unwrap_or("image/jpeg")
+                .trim()
+                .to_ascii_lowercase();
+            if !content_type.starts_with("image/") {
+                log::warn!(
+                    "cover fetch returned non-image content-type {} for {}",
+                    content_type,
+                    url
+                );
+                return Ok(None);
+            }
+            let extension = map_cover_extension(&content_type).unwrap_or("jpg").to_string();
+            let bytes = response.bytes().map_err(|err| err.to_string())?.to_vec();
+
+            if bytes.len() < 1024 {
+                log::info!(
+                    "cover too small ({} bytes), likely a placeholder: {}",
+                    bytes.len(),
+                    url
+                );
+                return Ok(None);
+            }
+            if image::load_from_memory(&bytes).is_err() {
+                log::warn!(
+                    "cover fetch returned undecodable image payload ({} bytes) for {}",
+                    bytes.len(),
+                    url
+                );
+                return Ok(None);
+            }
+            return Ok(Some((bytes, extension)));
+        }
+
+        if (status.as_u16() == 429 || status.is_server_error()) && attempt < MAX_ATTEMPTS {
+            let retry_after_ms = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok())
+                .map(|value| value * 1000)
+                .unwrap_or(350 * attempt as u64);
+            std::thread::sleep(std::time::Duration::from_millis(retry_after_ms.min(4_000)));
+            continue;
+        }
+
+        log::warn!("cover fetch returned status {} for {}", status, url);
+        return Ok(None);
+    }
+
+    Ok(None)
 }
 
 fn fetch_openlibrary_isbn(isbn: &str) -> Vec<EnrichmentCandidate> {

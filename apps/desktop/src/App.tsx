@@ -103,7 +103,8 @@ const DEFAULT_METADATA_SOURCES: MetadataSourceSetting[] = [
 ];
 
 const SYNC_CHANGE_ID_PREFIX = "sync:";
-const LIBRARY_SORT_SESSION_KEY = "folio.session.librarySort";
+const LIBRARY_SORT_STORAGE_KEY = "folio.librarySort";
+const LIBRARY_SORT_LEGACY_SESSION_KEY = "folio.session.librarySort";
 const LIBRARY_SORT_VALUES: LibrarySort[] = [
   "default",
   "title-asc",
@@ -126,7 +127,9 @@ function App() {
   };
   const readInitialLibrarySort = () => {
     if (typeof window === "undefined") return "default" as LibrarySort;
-    const raw = window.sessionStorage.getItem(LIBRARY_SORT_SESSION_KEY);
+    const raw =
+      window.localStorage.getItem(LIBRARY_SORT_STORAGE_KEY) ??
+      window.sessionStorage.getItem(LIBRARY_SORT_LEGACY_SESSION_KEY);
     if (!raw) return "default";
     return LIBRARY_SORT_VALUES.includes(raw as LibrarySort)
       ? (raw as LibrarySort)
@@ -2122,7 +2125,8 @@ function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.sessionStorage.setItem(LIBRARY_SORT_SESSION_KEY, librarySort);
+    window.localStorage.setItem(LIBRARY_SORT_STORAGE_KEY, librarySort);
+    window.sessionStorage.removeItem(LIBRARY_SORT_LEGACY_SESSION_KEY);
   }, [librarySort]);
 
   useEffect(() => {
