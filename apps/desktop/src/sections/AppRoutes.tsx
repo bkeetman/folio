@@ -420,6 +420,8 @@ export function AppRoutes(props: AppRoutesProps) {
       {view === "library-authors" ? (
         <AuthorsView
           authors={uniqueAuthors}
+          selectedAuthorNames={selectedAuthorNames}
+          setSelectedItemId={setSelectedItemId}
           setSelectedAuthorNames={setSelectedAuthorNames}
           setSelectedGenres={setSelectedGenres}
           setView={setView}

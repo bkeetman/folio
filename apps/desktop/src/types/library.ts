@@ -98,6 +98,23 @@ export type Author = {
   bookCount: number;
 };
 
+export type AuthorSuggestion = {
+  id: string;
+  name: string;
+  bookCount: number;
+};
+
+export type AuthorProfile = {
+  id: string;
+  name: string;
+  bookCount: number;
+  bio: string | null;
+  photoUrl: string | null;
+  metadataSource: string | null;
+  metadataSourceId: string | null;
+  metadataUpdatedAt: number | null;
+};
+
 export type Category = {
   name: string;
   bookCount: number;

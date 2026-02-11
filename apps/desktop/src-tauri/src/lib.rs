@@ -51,6 +51,10 @@ const MIGRATION_LIBRARY_QUERY_INDEXES_SQL: &str =
 const MIGRATION_METADATA_LOOKUP_SETTINGS_SQL: &str =
     include_str!("../../../../packages/core/drizzle/0009_metadata_lookup_settings.sql");
 const MIGRATION_ITEM_GENRES_SQL: &str = include_str!("../../../../packages/core/drizzle/0010_item_genres.sql");
+const MIGRATION_AUTHORS_NORMALIZED_LOOKUP_SQL: &str =
+    include_str!("../../../../packages/core/drizzle/0011_authors_normalized_lookup.sql");
+const MIGRATION_AUTHOR_METADATA_SQL: &str =
+    include_str!("../../../../packages/core/drizzle/0012_author_metadata.sql");
 
 #[derive(Serialize, Clone)]
 struct Tag {
@@ -75,6 +79,33 @@ struct LibraryItem {
     series_index: Option<f64>,
     isbn: Option<String>,
     genres: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthorSuggestion {
+    id: String,
+    name: String,
+    book_count: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthorProfile {
+    id: String,
+    name: String,
+    book_count: i64,
+    bio: Option<String>,
+    photo_url: Option<String>,
+    metadata_source: Option<String>,
+    metadata_source_id: Option<String>,
+    metadata_updated_at: Option<i64>,
+}
+
+struct OpenLibraryAuthorMetadata {
+    source_id: String,
+    bio: Option<String>,
+    photo_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -998,6 +1029,266 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
     );
 
     Ok(items)
+}
+
+#[tauri::command]
+async fn search_authors(
+    app: tauri::AppHandle,
+    query: String,
+    limit: Option<i64>,
+) -> Result<Vec<AuthorSuggestion>, String> {
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || search_authors_sync(app_handle, query, limit))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn search_authors_sync(
+    app: tauri::AppHandle,
+    query: String,
+    limit: Option<i64>,
+) -> Result<Vec<AuthorSuggestion>, String> {
+    let conn = open_db(&app)?;
+    let trimmed = normalize_ws(&query);
+    let normalized = normalize_author_key(&trimmed);
+    let name_pattern = format!("%{}%", trimmed);
+    let normalized_pattern = format!("%{}%", normalized);
+    let capped_limit = limit.unwrap_or(8).clamp(1, 25);
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT a.id, a.name, COUNT(DISTINCT ia.item_id) as book_count \
+             FROM authors a \
+             LEFT JOIN item_authors ia ON ia.author_id = a.id \
+             WHERE (?1 = '') OR (a.name LIKE ?2 COLLATE NOCASE) OR (a.normalized_name LIKE ?3) \
+             GROUP BY a.id, a.name \
+             ORDER BY \
+               CASE \
+                 WHEN lower(a.name) = lower(?1) THEN 0 \
+                 WHEN lower(a.name) LIKE lower(?1 || '%') THEN 1 \
+                 WHEN a.normalized_name = ?4 THEN 2 \
+                 ELSE 3 \
+               END, \
+               book_count DESC, \
+               a.name COLLATE NOCASE ASC \
+             LIMIT ?5",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(
+            params![
+                trimmed,
+                name_pattern,
+                normalized_pattern,
+                normalized,
+                capped_limit
+            ],
+            |row| {
+                Ok(AuthorSuggestion {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    book_count: row.get(2)?,
+                })
+            },
+        )
+        .map_err(|err| err.to_string())?;
+
+    let mut suggestions = Vec::new();
+    for row in rows {
+        suggestions.push(row.map_err(|err| err.to_string())?);
+    }
+    Ok(suggestions)
+}
+
+#[tauri::command]
+async fn list_author_profiles(app: tauri::AppHandle) -> Result<Vec<AuthorProfile>, String> {
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || list_author_profiles_sync(app_handle))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn list_author_profiles_sync(app: tauri::AppHandle) -> Result<Vec<AuthorProfile>, String> {
+    let conn = open_db(&app)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT a.id, a.name, a.bio, a.photo_url, a.metadata_source, a.metadata_source_id, a.metadata_updated_at, \
+             COUNT(DISTINCT ia.item_id) as book_count \
+             FROM authors a \
+             LEFT JOIN item_authors ia ON ia.author_id = a.id \
+             GROUP BY a.id, a.name, a.bio, a.photo_url, a.metadata_source, a.metadata_source_id, a.metadata_updated_at \
+             ORDER BY a.name COLLATE NOCASE ASC",
+        )
+        .map_err(|err| err.to_string())?;
+
+    let rows = stmt
+        .query_map(params![], |row| {
+            Ok(AuthorProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                bio: row.get::<_, Option<String>>(2)?.and_then(non_empty),
+                photo_url: row.get::<_, Option<String>>(3)?.and_then(non_empty),
+                metadata_source: row.get::<_, Option<String>>(4)?.and_then(non_empty),
+                metadata_source_id: row.get::<_, Option<String>>(5)?.and_then(non_empty),
+                metadata_updated_at: row.get(6)?,
+                book_count: row.get(7)?,
+            })
+        })
+        .map_err(|err| err.to_string())?;
+
+    let mut profiles = Vec::new();
+    for row in rows {
+        profiles.push(row.map_err(|err| err.to_string())?);
+    }
+    Ok(profiles)
+}
+
+fn get_author_profile_from_conn(
+    conn: &Connection,
+    author_name: &str,
+) -> Result<Option<AuthorProfile>, String> {
+    let trimmed = normalize_ws(author_name);
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let normalized = normalize_author_key(&trimmed);
+    conn.query_row(
+        "SELECT a.id, a.name, a.bio, a.photo_url, a.metadata_source, a.metadata_source_id, a.metadata_updated_at, \
+         COUNT(DISTINCT ia.item_id) as book_count \
+         FROM authors a \
+         LEFT JOIN item_authors ia ON ia.author_id = a.id \
+         WHERE lower(a.name) = lower(?1) OR (?2 != '' AND a.normalized_name = ?2) \
+         GROUP BY a.id, a.name, a.bio, a.photo_url, a.metadata_source, a.metadata_source_id, a.metadata_updated_at \
+         ORDER BY \
+           CASE WHEN lower(a.name) = lower(?1) THEN 0 ELSE 1 END, \
+           book_count DESC \
+         LIMIT 1",
+        params![trimmed, normalized],
+        |row| {
+            Ok(AuthorProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                bio: row.get::<_, Option<String>>(2)?.and_then(non_empty),
+                photo_url: row.get::<_, Option<String>>(3)?.and_then(non_empty),
+                metadata_source: row.get::<_, Option<String>>(4)?.and_then(non_empty),
+                metadata_source_id: row.get::<_, Option<String>>(5)?.and_then(non_empty),
+                metadata_updated_at: row.get(6)?,
+                book_count: row.get(7)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|err| err.to_string())
+}
+
+fn get_author_profile_by_id(
+    conn: &Connection,
+    author_id: &str,
+) -> Result<Option<AuthorProfile>, String> {
+    conn.query_row(
+        "SELECT a.id, a.name, a.bio, a.photo_url, a.metadata_source, a.metadata_source_id, a.metadata_updated_at, \
+         COUNT(DISTINCT ia.item_id) as book_count \
+         FROM authors a \
+         LEFT JOIN item_authors ia ON ia.author_id = a.id \
+         WHERE a.id = ?1 \
+         GROUP BY a.id, a.name, a.bio, a.photo_url, a.metadata_source, a.metadata_source_id, a.metadata_updated_at \
+         LIMIT 1",
+        params![author_id],
+        |row| {
+            Ok(AuthorProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                bio: row.get::<_, Option<String>>(2)?.and_then(non_empty),
+                photo_url: row.get::<_, Option<String>>(3)?.and_then(non_empty),
+                metadata_source: row.get::<_, Option<String>>(4)?.and_then(non_empty),
+                metadata_source_id: row.get::<_, Option<String>>(5)?.and_then(non_empty),
+                metadata_updated_at: row.get(6)?,
+                book_count: row.get(7)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn get_author_profile(
+    app: tauri::AppHandle,
+    author_name: String,
+) -> Result<Option<AuthorProfile>, String> {
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || get_author_profile_sync(app_handle, author_name))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn get_author_profile_sync(
+    app: tauri::AppHandle,
+    author_name: String,
+) -> Result<Option<AuthorProfile>, String> {
+    let conn = open_db(&app)?;
+    get_author_profile_from_conn(&conn, &author_name)
+}
+
+#[tauri::command]
+async fn enrich_author_metadata(
+    app: tauri::AppHandle,
+    author_name: String,
+) -> Result<Option<AuthorProfile>, String> {
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        enrich_author_metadata_sync(app_handle, author_name)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+fn enrich_author_metadata_sync(
+    app: tauri::AppHandle,
+    author_name: String,
+) -> Result<Option<AuthorProfile>, String> {
+    let conn = open_db(&app)?;
+    let Some(profile) = get_author_profile_from_conn(&conn, &author_name)? else {
+        return Ok(None);
+    };
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let metadata = fetch_openlibrary_author_metadata(&profile.name)
+        .or_else(|| fetch_openlibrary_author_metadata(&author_name));
+
+    if let Some(metadata) = metadata {
+        conn.execute(
+            "UPDATE authors \
+             SET bio = COALESCE(?1, bio), \
+                 photo_url = COALESCE(?2, photo_url), \
+                 metadata_source = 'openlibrary', \
+                 metadata_source_id = ?3, \
+                 metadata_updated_at = ?4, \
+                 updated_at = ?4 \
+             WHERE id = ?5",
+            params![
+                metadata.bio,
+                metadata.photo_url,
+                metadata.source_id,
+                now,
+                profile.id
+            ],
+        )
+        .map_err(|err| err.to_string())?;
+    } else {
+        // Mark attempt timestamp so automatic fetch is not retried on every selection.
+        conn.execute(
+            "UPDATE authors \
+             SET metadata_source = 'openlibrary', \
+                 metadata_updated_at = ?1, \
+                 updated_at = ?1 \
+             WHERE id = ?2",
+            params![now, profile.id],
+        )
+        .map_err(|err| err.to_string())?;
+    }
+
+    get_author_profile_by_id(&conn, &profile.id)
 }
 
 #[tauri::command]
@@ -4012,28 +4303,7 @@ fn save_item_metadata_sync(
         .map_err(|err| err.to_string())?;
 
         for author in &metadata.authors {
-            let author_id: Option<String> = conn
-                .query_row(
-                    "SELECT id FROM authors WHERE name = ?1",
-                    params![author],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(|err| err.to_string())?;
-
-            let author_id = match author_id {
-                Some(id) => id,
-                None => {
-                    let new_id = uuid::Uuid::new_v4().to_string();
-                    conn
-            .execute(
-              "INSERT INTO authors (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-              params![new_id, author, now, now],
-            )
-            .map_err(|err| err.to_string())?;
-                    new_id
-                }
-            };
+            let author_id = get_or_create_author(&conn, author, now)?;
 
             conn.execute(
                 "INSERT OR IGNORE INTO item_authors (item_id, author_id) VALUES (?1, ?2)",
@@ -5319,6 +5589,19 @@ fn normalize_ws(value: &str) -> String {
         .join(" ")
         .trim()
         .to_string()
+}
+
+fn normalize_author_key(value: &str) -> String {
+    let collapsed = normalize_ws(value);
+    let mut lowered = String::new();
+    for ch in collapsed.chars() {
+        if ch.is_alphanumeric() {
+            lowered.extend(ch.to_lowercase());
+        } else {
+            lowered.push(' ');
+        }
+    }
+    normalize_ws(&lowered)
 }
 
 fn parse_year_from_title_suffix(title: &str) -> Option<i64> {
@@ -7202,23 +7485,138 @@ fn sanitize_path_component(s: &str) -> String {
         .to_string()
 }
 
+fn normalize_and_dedupe_authors(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, created_at \
+             FROM authors \
+             ORDER BY created_at ASC, name COLLATE NOCASE ASC, id ASC",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(params![], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(|err| err.to_string())?;
+
+    let mut by_key: std::collections::BTreeMap<String, Vec<(String, String, i64)>> =
+        std::collections::BTreeMap::new();
+    for row in rows {
+        let (id, name, created_at) = row.map_err(|err| err.to_string())?;
+        let normalized_name = normalize_author_key(&name);
+        if normalized_name.is_empty() {
+            continue;
+        }
+        conn.execute(
+            "UPDATE authors SET normalized_name = ?1 WHERE id = ?2 AND (normalized_name IS NULL OR normalized_name != ?1)",
+            params![normalized_name, id],
+        )
+        .map_err(|err| err.to_string())?;
+        by_key
+            .entry(normalized_name)
+            .or_default()
+            .push((id, name, created_at));
+    }
+
+    let now = chrono::Utc::now().timestamp_millis();
+    for (normalized_name, group) in by_key {
+        if group.is_empty() {
+            continue;
+        }
+
+        let mut canonical = &group[0];
+        for candidate in group.iter().skip(1) {
+            let candidate_name_len = normalize_ws(&candidate.1).len();
+            let canonical_name_len = normalize_ws(&canonical.1).len();
+            let candidate_better_name = candidate_name_len > canonical_name_len;
+            let same_name_quality = candidate_name_len == canonical_name_len;
+            let candidate_older = candidate.2 < canonical.2;
+            if candidate_better_name || (same_name_quality && candidate_older) {
+                canonical = candidate;
+            }
+        }
+
+        let canonical_id = canonical.0.clone();
+        let canonical_name = canonical.1.clone();
+        conn.execute(
+            "UPDATE authors SET name = ?1, normalized_name = ?2, updated_at = ?3 WHERE id = ?4",
+            params![canonical_name, normalized_name, now, canonical_id],
+        )
+        .map_err(|err| err.to_string())?;
+
+        for duplicate in group {
+            let duplicate_id = duplicate.0;
+            if duplicate_id == canonical_id {
+                continue;
+            }
+            conn.execute(
+                "INSERT OR IGNORE INTO item_authors (item_id, author_id, role, ord) \
+                 SELECT item_id, ?1, role, ord FROM item_authors WHERE author_id = ?2",
+                params![canonical_id, duplicate_id],
+            )
+            .map_err(|err| err.to_string())?;
+            conn.execute(
+                "DELETE FROM item_authors WHERE author_id = ?1",
+                params![duplicate_id],
+            )
+            .map_err(|err| err.to_string())?;
+            conn.execute("DELETE FROM authors WHERE id = ?1", params![duplicate_id])
+                .map_err(|err| err.to_string())?;
+        }
+    }
+
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_authors_normalized_name_unique ON authors(normalized_name)",
+        params![],
+    )
+    .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
 fn get_or_create_author(conn: &Connection, name: &str, now: i64) -> Result<String, String> {
-    let existing_id: Option<String> = conn
-        .query_row(
-            "SELECT id FROM authors WHERE name = ?1",
-            params![name],
+    let cleaned_name = normalize_ws(name);
+    if cleaned_name.is_empty() {
+        return Err("Author name cannot be empty.".to_string());
+    }
+    let normalized_name = normalize_author_key(&cleaned_name);
+    let existing_id: Option<String> = if normalized_name.is_empty() {
+        conn.query_row(
+            "SELECT id FROM authors WHERE name = ?1 LIMIT 1",
+            params![cleaned_name],
             |row| row.get(0),
         )
         .optional()
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| err.to_string())?
+    } else {
+        conn.query_row(
+            "SELECT id FROM authors WHERE normalized_name = ?1 LIMIT 1",
+            params![normalized_name],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?
+    };
 
     match existing_id {
-        Some(id) => Ok(id),
+        Some(id) => {
+            if !normalized_name.is_empty() {
+                conn.execute(
+                    "UPDATE authors SET normalized_name = ?1, updated_at = ?2 WHERE id = ?3 AND (normalized_name IS NULL OR normalized_name != ?1)",
+                    params![normalized_name, now, id],
+                )
+                .map_err(|err| err.to_string())?;
+            }
+            Ok(id)
+        }
         None => {
             let new_id = Uuid::new_v4().to_string();
             conn.execute(
-                "INSERT INTO authors (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-                params![new_id, name, now, now],
+                "INSERT INTO authors (id, name, normalized_name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![new_id, cleaned_name, normalized_name, now, now],
             )
             .map_err(|err| err.to_string())?;
             Ok(new_id)
@@ -7739,8 +8137,22 @@ fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
     "0009_metadata_lookup_settings",
     MIGRATION_METADATA_LOOKUP_SETTINGS_SQL,
   )?;
-    apply_migration(&conn, "0010_item_genres", MIGRATION_ITEM_GENRES_SQL)?;
-    normalize_item_genres_to_strict_set(&conn)?;
+    let applied_item_genres_migration =
+        apply_migration(&conn, "0010_item_genres", MIGRATION_ITEM_GENRES_SQL)?;
+    let applied_author_lookup_migration = apply_migration(
+        &conn,
+        "0011_authors_normalized_lookup",
+        MIGRATION_AUTHORS_NORMALIZED_LOOKUP_SQL,
+    )?;
+    apply_migration(&conn, "0012_author_metadata", MIGRATION_AUTHOR_METADATA_SQL)?;
+
+    // Expensive data normalization should only run when its migration was just applied.
+    if applied_item_genres_migration {
+        normalize_item_genres_to_strict_set(&conn)?;
+    }
+    if applied_author_lookup_migration {
+        normalize_and_dedupe_authors(&conn)?;
+    }
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(|err| err.to_string())?;
     Ok(conn)
@@ -7809,7 +8221,7 @@ fn normalize_item_genres_to_strict_set(conn: &Connection) -> Result<(), String> 
     Ok(())
 }
 
-fn apply_migration(conn: &Connection, id: &str, sql: &str) -> Result<(), String> {
+fn apply_migration(conn: &Connection, id: &str, sql: &str) -> Result<bool, String> {
     let existing: Option<String> = conn
         .query_row(
             "SELECT id FROM schema_migrations WHERE id = ?1",
@@ -7819,7 +8231,7 @@ fn apply_migration(conn: &Connection, id: &str, sql: &str) -> Result<(), String>
         .optional()
         .map_err(|err| err.to_string())?;
     if existing.is_some() {
-        return Ok(());
+        return Ok(false);
     }
     conn.execute_batch(sql).map_err(|err| err.to_string())?;
     conn.execute(
@@ -7827,7 +8239,7 @@ fn apply_migration(conn: &Connection, id: &str, sql: &str) -> Result<(), String>
         params![id, chrono::Utc::now().timestamp_millis()],
     )
     .map_err(|err| err.to_string())?;
-    Ok(())
+    Ok(true)
 }
 
 fn ensure_covers_table(conn: &Connection) -> Result<(), String> {
@@ -8223,20 +8635,7 @@ fn apply_metadata(
     }
 
     for author in &metadata.authors {
-        let author_id: Option<String> = conn
-            .query_row(
-                "SELECT id FROM authors WHERE name = ?1",
-                params![author],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|err| err.to_string())?;
-        let author_id = author_id.unwrap_or_else(|| Uuid::new_v4().to_string());
-        conn.execute(
-      "INSERT OR IGNORE INTO authors (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
-      params![author_id, author, now],
-    )
-    .map_err(|err| err.to_string())?;
+        let author_id = get_or_create_author(conn, author, now)?;
         conn.execute(
       "INSERT OR IGNORE INTO item_authors (item_id, author_id, role, ord) VALUES (?1, ?2, 'author', 0)",
       params![item_id, author_id],
@@ -10683,6 +11082,129 @@ fn fetch_openlibrary_search(title: &str, author: Option<&str>) -> Vec<Enrichment
         .collect()
 }
 
+fn extract_openlibrary_author_bio(value: &serde_json::Value) -> Option<String> {
+    let bio = value.get("bio")?;
+    match bio {
+        serde_json::Value::String(text) => non_empty(text.to_string()),
+        serde_json::Value::Object(map) => map
+            .get("value")
+            .and_then(|entry| entry.as_str())
+            .map(|text| text.to_string())
+            .and_then(non_empty),
+        _ => None,
+    }
+}
+
+fn fetch_openlibrary_author_metadata(author_name: &str) -> Option<OpenLibraryAuthorMetadata> {
+    let cleaned = normalize_ws(author_name);
+    if cleaned.is_empty() {
+        return None;
+    }
+
+    let search_url = format!(
+        "https://openlibrary.org/search/authors.json?q={}&limit=6",
+        urlencoding::encode(&cleaned)
+    );
+    let search_data = fetch_json_with_retry(&search_url)?;
+    let docs = search_data
+        .get("docs")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let target_key = normalize_author_key(&cleaned);
+    let mut best: Option<(&serde_json::Value, i32)> = None;
+
+    for doc in &docs {
+        let key = doc
+            .get("key")
+            .and_then(|value| value.as_str())
+            .map(|value| value.trim())
+            .unwrap_or("");
+        if key.is_empty() {
+            continue;
+        }
+        let doc_name = doc
+            .get("name")
+            .and_then(|value| value.as_str())
+            .map(|value| value.trim())
+            .unwrap_or("");
+        let doc_normalized = normalize_author_key(doc_name);
+        let score = if !target_key.is_empty() && !doc_normalized.is_empty() {
+            if doc_normalized == target_key {
+                100
+            } else if doc_normalized.starts_with(&(target_key.clone() + " ")) {
+                80
+            } else if doc_normalized.contains(&target_key) || target_key.contains(&doc_normalized) {
+                60
+            } else {
+                20
+            }
+        } else {
+            10
+        };
+        if best.map(|(_, current)| score > current).unwrap_or(true) {
+            best = Some((doc, score));
+        }
+    }
+
+    let (best_doc, _) = best?;
+    let source_id = best_doc
+        .get("key")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string())?;
+    let details_path = if source_id.starts_with("http://") || source_id.starts_with("https://") {
+        source_id.clone()
+    } else if source_id.starts_with("/authors/") {
+        if source_id.ends_with(".json") {
+            source_id.clone()
+        } else {
+            format!("{}.json", source_id)
+        }
+    } else if source_id.starts_with('/') {
+        if source_id.ends_with(".json") {
+            source_id.clone()
+        } else {
+            format!("{}.json", source_id)
+        }
+    } else if source_id.starts_with("OL") && source_id.ends_with('A') {
+        format!("/authors/{}.json", source_id)
+    } else if source_id.ends_with(".json") {
+        format!("/{}", source_id)
+    } else {
+        format!("/{}.json", source_id)
+    };
+    let details_url = if details_path.starts_with("http://") || details_path.starts_with("https://")
+    {
+        details_path
+    } else {
+        format!("https://openlibrary.org{}", details_path)
+    };
+    let details = fetch_json_with_retry(&details_url)?;
+
+    let photo_url = details
+        .get("photos")
+        .and_then(|value| value.as_array())
+        .and_then(|values| values.first())
+        .and_then(|entry| {
+            if let Some(id) = entry.as_i64() {
+                Some(format!("https://covers.openlibrary.org/a/id/{}-L.jpg", id))
+            } else {
+                entry
+                    .as_str()
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty())
+                    .map(|value| format!("https://covers.openlibrary.org/a/id/{}-L.jpg", value))
+            }
+        });
+
+    Some(OpenLibraryAuthorMetadata {
+        source_id,
+        bio: extract_openlibrary_author_bio(&details)
+            .or_else(|| extract_openlibrary_author_bio(best_doc)),
+        photo_url,
+    })
+}
+
 fn parse_search_query(query: &str) -> (String, Option<String>) {
     let lowered = query.to_lowercase();
     if let Some(result) = split_search_query(query, &lowered, " by ") {
@@ -11034,20 +11556,7 @@ fn apply_enrichment_candidate(
         .map_err(|err| err.to_string())?;
 
         for author in &candidate.authors {
-            let author_id: Option<String> = conn
-                .query_row(
-                    "SELECT id FROM authors WHERE name = ?1",
-                    params![author],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(|err| err.to_string())?;
-            let author_id = author_id.unwrap_or_else(|| Uuid::new_v4().to_string());
-            conn.execute(
-        "INSERT OR IGNORE INTO authors (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
-        params![author_id, author, now],
-      )
-      .map_err(|err| err.to_string())?;
+            let author_id = get_or_create_author(conn, author, now)?;
             conn.execute(
         "INSERT OR IGNORE INTO item_authors (item_id, author_id, role, ord) VALUES (?1, ?2, 'author', 0)",
         params![item_id, author_id],
@@ -12593,6 +13102,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_library_items,
             get_library_items_light,
+            search_authors,
+            list_author_profiles,
+            get_author_profile,
+            enrich_author_metadata,
             get_library_item_facets,
             get_inbox_items,
             list_tags,

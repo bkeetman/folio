@@ -1,13 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ArrowLeft, Check, Image as ImageIcon, Loader2, Search, Trash2, X } from "lucide-react";
-import type { Dispatch, SetStateAction } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input } from "../components/ui";
 import { LANGUAGE_OPTIONS } from "../lib/languageFlags";
 import { cleanupMetadataTitle } from "../lib/metadataCleanup";
 import { PREDEFINED_BOOK_CATEGORIES } from "../lib/categories";
-import type { EnrichmentCandidate, ItemMetadata, LibraryItem, View } from "../types/library";
+import type { AuthorSuggestion, EnrichmentCandidate, ItemMetadata, LibraryItem, View } from "../types/library";
 
 type EmbeddedCoverCandidate = {
     path: string;
@@ -41,8 +41,15 @@ type BookEditViewProps = {
 };
 
 function isLikelyIsbn(value: string): boolean {
-    const normalized = value.replace(/[^0-9Xx]/g, "");
-    return normalized.length === 10 || normalized.length === 13;
+  const normalized = value.replace(/[^0-9Xx]/g, "");
+  return normalized.length === 10 || normalized.length === 13;
+}
+
+function parseAuthorsInput(value: string): string[] {
+    return value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
 }
 
 function buildMetadataSearchQuery(metadata: ItemMetadata): string {
@@ -113,6 +120,11 @@ export function BookEditView({
     const [embeddedSelectionDirty, setEmbeddedSelectionDirty] = useState(false);
     const [selectedCategoryToAdd, setSelectedCategoryToAdd] = useState("");
     const [isMatchQueryDirty, setIsMatchQueryDirty] = useState(false);
+    const [authorsInput, setAuthorsInput] = useState("");
+    const [authorSuggestions, setAuthorSuggestions] = useState<AuthorSuggestion[]>([]);
+    const [authorSuggestionsLoading, setAuthorSuggestionsLoading] = useState(false);
+    const [authorsFocused, setAuthorsFocused] = useState(false);
+    const [activeAuthorSuggestionIndex, setActiveAuthorSuggestionIndex] = useState(-1);
     const [formData, setFormData] = useState<ItemMetadata>({
         title: "",
         authors: [],
@@ -132,6 +144,14 @@ export function BookEditView({
         (category) => !visibleGenres.some((genre) => genre.localeCompare(category, undefined, { sensitivity: "base" }) === 0),
     );
     const metadataSearchQuery = buildMetadataSearchQuery(formData);
+    const authorLookupQuery = useMemo(() => {
+        const parts = authorsInput.split(",");
+        return parts.at(-1)?.trim() ?? "";
+    }, [authorsInput]);
+    const showAuthorSuggestions =
+        authorsFocused &&
+        authorLookupQuery.length >= 2 &&
+        (authorSuggestionsLoading || authorSuggestions.length > 0);
 
     const selectedItem = libraryItems.find((item) => item.id === selectedItemId);
     const displayCoverUrl = localCoverUrl ?? coverUrl;
@@ -139,12 +159,18 @@ export function BookEditView({
     const activeItemIdRef = useRef<string | null>(selectedItemId);
     const embeddedPreviewUrlRef = useRef<string | null>(null);
     const localCoverUrlRef = useRef<string | null>(null);
+    const authorSuggestionsListRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         activeItemIdRef.current = selectedItemId;
         setError(null);
         setInfoMessage(null);
         setIsMatchQueryDirty(false);
+        setAuthorsInput("");
+        setAuthorSuggestions([]);
+        setAuthorSuggestionsLoading(false);
+        setAuthorsFocused(false);
+        setActiveAuthorSuggestionIndex(-1);
         setEmbeddedCandidates([]);
         setSelectedEmbeddedIndex(0);
         setEmbeddedSelectionDirty(false);
@@ -190,6 +216,7 @@ export function BookEditView({
             invoke<ItemMetadata>("get_item_details", { itemId: selectedItemId })
                 .then((details) => {
                     setFormData({ ...details, genres: details.genres ?? [] });
+                    setAuthorsInput((details.authors ?? []).join(", "));
                     setIsLoading(false);
                 })
                 .catch((err) => {
@@ -249,12 +276,131 @@ export function BookEditView({
         onMatchQueryChange,
     ]);
 
+    useEffect(() => {
+        if (!isDesktop || !authorsFocused || authorLookupQuery.length < 2) {
+            setAuthorSuggestions([]);
+            setAuthorSuggestionsLoading(false);
+            setActiveAuthorSuggestionIndex(-1);
+            return;
+        }
+        let cancelled = false;
+        const timer = window.setTimeout(() => {
+            setAuthorSuggestionsLoading(true);
+            void invoke<AuthorSuggestion[]>("search_authors", {
+                query: authorLookupQuery,
+                limit: 8,
+            })
+                .then((suggestions) => {
+                    if (cancelled) return;
+                    setAuthorSuggestions(suggestions);
+                    setActiveAuthorSuggestionIndex((current) => {
+                        if (suggestions.length === 0) return -1;
+                        if (current >= 0 && current < suggestions.length) return current;
+                        return 0;
+                    });
+                })
+                .catch((error) => {
+                    if (cancelled) return;
+                    console.error("Failed to lookup author suggestions", error);
+                    setAuthorSuggestions([]);
+                    setActiveAuthorSuggestionIndex(-1);
+                })
+                .finally(() => {
+                    if (!cancelled) {
+                        setAuthorSuggestionsLoading(false);
+                    }
+                });
+        }, 180);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [isDesktop, authorsFocused, authorLookupQuery]);
+
     const handleUseCurrentMetadataQuery = useCallback(() => {
         if (metadataSearchQuery !== matchQuery) {
             onMatchQueryChange(metadataSearchQuery);
         }
         setIsMatchQueryDirty(false);
     }, [metadataSearchQuery, matchQuery, onMatchQueryChange]);
+
+    const handleAuthorsInputChange = useCallback((value: string) => {
+        const parsed = parseAuthorsInput(value);
+        setAuthorsInput(value);
+        setFormData((current) => ({ ...current, authors: parsed }));
+        setActiveAuthorSuggestionIndex(-1);
+    }, []);
+
+    const handleApplyAuthorSuggestion = useCallback((suggestion: AuthorSuggestion) => {
+        const parts = authorsInput.split(",");
+        if (parts.length === 0) {
+            parts.push(suggestion.name);
+        } else {
+            parts[parts.length - 1] = suggestion.name;
+        }
+        const parsed = parseAuthorsInput(parts.join(","));
+        setAuthorsInput(parsed.length ? `${parsed.join(", ")}, ` : "");
+        setFormData((current) => ({ ...current, authors: parsed }));
+        setAuthorSuggestions([]);
+        setActiveAuthorSuggestionIndex(-1);
+    }, [authorsInput]);
+
+    const handleAuthorsInputKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>) => {
+        if (!showAuthorSuggestions || authorSuggestions.length === 0) return;
+        const lastIndex = authorSuggestions.length - 1;
+        if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setActiveAuthorSuggestionIndex((current) => {
+                if (current < 0) return 0;
+                return current >= lastIndex ? 0 : current + 1;
+            });
+            return;
+        }
+        if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setActiveAuthorSuggestionIndex((current) => {
+                if (current < 0) return lastIndex;
+                if (current === 0) return lastIndex;
+                return current - 1;
+            });
+            return;
+        }
+        if (event.key === "Enter") {
+            const pickedIndex = activeAuthorSuggestionIndex >= 0 ? activeAuthorSuggestionIndex : 0;
+            const picked = authorSuggestions[pickedIndex];
+            if (!picked) return;
+            event.preventDefault();
+            handleApplyAuthorSuggestion(picked);
+            return;
+        }
+        if (event.key === "Escape") {
+            event.preventDefault();
+            setAuthorSuggestions([]);
+            setActiveAuthorSuggestionIndex(-1);
+        }
+    }, [
+        activeAuthorSuggestionIndex,
+        authorSuggestions,
+        handleApplyAuthorSuggestion,
+        showAuthorSuggestions,
+    ]);
+
+    useEffect(() => {
+        if (!showAuthorSuggestions || activeAuthorSuggestionIndex < 0) return;
+        const list = authorSuggestionsListRef.current;
+        if (!list) return;
+        const activeEl = list.querySelector<HTMLButtonElement>(
+            `[data-suggestion-index='${activeAuthorSuggestionIndex}']`,
+        );
+        activeEl?.scrollIntoView({ block: "nearest" });
+    }, [showAuthorSuggestions, activeAuthorSuggestionIndex]);
+
+    useEffect(() => {
+        if (!showAuthorSuggestions || authorSuggestionsLoading || authorSuggestions.length === 0) return;
+        if (activeAuthorSuggestionIndex < 0 || activeAuthorSuggestionIndex >= authorSuggestions.length) {
+            setActiveAuthorSuggestionIndex(0);
+        }
+    }, [showAuthorSuggestions, authorSuggestionsLoading, authorSuggestions.length, activeAuthorSuggestionIndex]);
 
     const handleSave = async () => {
         if (!selectedItemId) return;
@@ -732,20 +878,55 @@ export function BookEditView({
                             {/* Authors */}
                             <div>
                                 <label className="mb-1.5 block text-sm font-medium text-app-ink">{t("bookEdit.authors")}</label>
-                                <Input
-                                    value={formData.authors.join(", ")}
-                                    onChange={(e) =>
-                                        setFormData({
-                                            ...formData,
-                                            authors: e.target.value
-                                                .split(",")
-                                                .map((s) => s.trim())
-                                                .filter(Boolean),
-                                        })
-                                    }
-                                    placeholder={t("bookEdit.authorsPlaceholder")}
-                                    className="w-full"
-                                />
+                                <div className="relative">
+                                    <Input
+                                        value={authorsInput}
+                                        onFocus={() => setAuthorsFocused(true)}
+                                        onBlur={() => {
+                                            window.setTimeout(() => {
+                                                setAuthorsFocused(false);
+                                            }, 120);
+                                        }}
+                                        onChange={(e) => handleAuthorsInputChange(e.target.value)}
+                                        onKeyDown={handleAuthorsInputKeyDown}
+                                        placeholder={t("bookEdit.authorsPlaceholder")}
+                                        className="w-full"
+                                    />
+                                    {showAuthorSuggestions && (
+                                        <div
+                                            ref={authorSuggestionsListRef}
+                                            className="absolute z-20 mt-1 max-h-52 w-full overflow-y-auto rounded-md border border-[var(--app-border-soft)] bg-app-surface shadow-lg"
+                                        >
+                                            {authorSuggestionsLoading ? (
+                                                <div className="px-3 py-2 text-xs text-app-ink-muted">{t("common.loading")}</div>
+                                            ) : (
+                                                authorSuggestions.map((suggestion, suggestionIndex) => (
+                                                    <button
+                                                        key={suggestion.id}
+                                                        type="button"
+                                                        data-suggestion-index={suggestionIndex}
+                                                        className={`flex w-full items-center justify-between border-l-2 px-3 py-2 text-left text-sm text-app-ink transition-colors ${
+                                                            suggestionIndex === activeAuthorSuggestionIndex
+                                                                ? "border-[var(--app-accent)] bg-[rgba(249,115,22,0.12)]"
+                                                                : "border-transparent hover:bg-app-surface-hover"
+                                                        }`}
+                                                        aria-selected={suggestionIndex === activeAuthorSuggestionIndex}
+                                                        onMouseDown={(event) => {
+                                                            event.preventDefault();
+                                                            handleApplyAuthorSuggestion(suggestion);
+                                                        }}
+                                                        onMouseEnter={() => setActiveAuthorSuggestionIndex(suggestionIndex)}
+                                                    >
+                                                        <span className="truncate">{suggestion.name}</span>
+                                                        <span className="ml-3 shrink-0 text-xs text-app-ink-muted">
+                                                            {suggestion.bookCount}
+                                                        </span>
+                                                    </button>
+                                                ))
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                                 <p className="mt-1 text-xs text-app-ink-muted">{t("bookEdit.authorsHint")}</p>
                             </div>
 

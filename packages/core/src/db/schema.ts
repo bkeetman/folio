@@ -40,13 +40,25 @@ export const files = sqliteTable("files", {
   status: text("status").default("active"),
 });
 
-export const authors = sqliteTable("authors", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  sortName: text("sort_name"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-});
+export const authors = sqliteTable(
+  "authors",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    normalizedName: text("normalized_name"),
+    sortName: text("sort_name"),
+    bio: text("bio"),
+    photoUrl: text("photo_url"),
+    metadataSource: text("metadata_source"),
+    metadataSourceId: text("metadata_source_id"),
+    metadataUpdatedAt: integer("metadata_updated_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    normalizedNameIdx: uniqueIndex("authors_normalized_name").on(table.normalizedName),
+  })
+);
 
 export const itemAuthors = sqliteTable(
   "item_authors",

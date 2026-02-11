@@ -164,7 +164,7 @@ function App() {
   const [editMatchCandidates, setEditMatchCandidates] = useState<EnrichmentCandidate[]>([]);
   const [editMatchApplying, setEditMatchApplying] = useState<string | null>(null);
   const [editDetailsVersion, setEditDetailsVersion] = useState(0);
-  const mainScrollRef = useRef<HTMLElement | null>(null);
+  const mainScrollRef = useRef<HTMLDivElement | null>(null);
   const savedScrollByViewRef = useRef<Partial<Record<View, number>>>({});
   const pendingScrollRestoreRef = useRef<{ view: View; top: number } | null>(null);
   const editReturnScrollRef = useRef<{ view: View; top: number } | null>(null);
@@ -2186,210 +2186,212 @@ function App() {
         pendingView={pendingView}
       />
 
-      <main
-        ref={mainScrollRef}
-        className={`flex h-screen flex-col gap-4 px-6 py-4 ${view === "ereader" ? "overflow-hidden" : "overflow-y-auto"}`}
-      >
-        {view !== "edit" && (
-          <TopToolbar
-            view={view}
-            checkForUpdates={(silent) => void checkForUpdates(silent)}
-            query={queryInput}
-            setQuery={setQueryInput}
-            grid={grid}
-            setGrid={setGrid}
-            libraryReady={libraryReady}
-            updateStatus={updateStatus}
-            updateAvailable={updateAvailable}
-            updateVersion={updateVersion}
-            scanStatus={scanStatus}
-            scanProgress={scanProgress}
-            importProgress={importProgress}
-            activityLog={activityLog}
-          />
-        )}
+      <main className="flex h-screen min-h-0 flex-col px-6 py-4">
+        <div
+          ref={mainScrollRef}
+          className={`flex min-h-0 flex-1 flex-col gap-4 ${view === "ereader" ? "overflow-hidden" : "overflow-y-auto pr-2 scrollbar-gutter-stable"}`}
+        >
+          {view !== "edit" && (
+            <TopToolbar
+              view={view}
+              checkForUpdates={(silent) => void checkForUpdates(silent)}
+              query={queryInput}
+              setQuery={setQueryInput}
+              grid={grid}
+              setGrid={setGrid}
+              libraryReady={libraryReady}
+              updateStatus={updateStatus}
+              updateAvailable={updateAvailable}
+              updateVersion={updateVersion}
+              scanStatus={scanStatus}
+              scanProgress={scanProgress}
+              importProgress={importProgress}
+              activityLog={activityLog}
+            />
+          )}
 
-        <ScanProgressBar
-          scanning={scanning}
-          progress={scanProgress}
-          etaLabel={scanEtaLabel}
-          variant="accent"
-        />
-        <ProgressBar
-          show={importingBooks}
-          progress={importProgress}
-          label="Importing"
-          variant="blue"
-        />
-        <div className="flex min-h-0 flex-1 flex-col gap-4">
-          <AppRoutes
-            view={view}
-            setView={setViewWithTransition}
-            isDesktop={isDesktop}
-            libraryReady={libraryReady}
-            libraryItemsLength={libraryItems.length}
-            sortedBooks={sortedBooks}
-            allBooks={allBooks}
-            selectedItemId={selectedItemId}
-            selectedBatchItemIds={selectedBatchItemIds}
-            setSelectedItemId={setSelectedItemId}
-            onToggleBatchSelect={handleToggleBatchSelection}
-            onSetBatchSelection={handleSetBatchSelection}
-            onClearBatchSelection={handleClearBatchSelection}
-            onApplyBatchMetadata={handleApplyBatchMetadata}
-            onRemoveSelectedBooks={handleBatchRemoveItems}
-            libraryFilter={libraryFilter}
-            setLibraryFilter={setLibraryFilter}
-            librarySort={librarySort}
-            setLibrarySort={setLibrarySort}
-            tags={tags}
-            selectedTagIds={selectedTagIds}
-            setSelectedTagIds={setSelectedTagIds}
-            grid={grid}
-            setGrid={setGrid}
-            fetchCoverOverride={fetchCoverOverride}
-            clearCoverOverride={clearCoverOverride}
-            onVisibleItemIdsChange={handleVisibleItemIdsChange}
-            scrollContainerRef={mainScrollRef}
-            selectedAuthorNames={selectedAuthorNames}
-            setSelectedAuthorNames={setSelectedAuthorNames}
-            selectedSeries={selectedSeries}
-            setSelectedSeries={setSelectedSeries}
-            selectedGenres={selectedGenres}
-            setSelectedGenres={setSelectedGenres}
-            onEnrichAll={handleEnrichAll}
-            onCancelEnrich={handleCancelEnrich}
-            enriching={enriching}
-            enrichingItems={enrichingItems}
-            enrichProgress={enrichProgress}
-            uniqueAuthors={uniqueAuthors}
-            uniqueSeries={uniqueSeries}
-            uniqueCategories={uniqueCategories}
-            inbox={inbox}
-            sampleInboxItems={sampleInboxItems}
-            duplicates={duplicates}
-            sampleDuplicateGroups={sampleDuplicateGroups}
-            titleDuplicates={titleDuplicates}
-            fuzzyDuplicates={fuzzyDuplicates}
-            duplicateKeepSelection={duplicateKeepSelection}
-            setDuplicateKeepSelection={setDuplicateKeepSelection}
-            handleResolveDuplicate={handleResolveDuplicate}
-            handleAutoSelectAll={handleAutoSelectDuplicates}
-            handleResolveAll={handleResolveAllDuplicates}
-            allFixItems={allFixItems}
-            fixIssues={fixIssues}
-            selectedFixItemId={selectedFixItemId}
-            setSelectedFixItemId={setSelectedFixItemId}
-            fixFilter={fixFilter}
-            setFixFilter={setFixFilter}
-            fixSearchQuery={fixSearchQuery}
-            setFixSearchQuery={setFixSearchQuery}
-            fixLoading={fixLoading}
-            fixCandidates={fixCandidates}
-            fixCoverUrl={selectedFixItemId ? coverOverrides[selectedFixItemId] : null}
-            onFetchFixCover={fetchCoverOverride}
-            onSearchFixWithQuery={handleSearchFixWithQuery}
-            onApplyFixCandidate={handleApplyFixCandidate}
-            onSaveFixMetadata={handleSaveFixMetadata}
-            fixApplyingCandidateId={fixApplyingCandidateId}
-            getCandidateCoverUrl={getCandidateCoverUrl}
-            pendingChangesStatus={pendingChangesStatus}
-            setPendingChangesStatus={setPendingChangesStatus}
-            pendingChangesApplying={pendingChangesApplying}
-            pendingChangesLoading={pendingChangesLoading}
-            changesSourceFilter={changesSourceFilter}
-            setChangesSourceFilter={setChangesSourceFilter}
-            changesDeviceFilter={changesDeviceFilter}
-            clearChangesDeviceFilter={() => setChangesDeviceFilter(null)}
-            pendingChanges={pendingChangesForView}
-            selectedChangeIds={selectedChangeIds}
-            toggleChangeSelection={toggleChangeSelection}
-            handleApplyAllChanges={handleApplyAllChanges}
-            handleApplySelectedChanges={handleApplySelectedChanges}
-            handleApplyChange={handleApplyChange}
-            handleRemoveChange={handleRemoveChange}
-            handleRemoveAllChanges={handleRemoveAllChanges}
-            handleRemoveSelectedChanges={handleRemoveSelectedChanges}
-            confirmDeleteOpen={confirmDeleteOpen}
-            confirmDeleteIds={confirmDeleteIds}
-            setConfirmDeleteOpen={setConfirmDeleteOpen}
-            setConfirmDeleteIds={setConfirmDeleteIds}
-            handleConfirmDelete={handleConfirmDelete}
-            applyingChangeIds={applyingChangeIds}
-            changeProgress={changeProgress}
-            organizeMode={organizeMode}
-            setOrganizeMode={setOrganizeMode}
-            organizeRoot={organizeRoot}
-            organizeTemplate={organizeTemplate}
-            setOrganizeTemplate={setOrganizeTemplate}
-            organizePlan={organizePlan}
-            handlePlanOrganize={handlePlanOrganize}
-            handleApplyOrganize={handleApplyOrganize}
-            organizeStatus={organizeStatus}
-            organizeProgress={organizeProgress}
-            organizing={organizing}
-            organizeLog={organizeLog}
-            onImportCancel={handleImportCancel}
-            onImportStart={handleImportStart}
-            onChooseRoot={handleChooseRoot}
-            onNormalizeDescriptions={handleNormalizeDescriptions}
-            normalizingDescriptions={normalizingDescriptions}
-            onBatchFixTitles={handleBatchFixTitles}
-            batchFixingTitles={batchFixingTitles}
-            metadataSources={metadataSources}
-            onSetMetadataSourceEnabled={handleSetMetadataSourceEnabled}
-            metadataSourcesSaving={metadataSourcesSaving}
-            themeMode={themeMode}
-            setThemeMode={setThemeMode}
-            missingFiles={missingFiles}
-            onRelinkMissing={handleRelinkMissing}
-            onRemoveMissing={handleRemoveMissing}
-            onRemoveAllMissing={handleRemoveAllMissing}
-            onRescanMissing={handleRescanMissing}
-            libraryItems={libraryItems}
-            previousView={previousView}
-            onEditItemUpdate={async () => {
-              await refreshLibrary();
-              await refreshPendingChanges();
-            }}
-            editCoverUrl={selectedItemId ? coverOverrides[selectedItemId] : null}
-            detailsVersion={editDetailsVersion}
-            matchQuery={editMatchQuery}
-            onMatchQueryChange={setEditMatchQuery}
-            matchLoading={editMatchLoading}
-            matchCandidates={editMatchCandidates}
-            onMatchSearch={handleEditMatchSearch}
-            onMatchApply={handleEditMatchApply}
-            matchApplyingId={editMatchApplying}
-            onQueueRemoveItem={handleQueueRemoveItem}
-            newTagName={newTagName}
-            setNewTagName={setNewTagName}
-            newTagColor={newTagColor}
-            setNewTagColor={setNewTagColor}
-            handleCreateTag={handleCreateTag}
-            handleUpdateTag={handleUpdateTag}
-            ereaderDevices={ereaderDevices}
-            selectedEreaderDeviceId={selectedEreaderDeviceId}
-            setSelectedEreaderDeviceId={setSelectedEreaderDeviceId}
-            ereaderBooks={ereaderBooks}
-            ereaderSyncQueue={ereaderSyncQueue}
-            onAddEreaderDevice={handleAddEreaderDevice}
-            onRemoveEreaderDevice={handleRemoveEreaderDevice}
-            onScanEreaderDevice={handleScanEreaderDevice}
-            onQueueEreaderAdd={handleQueueEreaderAdd}
-            onQueueEreaderRemove={handleQueueEreaderRemove}
-            onQueueEreaderImport={handleQueueEreaderImport}
-            onQueueEreaderUpdate={handleQueueEreaderUpdate}
-            onExecuteSync={handleOpenSyncDialog}
-            onOpenChangesFromEreader={handleOpenChangesFromEreader}
-            onRefreshDevices={async () => {
-              await refreshEreaderDevices();
-            }}
-            ereaderScanning={ereaderScanning}
-            ereaderScanProgress={ereaderScanProgress}
-            ereaderSyncing={ereaderSyncing}
-            ereaderSyncProgress={ereaderSyncProgress}
+          <ScanProgressBar
+            scanning={scanning}
+            progress={scanProgress}
+            etaLabel={scanEtaLabel}
+            variant="accent"
           />
+          <ProgressBar
+            show={importingBooks}
+            progress={importProgress}
+            label="Importing"
+            variant="blue"
+          />
+          <div className="flex min-h-0 flex-1 flex-col gap-4">
+            <AppRoutes
+              view={view}
+              setView={setViewWithTransition}
+              isDesktop={isDesktop}
+              libraryReady={libraryReady}
+              libraryItemsLength={libraryItems.length}
+              sortedBooks={sortedBooks}
+              allBooks={allBooks}
+              selectedItemId={selectedItemId}
+              selectedBatchItemIds={selectedBatchItemIds}
+              setSelectedItemId={setSelectedItemId}
+              onToggleBatchSelect={handleToggleBatchSelection}
+              onSetBatchSelection={handleSetBatchSelection}
+              onClearBatchSelection={handleClearBatchSelection}
+              onApplyBatchMetadata={handleApplyBatchMetadata}
+              onRemoveSelectedBooks={handleBatchRemoveItems}
+              libraryFilter={libraryFilter}
+              setLibraryFilter={setLibraryFilter}
+              librarySort={librarySort}
+              setLibrarySort={setLibrarySort}
+              tags={tags}
+              selectedTagIds={selectedTagIds}
+              setSelectedTagIds={setSelectedTagIds}
+              grid={grid}
+              setGrid={setGrid}
+              fetchCoverOverride={fetchCoverOverride}
+              clearCoverOverride={clearCoverOverride}
+              onVisibleItemIdsChange={handleVisibleItemIdsChange}
+              scrollContainerRef={mainScrollRef}
+              selectedAuthorNames={selectedAuthorNames}
+              setSelectedAuthorNames={setSelectedAuthorNames}
+              selectedSeries={selectedSeries}
+              setSelectedSeries={setSelectedSeries}
+              selectedGenres={selectedGenres}
+              setSelectedGenres={setSelectedGenres}
+              onEnrichAll={handleEnrichAll}
+              onCancelEnrich={handleCancelEnrich}
+              enriching={enriching}
+              enrichingItems={enrichingItems}
+              enrichProgress={enrichProgress}
+              uniqueAuthors={uniqueAuthors}
+              uniqueSeries={uniqueSeries}
+              uniqueCategories={uniqueCategories}
+              inbox={inbox}
+              sampleInboxItems={sampleInboxItems}
+              duplicates={duplicates}
+              sampleDuplicateGroups={sampleDuplicateGroups}
+              titleDuplicates={titleDuplicates}
+              fuzzyDuplicates={fuzzyDuplicates}
+              duplicateKeepSelection={duplicateKeepSelection}
+              setDuplicateKeepSelection={setDuplicateKeepSelection}
+              handleResolveDuplicate={handleResolveDuplicate}
+              handleAutoSelectAll={handleAutoSelectDuplicates}
+              handleResolveAll={handleResolveAllDuplicates}
+              allFixItems={allFixItems}
+              fixIssues={fixIssues}
+              selectedFixItemId={selectedFixItemId}
+              setSelectedFixItemId={setSelectedFixItemId}
+              fixFilter={fixFilter}
+              setFixFilter={setFixFilter}
+              fixSearchQuery={fixSearchQuery}
+              setFixSearchQuery={setFixSearchQuery}
+              fixLoading={fixLoading}
+              fixCandidates={fixCandidates}
+              fixCoverUrl={selectedFixItemId ? coverOverrides[selectedFixItemId] : null}
+              onFetchFixCover={fetchCoverOverride}
+              onSearchFixWithQuery={handleSearchFixWithQuery}
+              onApplyFixCandidate={handleApplyFixCandidate}
+              onSaveFixMetadata={handleSaveFixMetadata}
+              fixApplyingCandidateId={fixApplyingCandidateId}
+              getCandidateCoverUrl={getCandidateCoverUrl}
+              pendingChangesStatus={pendingChangesStatus}
+              setPendingChangesStatus={setPendingChangesStatus}
+              pendingChangesApplying={pendingChangesApplying}
+              pendingChangesLoading={pendingChangesLoading}
+              changesSourceFilter={changesSourceFilter}
+              setChangesSourceFilter={setChangesSourceFilter}
+              changesDeviceFilter={changesDeviceFilter}
+              clearChangesDeviceFilter={() => setChangesDeviceFilter(null)}
+              pendingChanges={pendingChangesForView}
+              selectedChangeIds={selectedChangeIds}
+              toggleChangeSelection={toggleChangeSelection}
+              handleApplyAllChanges={handleApplyAllChanges}
+              handleApplySelectedChanges={handleApplySelectedChanges}
+              handleApplyChange={handleApplyChange}
+              handleRemoveChange={handleRemoveChange}
+              handleRemoveAllChanges={handleRemoveAllChanges}
+              handleRemoveSelectedChanges={handleRemoveSelectedChanges}
+              confirmDeleteOpen={confirmDeleteOpen}
+              confirmDeleteIds={confirmDeleteIds}
+              setConfirmDeleteOpen={setConfirmDeleteOpen}
+              setConfirmDeleteIds={setConfirmDeleteIds}
+              handleConfirmDelete={handleConfirmDelete}
+              applyingChangeIds={applyingChangeIds}
+              changeProgress={changeProgress}
+              organizeMode={organizeMode}
+              setOrganizeMode={setOrganizeMode}
+              organizeRoot={organizeRoot}
+              organizeTemplate={organizeTemplate}
+              setOrganizeTemplate={setOrganizeTemplate}
+              organizePlan={organizePlan}
+              handlePlanOrganize={handlePlanOrganize}
+              handleApplyOrganize={handleApplyOrganize}
+              organizeStatus={organizeStatus}
+              organizeProgress={organizeProgress}
+              organizing={organizing}
+              organizeLog={organizeLog}
+              onImportCancel={handleImportCancel}
+              onImportStart={handleImportStart}
+              onChooseRoot={handleChooseRoot}
+              onNormalizeDescriptions={handleNormalizeDescriptions}
+              normalizingDescriptions={normalizingDescriptions}
+              onBatchFixTitles={handleBatchFixTitles}
+              batchFixingTitles={batchFixingTitles}
+              metadataSources={metadataSources}
+              onSetMetadataSourceEnabled={handleSetMetadataSourceEnabled}
+              metadataSourcesSaving={metadataSourcesSaving}
+              themeMode={themeMode}
+              setThemeMode={setThemeMode}
+              missingFiles={missingFiles}
+              onRelinkMissing={handleRelinkMissing}
+              onRemoveMissing={handleRemoveMissing}
+              onRemoveAllMissing={handleRemoveAllMissing}
+              onRescanMissing={handleRescanMissing}
+              libraryItems={libraryItems}
+              previousView={previousView}
+              onEditItemUpdate={async () => {
+                await refreshLibrary();
+                await refreshPendingChanges();
+              }}
+              editCoverUrl={selectedItemId ? coverOverrides[selectedItemId] : null}
+              detailsVersion={editDetailsVersion}
+              matchQuery={editMatchQuery}
+              onMatchQueryChange={setEditMatchQuery}
+              matchLoading={editMatchLoading}
+              matchCandidates={editMatchCandidates}
+              onMatchSearch={handleEditMatchSearch}
+              onMatchApply={handleEditMatchApply}
+              matchApplyingId={editMatchApplying}
+              onQueueRemoveItem={handleQueueRemoveItem}
+              newTagName={newTagName}
+              setNewTagName={setNewTagName}
+              newTagColor={newTagColor}
+              setNewTagColor={setNewTagColor}
+              handleCreateTag={handleCreateTag}
+              handleUpdateTag={handleUpdateTag}
+              ereaderDevices={ereaderDevices}
+              selectedEreaderDeviceId={selectedEreaderDeviceId}
+              setSelectedEreaderDeviceId={setSelectedEreaderDeviceId}
+              ereaderBooks={ereaderBooks}
+              ereaderSyncQueue={ereaderSyncQueue}
+              onAddEreaderDevice={handleAddEreaderDevice}
+              onRemoveEreaderDevice={handleRemoveEreaderDevice}
+              onScanEreaderDevice={handleScanEreaderDevice}
+              onQueueEreaderAdd={handleQueueEreaderAdd}
+              onQueueEreaderRemove={handleQueueEreaderRemove}
+              onQueueEreaderImport={handleQueueEreaderImport}
+              onQueueEreaderUpdate={handleQueueEreaderUpdate}
+              onExecuteSync={handleOpenSyncDialog}
+              onOpenChangesFromEreader={handleOpenChangesFromEreader}
+              onRefreshDevices={async () => {
+                await refreshEreaderDevices();
+              }}
+              ereaderScanning={ereaderScanning}
+              ereaderScanProgress={ereaderScanProgress}
+              ereaderSyncing={ereaderSyncing}
+              ereaderSyncProgress={ereaderSyncProgress}
+            />
+          </div>
         </div>
 
         <SyncConfirmDialog
@@ -2404,12 +2406,14 @@ function App() {
           syncProgress={ereaderSyncProgress}
         />
 
-        <StatusBar
-          scanStatus={scanStatus}
-          updateStatus={updateStatus}
-          isDesktop={isDesktop}
-          appVersion={appVersion}
-        />
+        <div className="pt-3">
+          <StatusBar
+            scanStatus={scanStatus}
+            updateStatus={updateStatus}
+            isDesktop={isDesktop}
+            appVersion={appVersion}
+          />
+        </div>
       </main>
 
       {(view === "library" ||
@@ -2435,6 +2439,7 @@ function App() {
             clearCoverOverride={clearCoverOverride}
             fetchCoverOverride={(itemId) => void fetchCoverOverride(itemId)}
             setView={setViewWithTransition}
+            selectedAuthorNames={selectedAuthorNames}
             setSelectedAuthorNames={setSelectedAuthorNames}
             setSelectedSeries={setSelectedSeries}
             setSelectedGenres={setSelectedGenres}

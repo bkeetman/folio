@@ -32,6 +32,14 @@ type ScanStats = {
 
 const defaultExtensions = [".epub", ".pdf", ".mobi"];
 
+function normalizeAuthorKey(value: string): string {
+  return value
+    .trim()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
 export async function scanRoot(
   db: FolioDb,
   rootPath: string,
@@ -331,16 +339,20 @@ async function applyMetadata(db: FolioDb, itemId: string, filePath: string) {
 
     if (metadata.authors?.length) {
       for (const name of metadata.authors) {
+        const normalizedName = normalizeAuthorKey(name);
         const existingAuthor = db
           .select()
           .from(authors)
-          .where(eq(authors.name, name))
+          .where(
+            normalizedName ? eq(authors.normalizedName, normalizedName) : eq(authors.name, name)
+          )
           .get();
         const authorId = existingAuthor?.id ?? randomUUID();
         if (!existingAuthor) {
           db.insert(authors).values({
             id: authorId,
             name,
+            normalizedName: normalizedName || undefined,
             createdAt: now,
             updatedAt: now,
           });

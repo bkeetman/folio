@@ -139,3 +139,7 @@ textarea {
   width: 0;
   height: 0;
 }
+
+.scrollbar-gutter-stable {
+  scrollbar-gutter: stable;
+}

@@ -1,18 +1,49 @@
 import { invoke } from "@tauri-apps/api/core";
-import { BookOpen, FileText, FolderOpen, Globe, HardDrive, PencilLine } from "lucide-react";
+import { BookOpen, FileText, FolderOpen, Globe, HardDrive, Loader2, PencilLine, RefreshCcw, UserRound } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge, Button, Separator } from "../components/ui";
+import { emitAuthorProfileUpdated } from "../lib/authorProfileEvents";
 import { getLanguageFlag, getLanguageName, isKnownLanguageCode } from "../lib/languageFlags";
 import { getTagColorClass } from "../lib/tagColors";
-import type { FileItem, Tag, View } from "../types/library";
+import type { AuthorProfile, FileItem, Tag, View } from "../types/library";
 
 type EReaderSyncStatus = {
   isOnDevice: boolean;
   isInQueue: boolean;
   matchConfidence: "exact" | "isbn" | "title" | "fuzzy" | null;
 };
+
+function formatMetadataDate(timestampMs: number | null): string | null {
+  if (!timestampMs) return null;
+  const parsed = new Date(timestampMs);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleDateString();
+}
+
+function hasAuthorMetadata(profile: AuthorProfile | null): boolean {
+  if (!profile) return false;
+  const hasBio = Boolean(profile.bio && profile.bio.trim().length > 0);
+  const hasPhoto = Boolean(profile.photoUrl && profile.photoUrl.trim().length > 0);
+  return hasBio || hasPhoto;
+}
+
+function hasFetchedAuthorMetadata(profile: AuthorProfile | null): boolean {
+  if (!profile) return false;
+  return Boolean(profile.metadataUpdatedAt || (profile.metadataSource && profile.metadataSource.trim().length > 0));
+}
+
+function authorProfileKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function formatAuthorMetadataSource(source: string | null | undefined): string | null {
+  const value = source?.trim();
+  if (!value) return null;
+  if (value.toLowerCase() === "openlibrary") return "Open Library";
+  return value;
+}
 
 type InspectorProps = {
   selectedItem: {
@@ -39,6 +70,7 @@ type InspectorProps = {
   fetchCoverOverride: (itemId: string) => void;
   // Navigation
   setView: Dispatch<SetStateAction<View>>;
+  selectedAuthorNames: string[];
   setSelectedAuthorNames: Dispatch<SetStateAction<string[]>>;
   setSelectedSeries: Dispatch<SetStateAction<string[]>>;
   setSelectedGenres: Dispatch<SetStateAction<string[]>>;
@@ -60,6 +92,7 @@ export function Inspector({
   clearCoverOverride,
   fetchCoverOverride,
   setView,
+  selectedAuthorNames,
   setSelectedAuthorNames,
   setSelectedSeries,
   setSelectedGenres,
@@ -76,7 +109,30 @@ export function Inspector({
     itemId: null,
     files: [],
   });
+  const [authorProfile, setAuthorProfile] = useState<AuthorProfile | null>(null);
+  const [authorProfileLoading, setAuthorProfileLoading] = useState(false);
+  const [authorProfileRefreshing, setAuthorProfileRefreshing] = useState(false);
+  const [authorProfileError, setAuthorProfileError] = useState<string | null>(null);
+  const [bookAuthorProfiles, setBookAuthorProfiles] = useState<Record<string, AuthorProfile | null>>({});
+  const [bookAuthorProfilesLoading, setBookAuthorProfilesLoading] = useState(false);
+  const bookAuthorProfileCacheRef = useRef<Map<string, AuthorProfile | null>>(new Map());
+  const autoFetchAttemptedRef = useRef<Set<string>>(new Set());
+  const authorProfileLoadInFlightRef = useRef(false);
   const selectedItemId = selectedItem?.id ?? null;
+  const selectedAuthorName = selectedAuthorNames[0] ?? null;
+  const authorMetadataLoading = authorProfileLoading || authorProfileRefreshing;
+  const authorHasBio = Boolean(authorProfile?.bio && authorProfile.bio.trim().length > 0);
+  const authorHasPhoto = Boolean(authorProfile?.photoUrl && authorProfile.photoUrl.trim().length > 0);
+  const authorMetadataWasFetched = Boolean(authorProfile?.metadataSource || authorProfile?.metadataUpdatedAt);
+  const bookAuthorNames = useMemo(() => {
+    if (!selectedItem) return [] as string[];
+    const fromList = (selectedItem.authors ?? [])
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+    if (fromList.length > 0) return fromList;
+    const fallback = selectedItem.author?.trim() ?? "";
+    return fallback ? [fallback] : [];
+  }, [selectedItem]);
 
   useEffect(() => {
     if (!selectedItemId) return;
@@ -91,6 +147,111 @@ export function Inspector({
       cancelled = true;
     };
   }, [selectedItemId]);
+
+  useEffect(() => {
+    if (selectedItem || !selectedAuthorName) {
+      setAuthorProfile(null);
+      setAuthorProfileLoading(false);
+      setAuthorProfileRefreshing(false);
+      setAuthorProfileError(null);
+      authorProfileLoadInFlightRef.current = false;
+      return;
+    }
+    let cancelled = false;
+    authorProfileLoadInFlightRef.current = true;
+    setAuthorProfileLoading(true);
+    setAuthorProfileError(null);
+    void invoke<AuthorProfile | null>("get_author_profile", {
+      authorName: selectedAuthorName,
+    })
+      .then((profile) => {
+        if (cancelled) return;
+        setAuthorProfile(profile);
+        if (profile) {
+          emitAuthorProfileUpdated(profile);
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Failed to fetch author profile", error);
+        setAuthorProfile(null);
+        setAuthorProfileError(
+          t("inspector.authorProfileLoadFailed", {
+            defaultValue: "Failed to load author details.",
+          })
+        );
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setAuthorProfileLoading(false);
+        }
+        authorProfileLoadInFlightRef.current = false;
+      });
+    return () => {
+      cancelled = true;
+      authorProfileLoadInFlightRef.current = false;
+    };
+  }, [selectedItem, selectedAuthorName, t]);
+
+  useEffect(() => {
+    if (!selectedItem || bookAuthorNames.length === 0) {
+      setBookAuthorProfiles({});
+      setBookAuthorProfilesLoading(false);
+      return;
+    }
+
+    const cached: Record<string, AuthorProfile | null> = {};
+    const missingAuthors: string[] = [];
+    for (const authorName of bookAuthorNames) {
+      const key = authorProfileKey(authorName);
+      if (bookAuthorProfileCacheRef.current.has(key)) {
+        cached[key] = bookAuthorProfileCacheRef.current.get(key) ?? null;
+      } else {
+        missingAuthors.push(authorName);
+      }
+    }
+    setBookAuthorProfiles(cached);
+
+    if (missingAuthors.length === 0) {
+      setBookAuthorProfilesLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setBookAuthorProfilesLoading(true);
+    void Promise.all(
+      missingAuthors.map(async (authorName) => {
+        try {
+          const profile = await invoke<AuthorProfile | null>("get_author_profile", {
+            authorName,
+          });
+          return [authorName, profile] as const;
+        } catch (error) {
+          console.error(`Failed to load profile for author "${authorName}"`, error);
+          return [authorName, null] as const;
+        }
+      })
+    )
+      .then((results) => {
+        if (cancelled) return;
+        const next: Record<string, AuthorProfile | null> = { ...cached };
+        for (const [authorName, profile] of results) {
+          const key = authorProfileKey(authorName);
+          bookAuthorProfileCacheRef.current.set(key, profile);
+          next[key] = profile;
+        }
+        setBookAuthorProfiles(next);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setBookAuthorProfilesLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bookAuthorNames, selectedItem]);
 
   const files = selectedItem && fileState.itemId === selectedItem.id ? fileState.files : [];
 
@@ -118,6 +279,61 @@ export function Inspector({
     setSelectedSeries([]);
     setView("library-books");
   };
+
+  const handleOpenAuthorBooks = () => {
+    if (!selectedAuthorName) return;
+    setSelectedAuthorNames([selectedAuthorName]);
+    setSelectedSeries([]);
+    setSelectedGenres([]);
+    setView("library-books");
+  };
+
+  const handleRefreshAuthorProfile = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!selectedAuthorName || selectedItem) return;
+      setAuthorProfileRefreshing(true);
+      setAuthorProfileError(null);
+      try {
+        const refreshed = await invoke<AuthorProfile | null>("enrich_author_metadata", {
+          authorName: selectedAuthorName,
+        });
+        setAuthorProfile(refreshed);
+        if (refreshed) {
+          emitAuthorProfileUpdated(refreshed);
+        }
+      } catch (error) {
+        console.error("Failed to refresh author profile", error);
+        if (!options?.silent) {
+          setAuthorProfileError(
+            t("inspector.authorProfileRefreshFailed", {
+              defaultValue: "Failed to refresh author details.",
+            })
+          );
+        }
+      } finally {
+        setAuthorProfileRefreshing(false);
+      }
+    },
+    [selectedAuthorName, selectedItem, t]
+  );
+
+  useEffect(() => {
+    if (selectedItem || !selectedAuthorName) return;
+    if (authorProfileLoadInFlightRef.current || authorMetadataLoading) return;
+    if (hasAuthorMetadata(authorProfile) || hasFetchedAuthorMetadata(authorProfile)) return;
+
+    const key = selectedAuthorName.trim().toLowerCase();
+    if (!key) return;
+    if (autoFetchAttemptedRef.current.has(key)) return;
+    autoFetchAttemptedRef.current.add(key);
+    void handleRefreshAuthorProfile({ silent: true });
+  }, [
+    selectedItem,
+    selectedAuthorName,
+    authorProfile,
+    authorMetadataLoading,
+    handleRefreshAuthorProfile,
+  ]);
   return (
     <aside className="flex h-screen flex-col gap-3 overflow-hidden border-l border-[var(--app-border-soft)] bg-[var(--app-surface)] px-3 py-4">
       <div className="flex items-center justify-between">
@@ -159,18 +375,57 @@ export function Inspector({
 
               <div className="flex min-w-0 flex-1 flex-col gap-2">
                 <div className="break-words text-[15px] font-semibold leading-tight">{selectedItem.title}</div>
-                {selectedItem.authors && selectedItem.authors.length > 0 ? (
+                {bookAuthorNames.length > 0 ? (
                   <div className="space-y-1">
-                    {selectedItem.authors.map((author, i) => (
-                      <div key={`${author}-${i}`}>
+                    {bookAuthorNames.map((author, i) => {
+                      const profile = bookAuthorProfiles[authorProfileKey(author)] ?? null;
+                      const showAuthorCard = hasAuthorMetadata(profile) || hasFetchedAuthorMetadata(profile);
+                      const metadataSourceLabel = formatAuthorMetadataSource(profile?.metadataSource);
+                      if (!showAuthorCard) {
+                        return (
+                          <div key={`${author}-${i}`}>
+                            <button
+                              className="text-left text-sm text-[var(--app-accent-strong)] hover:underline"
+                              onClick={() => handleAuthorClick(author)}
+                            >
+                              {author}
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      return (
                         <button
-                          className="text-left text-sm text-[var(--app-accent-strong)] hover:underline"
+                          key={`${author}-${i}`}
+                          className="flex w-full items-start gap-2 rounded-md border border-[var(--app-border-soft)] bg-app-bg/30 px-2 py-1.5 text-left transition hover:border-[var(--app-accent)]/60 hover:bg-app-surface"
                           onClick={() => handleAuthorClick(author)}
                         >
-                          {author}
+                          <span className="flex h-9 w-9 flex-none items-center justify-center overflow-hidden rounded-full border border-[var(--app-border-soft)] bg-app-bg">
+                            {profile?.photoUrl ? (
+                              <img src={profile.photoUrl} alt={author} className="h-full w-full object-cover" />
+                            ) : (
+                              <UserRound size={16} className="text-[var(--app-ink-muted)]" />
+                            )}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block break-words text-sm leading-snug text-[var(--app-accent-strong)]">
+                              {author}
+                            </span>
+                            {metadataSourceLabel ? (
+                              <span className="mt-1 inline-flex rounded-full border border-[var(--app-border-soft)] bg-app-bg/50 px-1.5 py-0.5 text-[9px] text-[var(--app-ink-muted)]">
+                                {metadataSourceLabel}
+                              </span>
+                            ) : null}
+                          </span>
                         </button>
+                      );
+                    })}
+                    {bookAuthorProfilesLoading ? (
+                      <div className="flex items-center gap-1.5 text-[11px] text-[var(--app-ink-muted)]">
+                        <Loader2 size={11} className="animate-spin" />
+                        {t("inspector.loadingAuthorCards", { defaultValue: "Loading author info..." })}
                       </div>
-                    ))}
+                    ) : null}
                   </div>
                 ) : (
                   <div className="text-xs text-[var(--app-ink-muted)]">{selectedItem.author}</div>
@@ -394,9 +649,133 @@ export function Inspector({
             )}
           </div>
         </div>
+      ) : selectedAuthorName ? (
+        <div className="flex h-full flex-col overflow-y-auto pb-4 [&::-webkit-scrollbar]:hidden">
+          <div className="rounded-md border border-[var(--app-border-muted)] bg-app-surface/40 p-3">
+            <div className={compactLayout ? "flex flex-col gap-3" : "flex gap-3"}>
+              <div
+                className={
+                  compactLayout
+                    ? "relative mx-auto h-36 w-24 flex-none overflow-hidden rounded-md border border-[var(--app-border-muted)] bg-app-bg"
+                    : "relative h-32 w-24 flex-none overflow-hidden rounded-md border border-[var(--app-border-muted)] bg-app-bg"
+                }
+              >
+                {authorProfile?.photoUrl ? (
+                  <img
+                    className="h-full w-full object-cover"
+                    src={authorProfile.photoUrl}
+                    alt={authorProfile.name}
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-[var(--app-ink-muted)]">
+                    <UserRound size={22} />
+                  </div>
+                )}
+                {authorMetadataLoading ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-app-bg/45">
+                    <Loader2 size={14} className="animate-spin text-[var(--app-ink-muted)]" />
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="break-words text-[15px] font-semibold leading-tight">
+                    {authorProfile?.name ?? selectedAuthorName}
+                  </div>
+                  <button
+                    type="button"
+                    className="inline-flex h-5 w-5 flex-none items-center justify-center rounded text-[var(--app-ink-muted)]/80 transition hover:bg-app-bg/35 hover:text-[var(--app-ink)] disabled:cursor-not-allowed disabled:opacity-40"
+                    title={t("inspector.refresh", { defaultValue: "Refresh" })}
+                    onClick={() => void handleRefreshAuthorProfile()}
+                    disabled={authorMetadataLoading}
+                  >
+                    {authorMetadataLoading ? (
+                      <Loader2 size={11} className="animate-spin" />
+                    ) : (
+                      <RefreshCcw size={11} />
+                    )}
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="rounded-full border border-[var(--app-border-soft)] bg-app-bg/40 px-2 py-0.5 text-[11px] text-[var(--app-ink-muted)]">
+                    {t("inspector.booksByAuthor", {
+                      defaultValue: "{{count}} books",
+                      count: authorProfile?.bookCount ?? 0,
+                    })}
+                  </span>
+                  {authorProfile?.metadataSource ? (
+                    <span className="rounded-full border border-[var(--app-border-soft)] bg-app-bg/40 px-2 py-0.5 text-[11px] text-[var(--app-ink-muted)]">
+                      {authorProfile.metadataSource}
+                    </span>
+                  ) : null}
+                  {authorMetadataLoading ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--app-border-soft)] bg-app-bg/40 px-2 py-0.5 text-[11px] text-[var(--app-ink-muted)]">
+                      <Loader2 size={10} className="animate-spin" />
+                      {t("inspector.fetchingMetadata", { defaultValue: "Fetching metadata..." })}
+                    </span>
+                  ) : null}
+                </div>
+                {formatMetadataDate(authorProfile?.metadataUpdatedAt ?? null) ? (
+                  <div className="text-xs text-[var(--app-ink-muted)]">
+                    {t("inspector.updated", { defaultValue: "Updated" })}: {formatMetadataDate(authorProfile?.metadataUpdatedAt ?? null)}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            {authorProfileError ? (
+              <div className="mt-3 text-xs text-red-500">{authorProfileError}</div>
+            ) : (
+              <div className="mt-3">
+                {authorMetadataLoading ? (
+                  <div className="mb-2 flex items-center gap-1.5 text-[11px] text-[var(--app-ink-muted)]">
+                    <Loader2 size={12} className="animate-spin" />
+                    {t("inspector.fetchingAuthorDetails", { defaultValue: "Fetching author details..." })}
+                  </div>
+                ) : null}
+                {authorHasBio ? (
+                  <div className="rounded-md border border-[var(--app-border-soft)] bg-app-bg/30 p-2.5 text-xs leading-relaxed text-[var(--app-ink-soft)]">
+                    {authorProfile?.bio}
+                  </div>
+                ) : (
+                  <div className="text-xs text-[var(--app-ink-muted)]">
+                    {authorMetadataWasFetched
+                      ? authorHasPhoto
+                        ? t("inspector.noAuthorBioAfterFetch", {
+                            defaultValue:
+                              "Metadata was fetched automatically, but no biography was found yet.",
+                          })
+                        : t("inspector.noAuthorProfileAfterFetch", {
+                            defaultValue:
+                              "Metadata was fetched automatically, but no biography or photo was found yet.",
+                          })
+                      : t("inspector.noAuthorProfileYet", {
+                          defaultValue: "No author details yet. Metadata is fetched automatically.",
+                        })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="mt-3">
+              <Button
+                variant="toolbar"
+                size="sm"
+                className="w-full justify-center"
+                onClick={handleOpenAuthorBooks}
+              >
+                <BookOpen size={14} />
+                {t("inspector.showBooks", { defaultValue: "Show books" })}
+              </Button>
+            </div>
+          </div>
+        </div>
       ) : (
         <div className="text-xs text-[var(--app-ink-muted)]">
-          {t("inspector.selectBook")}
+          {t("inspector.selectBookOrAuthor", {
+            defaultValue: "Select a book or author to see details.",
+          })}
         </div>
       )}
     </aside>

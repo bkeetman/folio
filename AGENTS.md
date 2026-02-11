@@ -99,6 +99,8 @@
 - Use `useEffect` dependencies correctly (no suppressed deps).
 - Prefer lifting state rather than global mutable state.
 - Avoid excessive re-renders; memoize only when needed.
+- For async user actions/data fetches, always provide visible loading feedback (spinner/skeleton/progress) and disable conflicting actions while in flight.
+- Avoid UI jank: keep interactions responsive and prefer incremental rendering for large lists/cards.
 
 ## Styling
 - Desktop UI uses Tailwind + shadcn/ui (see `apps/desktop/src/index.css` and `apps/desktop/src/components/ui`).
@@ -115,6 +117,7 @@
 - Favor explicit error handling with `Result`.
 - Avoid panics in normal flows.
 - Keep Tauri commands small; push heavy logic to core helpers.
+- Do not run blocking DB/network work on the UI thread in Tauri commands. Use async commands with `tauri::async_runtime::spawn_blocking` (or equivalent) for heavy work.
 
 ## Error handling
 - Surface actionable error messages (include context, not stack traces for users).

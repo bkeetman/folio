@@ -38,6 +38,14 @@ const rateLimiters: Record<EnrichmentSourceName, RateLimiter> = {
 
 const appleBooksProvider = new AppleBooksProvider();
 
+function normalizeAuthorKey(value: string): string {
+  return value
+    .trim()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
 export async function enrichByIsbn(
   db: FolioDb,
   itemId: string,
@@ -174,16 +182,20 @@ export function applyEnrichmentCandidate(
 
   if (candidate.authors?.length) {
     for (const name of candidate.authors) {
+      const normalizedName = normalizeAuthorKey(name);
       const existing = db
         .select()
         .from(authors)
-        .where(eq(authors.name, name))
+        .where(
+          normalizedName ? eq(authors.normalizedName, normalizedName) : eq(authors.name, name)
+        )
         .get();
       const authorId = existing?.id ?? randomUUID();
       if (!existing) {
         db.insert(authors).values({
           id: authorId,
           name,
+          normalizedName: normalizedName || undefined,
           createdAt: now,
           updatedAt: now,
         });

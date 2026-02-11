@@ -335,6 +335,62 @@ body {
   margin-bottom: 80px;
 }
 
+/* Creator Credit */
+.creator-credit {
+  margin-bottom: 56px;
+}
+
+.creator-card {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: var(--shadow);
+  text-decoration: none;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.creator-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-lg);
+}
+
+.creator-card img {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.creator-eyebrow {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-soft);
+}
+
+.creator-name {
+  margin: 4px 0 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.creator-link {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .instruction-card {
   background: #fff;
   border: 1px solid var(--border);
@@ -573,5 +629,19 @@ body {
 @media (max-width: 640px) {
   .sovereignty-card {
     padding: 32px 24px;
+  }
+
+  .creator-card {
+    gap: 14px;
+    padding: 14px 16px;
+  }
+
+  .creator-card img {
+    width: 56px;
+    height: 56px;
+  }
+
+  .creator-name {
+    font-size: 18px;
   }
 }
