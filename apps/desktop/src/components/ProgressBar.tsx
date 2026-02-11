@@ -220,7 +220,9 @@ export function SyncProgressBar({ syncing, progress, variant = "accent" }: SyncP
     ? "Adding"
     : progress.action === "remove"
       ? "Removing"
-      : "Importing";
+      : progress.action === "update"
+        ? "Updating"
+        : "Importing";
 
   return (
     <div className={`rounded-lg border ${styles.border} ${styles.bg} px-3 py-2`}>

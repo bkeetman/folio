@@ -102,6 +102,10 @@ const DEFAULT_METADATA_SOURCES: MetadataSourceSetting[] = [
   },
 ];
 
+const SYNC_CHANGE_ID_PREFIX = "sync:";
+type PendingChangeStatus = "pending" | "applied" | "error";
+type ChangesSourceFilter = "all" | "library" | "ereader";
+
 function App() {
   const readInitialInspectorWidth = () => {
     if (typeof window === "undefined") return 320;
@@ -177,10 +181,10 @@ function App() {
   const [pendingChangesCount, setPendingChangesCount] = useState(0);
   const [pendingChangesLoading, setPendingChangesLoading] = useState(false);
   const [pendingChangesApplying, setPendingChangesApplying] = useState(false);
-  const [pendingChangesStatus, setPendingChangesStatus] = useState<
-    "pending" | "applied" | "error"
-  >("pending");
-  const pendingChangesStatusRef = useRef<"pending" | "applied" | "error">("pending");
+  const [pendingChangesStatus, setPendingChangesStatus] = useState<PendingChangeStatus>("pending");
+  const [changesSourceFilter, setChangesSourceFilter] = useState<ChangesSourceFilter>("all");
+  const [changesDeviceFilter, setChangesDeviceFilter] = useState<string | null>(null);
+  const pendingChangesStatusRef = useRef<PendingChangeStatus>("pending");
   const [applyingChangeIds, setApplyingChangeIds] = useState<Set<string>>(new Set());
   const [changeProgress, setChangeProgress] = useState<OperationProgress | null>(null);
   const [importProgress, setImportProgress] = useState<OperationProgress | null>(null);
@@ -346,7 +350,7 @@ function App() {
     handleQueueEreaderAdd,
     handleQueueEreaderRemove,
     handleQueueEreaderImport,
-    handleRemoveFromEreaderQueue,
+    handleQueueEreaderUpdate,
     handleExecuteEreaderSync,
   } = useEreader({
     isDesktop,
@@ -414,12 +418,69 @@ function App() {
     pendingChangesStatusRef.current = pendingChangesStatus;
   }, [pendingChangesStatus]);
 
+  const loadChangesByStatus = useCallback(async (status: PendingChangeStatus) => {
+    const [fileChanges, syncChanges] = await Promise.all([
+      invoke<PendingChange[]>("get_pending_changes", { status }),
+      invoke<PendingChange[]>("get_sync_queue_changes", { status }),
+    ]);
+    return [...fileChanges, ...syncChanges].sort((a, b) => b.created_at - a.created_at);
+  }, []);
+
+  const splitChangeIds = useCallback((ids: string[]) => {
+    const fileIds: string[] = [];
+    const syncIds: string[] = [];
+    ids.forEach((id) => {
+      if (id.startsWith(SYNC_CHANGE_ID_PREFIX)) {
+        syncIds.push(id.slice(SYNC_CHANGE_ID_PREFIX.length));
+      } else {
+        fileIds.push(id);
+      }
+    });
+    return { fileIds, syncIds };
+  }, []);
+
+  const isEreaderChange = useCallback((change: PendingChange) => {
+    return change.id.startsWith(SYNC_CHANGE_ID_PREFIX) || change.change_type.startsWith("ereader_");
+  }, []);
+
+  const getChangeDeviceId = useCallback((change: PendingChange): string | null => {
+    if (!change.changes_json) return null;
+    try {
+      const parsed = JSON.parse(change.changes_json) as { deviceId?: unknown };
+      return typeof parsed.deviceId === "string" && parsed.deviceId.length > 0
+        ? parsed.deviceId
+        : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const pendingChangesForView = useMemo(() => {
+    return pendingChanges.filter((change) => {
+      const isFromEreader = isEreaderChange(change);
+      if (changesSourceFilter === "library" && isFromEreader) return false;
+      if (changesSourceFilter === "ereader" && !isFromEreader) return false;
+      if (changesDeviceFilter) {
+        if (!isFromEreader) return false;
+        return getChangeDeviceId(change) === changesDeviceFilter;
+      }
+      return true;
+    });
+  }, [changesDeviceFilter, changesSourceFilter, getChangeDeviceId, isEreaderChange, pendingChanges]);
+
+  useEffect(() => {
+    const visibleIds = new Set(pendingChangesForView.map((change) => change.id));
+    setSelectedChangeIds((previous) => {
+      if (previous.size === 0) return previous;
+      const next = new Set(Array.from(previous).filter((id) => visibleIds.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [pendingChangesForView]);
+
   const refreshPendingChanges = useCallback(async () => {
     if (!isTauri()) return 0;
     try {
-      const result = await invoke<PendingChange[]>("get_pending_changes", {
-        status: "pending",
-      });
+      const result = await loadChangesByStatus("pending");
       setPendingChangesCount(result.length);
       if (pendingChangesStatus === "pending") {
         setPendingChanges(result);
@@ -428,12 +489,17 @@ function App() {
     } catch {
       return 0;
     }
-  }, [pendingChangesStatus]);
+  }, [loadChangesByStatus, pendingChangesStatus]);
 
   useEffect(() => {
     if (!isDesktop) return;
     void refreshPendingChanges();
   }, [isDesktop, refreshPendingChanges]);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    void refreshPendingChanges();
+  }, [ereaderSyncQueue, isDesktop, refreshPendingChanges]);
 
   const toggleChangeSelection = (id: string) => {
     setSelectedChangeIds((prev) => {
@@ -697,9 +763,7 @@ function App() {
     const load = async () => {
       setPendingChangesLoading(true);
       try {
-        const result = await invoke<PendingChange[]>("get_pending_changes", {
-          status: pendingChangesStatus,
-        });
+        const result = await loadChangesByStatus(pendingChangesStatus);
         if (active) {
           setPendingChanges(result);
           if (pendingChangesStatus === "pending") {
@@ -723,21 +787,34 @@ function App() {
       active = false;
       window.clearInterval(interval);
     };
-  }, [view, isDesktop, pendingChangesStatus]);
+  }, [view, isDesktop, loadChangesByStatus, pendingChangesStatus]);
+
+  const refreshCurrentChanges = useCallback(async () => {
+    const status = pendingChangesStatusRef.current;
+    const result = await loadChangesByStatus(status);
+    setPendingChanges(result);
+    if (status === "pending") {
+      setPendingChangesCount(result.length);
+    } else {
+      await refreshPendingChanges();
+    }
+    return result;
+  }, [loadChangesByStatus, refreshPendingChanges]);
 
   const handleApplyChange = async (changeId: string) => {
-    if (!isTauri()) return;
+    if (!isTauri() || pendingChangesStatusRef.current !== "pending") return;
     try {
       setPendingChangesApplying(true);
-      await invoke("apply_pending_changes", { ids: [changeId] });
-      const result = await invoke<PendingChange[]>("get_pending_changes", {
-        status: pendingChangesStatus,
-      });
-      setPendingChanges(result);
-      if (pendingChangesStatus === "pending") {
-        setPendingChangesCount(result.length);
-      } else {
-        void refreshPendingChanges();
+      const { fileIds, syncIds } = splitChangeIds([changeId]);
+      if (fileIds.length > 0) {
+        await invoke("apply_pending_changes", { ids: fileIds });
+      }
+      if (syncIds.length > 0) {
+        await invoke("apply_sync_queue_changes", { ids: syncIds });
+      }
+      await refreshCurrentChanges();
+      if (syncIds.length > 0) {
+        await refreshLibrary();
       }
     } catch {
       setScanStatus("Could not apply change.");
@@ -747,10 +824,10 @@ function App() {
   };
 
   const handleApplySelectedChanges = async () => {
-    if (!isTauri()) return;
+    if (!isTauri() || pendingChangesStatusRef.current !== "pending") return;
     const ids = Array.from(selectedChangeIds);
     if (!ids.length) return;
-    const selectedDeletes = pendingChanges
+    const selectedDeletes = pendingChangesForView
       .filter((change) => ids.includes(change.id))
       .filter((change) => change.change_type === "delete")
       .map((change) => change.id);
@@ -761,15 +838,16 @@ function App() {
     }
     try {
       setPendingChangesApplying(true);
-      await invoke("apply_pending_changes", { ids });
-      const result = await invoke<PendingChange[]>("get_pending_changes", {
-        status: pendingChangesStatus,
-      });
-      setPendingChanges(result);
-      if (pendingChangesStatus === "pending") {
-        setPendingChangesCount(result.length);
-      } else {
-        void refreshPendingChanges();
+      const { fileIds, syncIds } = splitChangeIds(ids);
+      if (fileIds.length > 0) {
+        await invoke("apply_pending_changes", { ids: fileIds });
+      }
+      if (syncIds.length > 0) {
+        await invoke("apply_sync_queue_changes", { ids: syncIds });
+      }
+      await refreshCurrentChanges();
+      if (syncIds.length > 0) {
+        await refreshLibrary();
       }
       clearChangeSelection();
     } catch {
@@ -780,18 +858,19 @@ function App() {
   };
 
   const handleConfirmDelete = async () => {
-    if (!confirmDeleteIds.length) return;
+    if (!confirmDeleteIds.length || pendingChangesStatusRef.current !== "pending") return;
     try {
       setPendingChangesApplying(true);
-      await invoke("apply_pending_changes", { ids: confirmDeleteIds });
-      const result = await invoke<PendingChange[]>("get_pending_changes", {
-        status: pendingChangesStatus,
-      });
-      setPendingChanges(result);
-      if (pendingChangesStatus === "pending") {
-        setPendingChangesCount(result.length);
-      } else {
-        void refreshPendingChanges();
+      const { fileIds, syncIds } = splitChangeIds(confirmDeleteIds);
+      if (fileIds.length > 0) {
+        await invoke("apply_pending_changes", { ids: fileIds });
+      }
+      if (syncIds.length > 0) {
+        await invoke("apply_sync_queue_changes", { ids: syncIds });
+      }
+      await refreshCurrentChanges();
+      if (syncIds.length > 0) {
+        await refreshLibrary();
       }
       clearChangeSelection();
     } catch {
@@ -804,19 +883,24 @@ function App() {
   };
 
   const handleApplyAllChanges = async () => {
-    if (!isTauri()) return;
+    if (!isTauri() || pendingChangesStatusRef.current !== "pending") return;
     try {
       setPendingChangesApplying(true);
-      await invoke("apply_pending_changes", { ids: [] });
-      const result = await invoke<PendingChange[]>("get_pending_changes", {
-        status: pendingChangesStatus,
-      });
-      setPendingChanges(result);
-      if (pendingChangesStatus === "pending") {
-        setPendingChangesCount(result.length);
-      } else {
-        void refreshPendingChanges();
+      const scopedIds = pendingChangesForView.map((change) => change.id);
+      if (changesSourceFilter === "all" && !changesDeviceFilter) {
+        await invoke("apply_pending_changes", { ids: [] });
+        await invoke("apply_sync_queue_changes", { ids: [] });
+      } else if (scopedIds.length > 0) {
+        const { fileIds, syncIds } = splitChangeIds(scopedIds);
+        if (fileIds.length > 0) {
+          await invoke("apply_pending_changes", { ids: fileIds });
+        }
+        if (syncIds.length > 0) {
+          await invoke("apply_sync_queue_changes", { ids: syncIds });
+        }
       }
+      await refreshCurrentChanges();
+      await refreshLibrary();
     } catch {
       setScanStatus("Could not apply changes.");
     } finally {
@@ -825,18 +909,16 @@ function App() {
   };
 
   const handleRemoveChange = async (changeId: string) => {
-    if (!isTauri()) return;
+    if (!isTauri() || pendingChangesStatusRef.current !== "pending") return;
     try {
-      await invoke("remove_pending_changes", { ids: [changeId] });
-      const result = await invoke<PendingChange[]>("get_pending_changes", {
-        status: pendingChangesStatus,
-      });
-      setPendingChanges(result);
-      if (pendingChangesStatus === "pending") {
-        setPendingChangesCount(result.length);
-      } else {
-        void refreshPendingChanges();
+      const { fileIds, syncIds } = splitChangeIds([changeId]);
+      if (fileIds.length > 0) {
+        await invoke("remove_pending_changes", { ids: fileIds });
       }
+      if (syncIds.length > 0) {
+        await invoke("remove_sync_queue_changes", { ids: syncIds });
+      }
+      await refreshCurrentChanges();
       setSelectedChangeIds((prev) => {
         const next = new Set(prev);
         next.delete(changeId);
@@ -848,18 +930,16 @@ function App() {
   };
 
   const handleRemoveSelectedChanges = async () => {
-    if (!isTauri() || !selectedChangeIds.size) return;
+    if (!isTauri() || !selectedChangeIds.size || pendingChangesStatusRef.current !== "pending") return;
     try {
-      await invoke("remove_pending_changes", { ids: Array.from(selectedChangeIds) });
-      const result = await invoke<PendingChange[]>("get_pending_changes", {
-        status: pendingChangesStatus,
-      });
-      setPendingChanges(result);
-      if (pendingChangesStatus === "pending") {
-        setPendingChangesCount(result.length);
-      } else {
-        void refreshPendingChanges();
+      const { fileIds, syncIds } = splitChangeIds(Array.from(selectedChangeIds));
+      if (fileIds.length > 0) {
+        await invoke("remove_pending_changes", { ids: fileIds });
       }
+      if (syncIds.length > 0) {
+        await invoke("remove_sync_queue_changes", { ids: syncIds });
+      }
+      await refreshCurrentChanges();
       setSelectedChangeIds(new Set());
     } catch {
       setScanStatus("Could not remove changes.");
@@ -867,18 +947,22 @@ function App() {
   };
 
   const handleRemoveAllChanges = async () => {
-    if (!isTauri()) return;
+    if (!isTauri() || pendingChangesStatusRef.current !== "pending") return;
     try {
-      await invoke("remove_pending_changes", { ids: [] });
-      const result = await invoke<PendingChange[]>("get_pending_changes", {
-        status: pendingChangesStatus,
-      });
-      setPendingChanges(result);
-      if (pendingChangesStatus === "pending") {
-        setPendingChangesCount(result.length);
-      } else {
-        void refreshPendingChanges();
+      const scopedIds = pendingChangesForView.map((change) => change.id);
+      if (changesSourceFilter === "all" && !changesDeviceFilter) {
+        await invoke("remove_pending_changes", { ids: [] });
+        await invoke("remove_sync_queue_changes", { ids: [] });
+      } else if (scopedIds.length > 0) {
+        const { fileIds, syncIds } = splitChangeIds(scopedIds);
+        if (fileIds.length > 0) {
+          await invoke("remove_pending_changes", { ids: fileIds });
+        }
+        if (syncIds.length > 0) {
+          await invoke("remove_sync_queue_changes", { ids: syncIds });
+        }
       }
+      await refreshCurrentChanges();
       setSelectedChangeIds(new Set());
     } catch {
       setScanStatus("Could not remove changes.");
@@ -1508,9 +1592,7 @@ function App() {
       );
       // Refresh the pending changes list
       try {
-        const result = await invoke<PendingChange[]>("get_pending_changes", {
-          status: pendingChangesStatusRef.current,
-        });
+        const result = await loadChangesByStatus(pendingChangesStatusRef.current);
         setPendingChanges(result);
         if (pendingChangesStatusRef.current === "pending") {
           setPendingChangesCount(result.length);
@@ -1529,7 +1611,7 @@ function App() {
       if (unlistenProgress) unlistenProgress();
       if (unlistenComplete) unlistenComplete();
     };
-  }, [isDesktop, refreshLibrary, refreshPendingChanges]);
+  }, [isDesktop, loadChangesByStatus, refreshLibrary, refreshPendingChanges]);
 
   useEffect(() => {
     if (!isDesktop) return;
@@ -1943,6 +2025,14 @@ function App() {
     setEreaderSyncDialogOpen(true);
   };
 
+  const handleOpenChangesFromEreader = useCallback(() => {
+    setEreaderSyncDialogOpen(false);
+    setPendingChangesStatus("pending");
+    setChangesSourceFilter("ereader");
+    setChangesDeviceFilter(selectedEreaderDeviceId);
+    setViewWithTransition("changes");
+  }, [selectedEreaderDeviceId, setEreaderSyncDialogOpen, setViewWithTransition]);
+
   const duplicateActionCount = useMemo(() => {
     const actionableHash = duplicates.filter((group) => {
       const titles = group.file_titles.length ? group.file_titles : [group.title];
@@ -2069,7 +2159,10 @@ function App() {
         pendingView={pendingView}
       />
 
-      <main ref={mainScrollRef} className="flex h-screen flex-col gap-4 overflow-y-auto px-6 py-4">
+      <main
+        ref={mainScrollRef}
+        className={`flex h-screen flex-col gap-4 px-6 py-4 ${view === "ereader" ? "overflow-hidden" : "overflow-y-auto"}`}
+      >
         {view !== "edit" && (
           <TopToolbar
             view={view}
@@ -2101,7 +2194,7 @@ function App() {
           label="Importing"
           variant="blue"
         />
-        <div className="flex flex-col gap-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-4">
           <AppRoutes
             view={view}
             setView={setViewWithTransition}
@@ -2177,7 +2270,11 @@ function App() {
             setPendingChangesStatus={setPendingChangesStatus}
             pendingChangesApplying={pendingChangesApplying}
             pendingChangesLoading={pendingChangesLoading}
-            pendingChanges={pendingChanges}
+            changesSourceFilter={changesSourceFilter}
+            setChangesSourceFilter={setChangesSourceFilter}
+            changesDeviceFilter={changesDeviceFilter}
+            clearChangesDeviceFilter={() => setChangesDeviceFilter(null)}
+            pendingChanges={pendingChangesForView}
             selectedChangeIds={selectedChangeIds}
             toggleChangeSelection={toggleChangeSelection}
             handleApplyAllChanges={handleApplyAllChanges}
@@ -2255,8 +2352,9 @@ function App() {
             onQueueEreaderAdd={handleQueueEreaderAdd}
             onQueueEreaderRemove={handleQueueEreaderRemove}
             onQueueEreaderImport={handleQueueEreaderImport}
-            onRemoveFromQueue={handleRemoveFromEreaderQueue}
+            onQueueEreaderUpdate={handleQueueEreaderUpdate}
             onExecuteSync={handleOpenSyncDialog}
+            onOpenChangesFromEreader={handleOpenChangesFromEreader}
             onRefreshDevices={async () => {
               await refreshEreaderDevices();
             }}
@@ -2271,6 +2369,7 @@ function App() {
           open={ereaderSyncDialogOpen}
           onClose={() => setEreaderSyncDialogOpen(false)}
           onConfirm={() => void handleExecuteEreaderSync()}
+          onOpenChanges={handleOpenChangesFromEreader}
           deviceName={ereaderDevices.find((d) => d.id === selectedEreaderDeviceId)?.name ?? "eReader"}
           queue={ereaderSyncQueue}
           libraryItems={libraryItems}

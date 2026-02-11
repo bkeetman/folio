@@ -410,6 +410,7 @@ struct SyncResult {
     added: i64,
     removed: i64,
     imported: i64,
+    updated: i64,
     errors: Vec<String>,
 }
 
@@ -420,6 +421,15 @@ struct SyncProgressPayload {
     total: usize,
     current: String,
     action: String,
+}
+
+#[derive(Clone)]
+struct SyncQueueEntry {
+    id: String,
+    device_id: String,
+    action: String,
+    item_id: Option<String>,
+    ereader_path: Option<String>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -11758,6 +11768,16 @@ fn queue_sync_action(
     let conn = open_db(&app)?;
     let now = chrono::Utc::now().timestamp_millis();
     let id = Uuid::new_v4().to_string();
+    let action = action.trim().to_ascii_lowercase();
+    if !matches!(action.as_str(), "add" | "remove" | "import" | "update") {
+        return Err(format!("Unsupported sync action: {}", action));
+    }
+    if matches!(action.as_str(), "add" | "update") && item_id.is_none() {
+        return Err("item_id is required for this sync action".to_string());
+    }
+    if matches!(action.as_str(), "remove" | "import" | "update") && ereader_path.is_none() {
+        return Err("ereader_path is required for this sync action".to_string());
+    }
 
     conn.execute(
     "INSERT INTO ereader_sync_queue (id, device_id, item_id, ereader_path, action, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6)",
@@ -11829,11 +11849,33 @@ fn clear_sync_queue(app: tauri::AppHandle, device_id: String) -> Result<(), Stri
     Ok(())
 }
 
-#[tauri::command]
-fn execute_sync(app: tauri::AppHandle, device_id: String) -> Result<SyncResult, String> {
-    let conn = open_db(&app)?;
+fn map_change_status_to_sync_status(status: &str) -> &str {
+    match status {
+        "applied" => "completed",
+        "error" => "error",
+        _ => "pending",
+    }
+}
 
-    // Get device info
+fn map_sync_status_to_change_status(status: &str) -> &str {
+    match status {
+        "completed" => "applied",
+        "error" => "error",
+        _ => "pending",
+    }
+}
+
+fn map_sync_action_to_change_type(action: &str) -> &str {
+    match action {
+        "add" => "ereader_add",
+        "remove" => "ereader_remove",
+        "import" => "ereader_import",
+        "update" => "ereader_update",
+        _ => "ereader_action",
+    }
+}
+
+fn get_device_sync_path(conn: &Connection, device_id: &str) -> Result<std::path::PathBuf, String> {
     let (mount_path, books_subfolder): (String, String) = conn
         .query_row(
             "SELECT mount_path, COALESCE(books_subfolder, '') FROM ereader_devices WHERE id = ?1",
@@ -11847,50 +11889,158 @@ fn execute_sync(app: tauri::AppHandle, device_id: String) -> Result<SyncResult, 
     } else {
         std::path::PathBuf::from(&mount_path).join(&books_subfolder)
     };
+    Ok(device_path)
+}
 
-    if !device_path.exists() {
-        return Err("Device is not connected".to_string());
-    }
-
-    // Get pending queue items
-    let mut stmt = conn
-    .prepare("SELECT id, action, item_id, ereader_path FROM ereader_sync_queue WHERE device_id = ?1 AND status = 'pending'")
-    .map_err(|err| err.to_string())?;
-
-    let rows = stmt
-        .query_map(params![device_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, Option<String>>(3)?,
-            ))
-        })
+fn build_ereader_import_request(
+    app: &tauri::AppHandle,
+    conn: &Connection,
+    src_path: &str,
+) -> Result<ImportRequest, String> {
+    let scan_result = scan_for_import_sync(app.clone(), vec![src_path.to_string()])?;
+    let organizer_row: Option<(Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT library_root, template FROM organizer_settings WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
         .map_err(|err| err.to_string())?;
 
-    let queue_items: Vec<_> = rows.filter_map(|r| r.ok()).collect();
-    let total = queue_items.len();
+    let configured_root = organizer_row
+        .as_ref()
+        .and_then(|(library_root, _)| library_root.clone())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let template = organizer_row
+        .as_ref()
+        .and_then(|(_, template)| template.clone())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "{Author}/{Title} ({Year}) [{ISBN13}].{ext}".to_string());
 
+    let library_root = match configured_root {
+        Some(value) => value,
+        None => {
+            let app_dir = app.path().app_data_dir().map_err(|err| err.to_string())?;
+            app_dir.join("imports").to_string_lossy().to_string()
+        }
+    };
+    std::fs::create_dir_all(&library_root).map_err(|err| err.to_string())?;
+
+    let mut new_book_ids: Vec<String> = Vec::new();
+    let mut duplicate_actions: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut candidates: Vec<ImportCandidateInput> = Vec::new();
+
+    for candidate in scan_result.new_books {
+        new_book_ids.push(candidate.id.clone());
+        candidates.push(ImportCandidateInput {
+            id: candidate.id,
+            file_path: candidate.file_path,
+            filename: candidate.filename,
+            title: candidate.title,
+            authors: candidate.authors,
+            published_year: candidate.published_year,
+            language: candidate.language,
+            identifiers: candidate.identifiers,
+            hash: candidate.hash,
+            size_bytes: candidate.size_bytes,
+            extension: candidate.extension,
+            has_cover: candidate.has_cover,
+            matched_item_id: None,
+            match_type: None,
+        });
+    }
+
+    for duplicate in scan_result.duplicates {
+        let duplicate_ext = duplicate.extension.trim_start_matches('.').to_uppercase();
+        let already_has_format = duplicate
+            .existing_formats
+            .iter()
+            .any(|existing| existing.trim_start_matches('.').eq_ignore_ascii_case(&duplicate_ext));
+        let action = if already_has_format {
+            "skip"
+        } else {
+            "add-format"
+        };
+        duplicate_actions.insert(duplicate.id.clone(), action.to_string());
+        candidates.push(ImportCandidateInput {
+            id: duplicate.id,
+            file_path: duplicate.file_path,
+            filename: duplicate.filename,
+            title: duplicate.title,
+            authors: duplicate.authors,
+            published_year: duplicate.published_year,
+            language: duplicate.language,
+            identifiers: duplicate.identifiers,
+            hash: duplicate.hash,
+            size_bytes: duplicate.size_bytes,
+            extension: duplicate.extension,
+            has_cover: duplicate.has_cover,
+            matched_item_id: Some(duplicate.matched_item_id),
+            match_type: Some(duplicate.match_type),
+        });
+    }
+
+    Ok(ImportRequest {
+        mode: "copy".to_string(),
+        library_root,
+        template,
+        new_book_ids,
+        duplicate_actions,
+        candidates,
+    })
+}
+
+fn import_ereader_file_to_library(
+    app: &tauri::AppHandle,
+    conn: &Connection,
+    src_path: &str,
+) -> Result<(), String> {
+    let request = build_ereader_import_request(app, conn, src_path)?;
+    if request.new_book_ids.is_empty() && request.duplicate_actions.is_empty() {
+        return Err("No importable ebook found at source path.".to_string());
+    }
+    let stats = import_books_sync(app.clone(), request)?;
+    if stats.errors > 0 {
+        return Err(format!(
+            "Import completed with {} error(s).",
+            stats.errors
+        ));
+    }
+    Ok(())
+}
+
+fn run_sync_queue_entries(
+    app: &tauri::AppHandle,
+    conn: &Connection,
+    queue_items: Vec<SyncQueueEntry>,
+) -> Result<SyncResult, String> {
+    use tauri::Emitter;
+
+    let total = queue_items.len();
     let mut added = 0i64;
     let mut removed = 0i64;
     let mut imported = 0i64;
+    let mut updated = 0i64;
     let mut errors: Vec<String> = Vec::new();
     let mut processed = 0usize;
+    let mut device_roots: std::collections::HashMap<String, std::path::PathBuf> =
+        std::collections::HashMap::new();
 
-    for (queue_id, action, item_id, ereader_path) in queue_items {
-        // Emit progress
+    for queue_item in queue_items {
+        let queue_id = queue_item.id.clone();
+        let action = queue_item.action.clone();
+        let item_id = queue_item.item_id.clone();
+        let ereader_path = queue_item.ereader_path.clone();
+        let device_id = queue_item.device_id.clone();
+
         let current_name = ereader_path
             .as_deref()
             .or(item_id.as_deref())
             .unwrap_or("item")
             .to_string();
-        log::info!(
-            "sync progress: {}/{} - {} ({})",
-            processed + 1,
-            total,
-            current_name,
-            action
-        );
         let _ = app.emit(
             "sync-progress",
             SyncProgressPayload {
@@ -11901,96 +12051,100 @@ fn execute_sync(app: tauri::AppHandle, device_id: String) -> Result<SyncResult, 
             },
         );
         processed += 1;
+
         let result: Result<(), String> = match action.as_str() {
             "add" => {
-                if let Some(item_id) = item_id {
-                    // Get file path from library
-                    let file_path: Option<String> = conn
-            .query_row(
-              "SELECT path FROM files WHERE item_id = ?1 AND status = 'active' LIMIT 1",
-              params![item_id],
-              |row| row.get(0),
-            )
-            .optional()
-            .map_err(|err| err.to_string())?;
+                let item_id_value = item_id
+                    .as_deref()
+                    .ok_or_else(|| "No item_id for add action".to_string())?;
+                let file_path: Option<String> = conn
+                    .query_row(
+                        "SELECT path FROM files WHERE item_id = ?1 AND status = 'active' LIMIT 1",
+                        params![item_id_value],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(|err| err.to_string())?;
+                let src = file_path.ok_or_else(|| "Library file not found".to_string())?;
 
-                    if let Some(src) = file_path {
-                        let src_path = std::path::Path::new(&src);
-                        let filename = src_path.file_name().unwrap_or_default();
-                        let dest = resolve_sync_collision(
-                            &device_path,
-                            filename.to_str().unwrap_or("book.epub"),
-                        );
-
-                        match std::fs::copy(&src, &dest) {
-                            Ok(_) => {
-                                added += 1;
-                                log::info!("copied {} to {}", src, dest.display());
-                                Ok(())
-                            }
-                            Err(e) => Err(format!("Failed to copy: {}", e)),
-                        }
-                    } else {
-                        Err("Library file not found".to_string())
-                    }
+                let device_path = if let Some(existing) = device_roots.get(&device_id) {
+                    existing.clone()
                 } else {
-                    Err("No item_id for add action".to_string())
+                    let resolved = get_device_sync_path(conn, &device_id)?;
+                    device_roots.insert(device_id.clone(), resolved.clone());
+                    resolved
+                };
+                if !device_path.exists() {
+                    Err("Device is not connected".to_string())
+                } else {
+                    let src_path = std::path::Path::new(&src);
+                    let filename = src_path.file_name().unwrap_or_default();
+                    let dest =
+                        resolve_sync_collision(&device_path, filename.to_str().unwrap_or("book.epub"));
+                    std::fs::copy(&src, &dest)
+                        .map_err(|err| format!("Failed to copy: {}", err))?;
+                    added += 1;
+                    Ok(())
                 }
             }
             "remove" => {
-                if let Some(path) = ereader_path {
-                    match std::fs::remove_file(&path) {
-                        Ok(_) => {
-                            removed += 1;
-                            log::info!("removed {}", path);
-                            Ok(())
-                        }
-                        Err(e) => Err(format!("Failed to remove: {}", e)),
-                    }
-                } else {
-                    Err("No path for remove action".to_string())
-                }
+                let path = ereader_path
+                    .as_deref()
+                    .ok_or_else(|| "No path for remove action".to_string())?;
+                std::fs::remove_file(path).map_err(|err| format!("Failed to remove: {}", err))?;
+                removed += 1;
+                Ok(())
             }
             "import" => {
-                if let Some(src) = ereader_path {
-                    let src_path = std::path::Path::new(&src);
-                    if src_path.exists() {
-                        // Import to library imports folder
-                        let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-                        let imports_dir = app_dir.join("imports");
-                        std::fs::create_dir_all(&imports_dir).map_err(|e| e.to_string())?;
-
-                        let filename = src_path.file_name().unwrap_or_default();
-                        let dest = imports_dir.join(filename);
-
-                        match std::fs::copy(&src, &dest) {
-                            Ok(_) => {
-                                imported += 1;
-                                log::info!("imported {} to {}", src, dest.display());
-                                Ok(())
-                            }
-                            Err(e) => Err(format!("Failed to import: {}", e)),
-                        }
-                    } else {
-                        Err("Source file not found".to_string())
-                    }
+                let path = ereader_path
+                    .as_deref()
+                    .ok_or_else(|| "No path for import action".to_string())?;
+                if !std::path::Path::new(path).exists() {
+                    Err("Source file not found".to_string())
                 } else {
-                    Err("No path for import action".to_string())
+                    import_ereader_file_to_library(app, conn, path)?;
+                    imported += 1;
+                    Ok(())
+                }
+            }
+            "update" => {
+                let item_id_value = item_id
+                    .as_deref()
+                    .ok_or_else(|| "No item_id for update action".to_string())?;
+                let path = ereader_path
+                    .as_deref()
+                    .ok_or_else(|| "No path for update action".to_string())?;
+                let src: Option<String> = conn
+                    .query_row(
+                        "SELECT path FROM files WHERE item_id = ?1 AND status = 'active' LIMIT 1",
+                        params![item_id_value],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(|err| err.to_string())?;
+                let src_path = src.ok_or_else(|| "Library file not found".to_string())?;
+                if !std::path::Path::new(path).exists() {
+                    Err("Device file not found".to_string())
+                } else {
+                    std::fs::copy(&src_path, path)
+                        .map_err(|err| format!("Failed to update device file: {}", err))?;
+                    updated += 1;
+                    Ok(())
                 }
             }
             _ => Err(format!("Unknown action: {}", action)),
         };
 
         match result {
-            Ok(_) => {
+            Ok(()) => {
                 conn.execute(
                     "UPDATE ereader_sync_queue SET status = 'completed' WHERE id = ?1",
                     params![queue_id],
                 )
                 .ok();
             }
-            Err(e) => {
-                errors.push(e.clone());
+            Err(message) => {
+                errors.push(message.clone());
                 conn.execute(
                     "UPDATE ereader_sync_queue SET status = 'error' WHERE id = ?1",
                     params![queue_id],
@@ -12000,6 +12154,237 @@ fn execute_sync(app: tauri::AppHandle, device_id: String) -> Result<SyncResult, 
         }
     }
 
+    Ok(SyncResult {
+        added,
+        removed,
+        imported,
+        updated,
+        errors,
+    })
+}
+
+#[tauri::command]
+fn get_sync_queue_changes(
+    app: tauri::AppHandle,
+    status: String,
+) -> Result<Vec<PendingChange>, String> {
+    let conn = open_db(&app)?;
+    let sync_status = map_change_status_to_sync_status(&status);
+    let mut stmt = conn
+    .prepare(
+      "SELECT q.id, q.device_id, q.action, q.item_id, q.ereader_path, q.status, q.created_at, \
+              d.name, i.title, file_map.path \
+       FROM ereader_sync_queue q \
+       LEFT JOIN ereader_devices d ON d.id = q.device_id \
+       LEFT JOIN items i ON i.id = q.item_id \
+       LEFT JOIN (SELECT item_id, MIN(path) as path FROM files WHERE status = 'active' GROUP BY item_id) file_map \
+              ON file_map.item_id = q.item_id \
+       WHERE q.status = ?1 \
+       ORDER BY q.created_at DESC",
+    )
+    .map_err(|err| err.to_string())?;
+
+    let rows = stmt
+        .query_map(params![sync_status], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, Option<String>>(9)?,
+            ))
+        })
+        .map_err(|err| err.to_string())?;
+
+    let mut changes: Vec<PendingChange> = Vec::new();
+    for row in rows {
+        let (
+            queue_id,
+            device_id,
+            action,
+            item_id,
+            ereader_path,
+            queue_status,
+            created_at,
+            device_name,
+            item_title,
+            library_path,
+        ) = row.map_err(|err| err.to_string())?;
+
+        let from_path = if action == "add" || action == "update" {
+            library_path.clone()
+        } else {
+            ereader_path.clone()
+        };
+        let to_path = if action == "update" {
+            ereader_path.clone()
+        } else {
+            None
+        };
+        let change_type = map_sync_action_to_change_type(&action).to_string();
+        let details = serde_json::json!({
+            "deviceId": device_id.clone(),
+            "deviceName": device_name,
+            "action": action,
+            "itemId": item_id,
+            "itemTitle": item_title,
+            "ereaderPath": ereader_path,
+            "libraryPath": library_path,
+        });
+        changes.push(PendingChange {
+            id: format!("sync:{}", queue_id),
+            file_id: format!("sync:{}", device_id),
+            change_type,
+            from_path,
+            to_path,
+            changes_json: Some(details.to_string()),
+            status: map_sync_status_to_change_status(&queue_status).to_string(),
+            created_at,
+            applied_at: None,
+            error: None,
+        });
+    }
+
+    Ok(changes)
+}
+
+#[tauri::command]
+fn remove_sync_queue_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<i64, String> {
+    let conn = open_db(&app)?;
+    if ids.is_empty() {
+        let affected = conn
+            .execute(
+                "DELETE FROM ereader_sync_queue WHERE status = 'pending'",
+                params![],
+            )
+            .map_err(|err| err.to_string())?;
+        return Ok(affected as i64);
+    }
+
+    let mut removed = 0i64;
+    for id in ids {
+        let affected = conn
+            .execute(
+                "DELETE FROM ereader_sync_queue WHERE id = ?1 AND status = 'pending'",
+                params![id],
+            )
+            .map_err(|err| err.to_string())?;
+        removed += affected as i64;
+    }
+    Ok(removed)
+}
+
+#[tauri::command]
+fn apply_sync_queue_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<SyncResult, String> {
+    use tauri::Emitter;
+
+    let conn = open_db(&app)?;
+    let mut queue_items: Vec<SyncQueueEntry> = Vec::new();
+
+    if ids.is_empty() {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, device_id, action, item_id, ereader_path \
+                 FROM ereader_sync_queue \
+                 WHERE status = 'pending' \
+                 ORDER BY created_at ASC",
+            )
+            .map_err(|err| err.to_string())?;
+        let rows = stmt
+            .query_map(params![], |row| {
+                Ok(SyncQueueEntry {
+                    id: row.get(0)?,
+                    device_id: row.get(1)?,
+                    action: row.get(2)?,
+                    item_id: row.get(3)?,
+                    ereader_path: row.get(4)?,
+                })
+            })
+            .map_err(|err| err.to_string())?;
+        for row in rows {
+            queue_items.push(row.map_err(|err| err.to_string())?);
+        }
+    } else {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, device_id, action, item_id, ereader_path \
+                 FROM ereader_sync_queue \
+                 WHERE id = ?1 AND status = 'pending' \
+                 LIMIT 1",
+            )
+            .map_err(|err| err.to_string())?;
+        for id in ids {
+            let row = stmt
+                .query_row(params![id], |row| {
+                    Ok(SyncQueueEntry {
+                        id: row.get(0)?,
+                        device_id: row.get(1)?,
+                        action: row.get(2)?,
+                        item_id: row.get(3)?,
+                        ereader_path: row.get(4)?,
+                    })
+                })
+                .optional()
+                .map_err(|err| err.to_string())?;
+            if let Some(entry) = row {
+                queue_items.push(entry);
+            }
+        }
+    }
+
+    let result = run_sync_queue_entries(&app, &conn, queue_items)?;
+
+    // Keep pending/error items, clear completed queue entries.
+    conn.execute(
+        "DELETE FROM ereader_sync_queue WHERE status = 'completed'",
+        params![],
+    )
+    .ok();
+
+    let _ = app.emit("sync-complete", &result);
+    Ok(result)
+}
+
+#[tauri::command]
+fn execute_sync(app: tauri::AppHandle, device_id: String) -> Result<SyncResult, String> {
+    let conn = open_db(&app)?;
+    let device_path = get_device_sync_path(&conn, &device_id)?;
+    if !device_path.exists() {
+        return Err("Device is not connected".to_string());
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, device_id, action, item_id, ereader_path \
+             FROM ereader_sync_queue \
+             WHERE device_id = ?1 AND status = 'pending' \
+             ORDER BY created_at ASC",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(params![device_id], |row| {
+            Ok(SyncQueueEntry {
+                id: row.get(0)?,
+                device_id: row.get(1)?,
+                action: row.get(2)?,
+                item_id: row.get(3)?,
+                ereader_path: row.get(4)?,
+            })
+        })
+        .map_err(|err| err.to_string())?;
+
+    let mut queue_items: Vec<SyncQueueEntry> = Vec::new();
+    for row in rows {
+        queue_items.push(row.map_err(|err| err.to_string())?);
+    }
+
+    let result = run_sync_queue_entries(&app, &conn, queue_items)?;
+
     // Clean up completed items
     conn.execute(
         "DELETE FROM ereader_sync_queue WHERE device_id = ?1 AND status = 'completed'",
@@ -12008,19 +12393,14 @@ fn execute_sync(app: tauri::AppHandle, device_id: String) -> Result<SyncResult, 
     .ok();
 
     log::info!(
-        "sync complete: {} added, {} removed, {} imported, {} errors",
-        added,
-        removed,
-        imported,
-        errors.len()
+        "sync complete: {} added, {} removed, {} imported, {} updated, {} errors",
+        result.added,
+        result.removed,
+        result.imported,
+        result.updated,
+        result.errors.len()
     );
-
-    let result = SyncResult {
-        added,
-        removed,
-        imported,
-        errors,
-    };
+    use tauri::Emitter;
     let _ = app.emit("sync-complete", &result);
     Ok(result)
 }
@@ -12175,12 +12555,9 @@ pub fn run() {
             remove_from_sync_queue,
             get_sync_queue,
             clear_sync_queue,
-            get_sync_queue,
-            clear_sync_queue,
-            execute_sync,
-            get_item_files,
-            get_sync_queue,
-            clear_sync_queue,
+            get_sync_queue_changes,
+            apply_sync_queue_changes,
+            remove_sync_queue_changes,
             execute_sync,
             get_item_files,
             reveal_file,

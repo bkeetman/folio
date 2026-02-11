@@ -108,7 +108,7 @@ export function useEreader({
       unlistenSyncProgress = stop;
     });
 
-    listen<{ added: number; removed: number; imported: number; errors: string[] }>(
+    listen<{ added: number; removed: number; imported: number; updated: number; errors: string[] }>(
       "sync-complete",
       (event) => {
         setEreaderSyncProgress(null);
@@ -117,6 +117,7 @@ export function useEreader({
         if (event.payload.added > 0) parts.push(`${event.payload.added} added`);
         if (event.payload.removed > 0) parts.push(`${event.payload.removed} removed`);
         if (event.payload.imported > 0) parts.push(`${event.payload.imported} imported`);
+        if (event.payload.updated > 0) parts.push(`${event.payload.updated} updated`);
         if (event.payload.errors.length > 0) parts.push(`${event.payload.errors.length} errors`);
         setScanStatus(`Sync complete: ${parts.join(", ")}`);
         setActivityLog((prev) => [
@@ -130,7 +131,17 @@ export function useEreader({
         ]);
         setEreaderSyncDialogOpen(false);
         if (selectedEreaderDeviceId) {
-          void refreshQueue(selectedEreaderDeviceId);
+          const deviceId = selectedEreaderDeviceId;
+          void (async () => {
+            await refreshQueue(deviceId);
+            try {
+              const books = await invoke<EReaderBook[]>("scan_ereader", { deviceId });
+              setEreaderBooks(books);
+            } catch {
+              // ignore transient rescan failures
+            }
+            await refreshLibrary();
+          })();
         }
       }
     ).then((stop) => {
@@ -141,7 +152,15 @@ export function useEreader({
       if (unlistenSyncProgress) unlistenSyncProgress();
       if (unlistenSyncComplete) unlistenSyncComplete();
     };
-  }, [isDesktop, ereaderSyncing, refreshQueue, selectedEreaderDeviceId, setActivityLog, setScanStatus]);
+  }, [
+    isDesktop,
+    ereaderSyncing,
+    refreshLibrary,
+    refreshQueue,
+    selectedEreaderDeviceId,
+    setActivityLog,
+    setScanStatus,
+  ]);
 
   const handleAddEreaderDevice = async (name: string, mountPath: string) => {
     if (!isTauri()) return;
@@ -229,6 +248,21 @@ export function useEreader({
     }
   };
 
+  const handleQueueEreaderUpdate = async (itemId: string, ereaderPath: string) => {
+    if (!isTauri() || !selectedEreaderDeviceId) return;
+    try {
+      const item = await invoke<SyncQueueItem>("queue_sync_action", {
+        deviceId: selectedEreaderDeviceId,
+        action: "update",
+        itemId,
+        ereaderPath,
+      });
+      setEreaderSyncQueue((prev) => [...prev, item]);
+    } catch {
+      setScanStatus("Could not queue book for update.");
+    }
+  };
+
   const handleRemoveFromEreaderQueue = async (queueId: string) => {
     if (!isTauri()) return;
     try {
@@ -241,15 +275,23 @@ export function useEreader({
 
   const handleExecuteEreaderSync = async () => {
     if (!isTauri() || !selectedEreaderDeviceId) return;
+    const pendingIds = ereaderSyncQueue
+      .filter((item) => item.status === "pending")
+      .map((item) => item.id);
+    if (pendingIds.length === 0) {
+      setEreaderSyncDialogOpen(false);
+      return;
+    }
     setEreaderSyncing(true);
     try {
       const result = await invoke<{
         added: number;
         removed: number;
         imported: number;
+        updated: number;
         errors: string[];
-      }>("execute_sync", {
-        deviceId: selectedEreaderDeviceId,
+      }>("apply_sync_queue_changes", {
+        ids: pendingIds,
       });
 
       await refreshQueue(selectedEreaderDeviceId);
@@ -263,6 +305,7 @@ export function useEreader({
       if (result.added > 0) parts.push(`${result.added} added`);
       if (result.removed > 0) parts.push(`${result.removed} removed`);
       if (result.imported > 0) parts.push(`${result.imported} imported`);
+      if (result.updated > 0) parts.push(`${result.updated} updated`);
       if (result.errors.length > 0) parts.push(`${result.errors.length} errors`);
 
       setScanStatus(`Sync complete: ${parts.join(", ")}`);
@@ -293,6 +336,7 @@ export function useEreader({
     handleQueueEreaderAdd,
     handleQueueEreaderRemove,
     handleQueueEreaderImport,
+    handleQueueEreaderUpdate,
     handleRemoveFromEreaderQueue,
     handleExecuteEreaderSync,
   };

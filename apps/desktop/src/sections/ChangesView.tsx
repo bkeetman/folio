@@ -10,6 +10,10 @@ import { Button } from "../components/ui";
 type ChangesViewProps = {
   pendingChangesStatus: "pending" | "applied" | "error";
   setPendingChangesStatus: (status: "pending" | "applied" | "error") => void;
+  changesSourceFilter: "all" | "library" | "ereader";
+  setChangesSourceFilter: (value: "all" | "library" | "ereader") => void;
+  changesDeviceFilter: string | null;
+  clearChangesDeviceFilter: () => void;
   pendingChangesApplying: boolean;
   pendingChangesLoading: boolean;
   pendingChanges: PendingChange[];
@@ -116,6 +120,10 @@ function changeTypeLabel(changeType: string, t: (key: string) => string): string
   if (changeType === "item_tag_remove") return t("changes.removeTagFromBook");
   if (changeType === "relink_missing") return t("changes.relinkMissingFile");
   if (changeType === "deactivate_missing") return t("changes.removeMissingFile");
+  if (changeType === "ereader_add") return t("changes.sendToEreader");
+  if (changeType === "ereader_remove") return t("changes.removeFromEreader");
+  if (changeType === "ereader_import") return t("changes.importFromEreader");
+  if (changeType === "ereader_update") return t("changes.updateOnEreader");
   return t("changes.updateMetadata");
 }
 
@@ -250,6 +258,10 @@ function PendingCoverDiff({ changeId }: { changeId: string }) {
 export function ChangesView({
   pendingChangesStatus,
   setPendingChangesStatus,
+  changesSourceFilter,
+  setChangesSourceFilter,
+  changesDeviceFilter,
+  clearChangesDeviceFilter,
   pendingChangesApplying,
   pendingChangesLoading,
   pendingChanges,
@@ -270,9 +282,48 @@ export function ChangesView({
   changeProgress,
 }: ChangesViewProps) {
   const { t } = useTranslation();
+  const hasPendingItems = pendingChanges.some((change) => change.status === "pending");
 
   return (
     <section className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2 rounded-md border border-[var(--app-border)] bg-app-surface/70 p-2">
+        <span className="text-[11px] uppercase tracking-[0.08em] text-[var(--app-ink-muted)]">
+          {t("changes.source")}
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setChangesSourceFilter("all")}
+          disabled={changesSourceFilter === "all"}
+        >
+          {t("changes.sources.all")}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setChangesSourceFilter("library")}
+          disabled={changesSourceFilter === "library"}
+        >
+          {t("changes.sources.library")}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setChangesSourceFilter("ereader")}
+          disabled={changesSourceFilter === "ereader"}
+        >
+          {t("changes.sources.ereader")}
+        </Button>
+        {changesDeviceFilter ? (
+          <button
+            type="button"
+            onClick={clearChangesDeviceFilter}
+            className="ml-2 rounded-full border border-[var(--app-border-soft)] bg-app-bg px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[var(--app-ink-muted)] hover:border-[var(--app-accent)] hover:text-[var(--app-ink)]"
+          >
+            {t("changes.deviceFilterActive")} {changesDeviceFilter} ×
+          </button>
+        ) : null}
+      </div>
       <div className="flex flex-wrap items-center gap-2 rounded-md border border-[var(--app-border)] bg-app-surface/70 p-2">
         <div className="flex gap-2">
           <Button
@@ -304,7 +355,7 @@ export function ChangesView({
           variant="primary"
           size="sm"
           onClick={handleApplyAllChanges}
-          disabled={pendingChangesApplying || !pendingChanges.length}
+          disabled={pendingChangesApplying || !hasPendingItems}
         >
           {t("changes.applyAll")}
         </Button>
@@ -329,7 +380,7 @@ export function ChangesView({
           variant="ghost"
           size="sm"
           onClick={handleRemoveAllChanges}
-          disabled={pendingChangesApplying || !pendingChanges.length}
+          disabled={pendingChangesApplying || !hasPendingItems}
         >
           {t("changes.removeAll")}
         </Button>

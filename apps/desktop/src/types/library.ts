@@ -288,7 +288,7 @@ export type EReaderBook = {
 export type SyncQueueItem = {
   id: string;
   deviceId: string;
-  action: "add" | "remove" | "import";
+  action: "add" | "remove" | "import" | "update";
   itemId: string | null;
   ereaderPath: string | null;
   status: "pending" | "completed" | "error";
@@ -299,6 +299,7 @@ export type SyncResult = {
   added: number;
   removed: number;
   imported: number;
+  updated: number;
   errors: string[];
 };
 

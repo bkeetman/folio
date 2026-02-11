@@ -116,6 +116,10 @@ type AppRoutesProps = {
   getCandidateCoverUrl: (candidate: EnrichmentCandidate) => string | null;
   pendingChangesStatus: "pending" | "applied" | "error";
   setPendingChangesStatus: Dispatch<SetStateAction<"pending" | "applied" | "error">>;
+  changesSourceFilter: "all" | "library" | "ereader";
+  setChangesSourceFilter: Dispatch<SetStateAction<"all" | "library" | "ereader">>;
+  changesDeviceFilter: string | null;
+  clearChangesDeviceFilter: () => void;
   pendingChangesApplying: boolean;
   pendingChangesLoading: boolean;
   pendingChanges: PendingChange[];
@@ -191,8 +195,9 @@ type AppRoutesProps = {
   onQueueEreaderAdd: (itemId: string) => void | Promise<void>;
   onQueueEreaderRemove: (ereaderPath: string) => void | Promise<void>;
   onQueueEreaderImport: (ereaderPath: string) => void | Promise<void>;
-  onRemoveFromQueue: (queueId: string) => void | Promise<void>;
+  onQueueEreaderUpdate: (itemId: string, ereaderPath: string) => void | Promise<void>;
   onExecuteSync: () => void;
+  onOpenChangesFromEreader: () => void;
   onRefreshDevices: () => void | Promise<void>;
   ereaderScanning: boolean;
   ereaderScanProgress: ScanProgress | null;
@@ -275,6 +280,10 @@ export function AppRoutes(props: AppRoutesProps) {
     getCandidateCoverUrl,
     pendingChangesStatus,
     setPendingChangesStatus,
+    changesSourceFilter,
+    setChangesSourceFilter,
+    changesDeviceFilter,
+    clearChangesDeviceFilter,
     pendingChangesApplying,
     pendingChangesLoading,
     pendingChanges,
@@ -350,8 +359,9 @@ export function AppRoutes(props: AppRoutesProps) {
     onQueueEreaderAdd,
     onQueueEreaderRemove,
     onQueueEreaderImport,
-    onRemoveFromQueue,
+    onQueueEreaderUpdate,
     onExecuteSync,
+    onOpenChangesFromEreader,
     onRefreshDevices,
     ereaderScanning,
     ereaderScanProgress,
@@ -363,7 +373,7 @@ export function AppRoutes(props: AppRoutesProps) {
   } = props;
 
   return (
-    <section className="flex flex-col gap-4">
+    <section className="flex min-h-0 flex-1 flex-col gap-4">
       {(view === "library" || view === "library-books") && !libraryReady ? (
         <div className="flex flex-col items-center justify-center gap-4 py-16">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--app-accent)] border-t-transparent" />
@@ -495,6 +505,10 @@ export function AppRoutes(props: AppRoutesProps) {
         <ChangesView
           pendingChangesStatus={pendingChangesStatus}
           setPendingChangesStatus={setPendingChangesStatus}
+          changesSourceFilter={changesSourceFilter}
+          setChangesSourceFilter={setChangesSourceFilter}
+          changesDeviceFilter={changesDeviceFilter}
+          clearChangesDeviceFilter={clearChangesDeviceFilter}
           pendingChangesApplying={pendingChangesApplying}
           pendingChangesLoading={pendingChangesLoading}
           pendingChanges={pendingChanges}
@@ -643,10 +657,11 @@ export function AppRoutes(props: AppRoutesProps) {
           onQueueImport={async (ereaderPath) => {
             await onQueueEreaderImport(ereaderPath);
           }}
-          onRemoveFromQueue={async (queueId) => {
-            await onRemoveFromQueue(queueId);
+          onQueueUpdate={async (itemId, ereaderPath) => {
+            await onQueueEreaderUpdate(itemId, ereaderPath);
           }}
           onExecuteSync={onExecuteSync}
+          onOpenChanges={onOpenChangesFromEreader}
           onRefreshDevices={async () => {
             await onRefreshDevices();
           }}

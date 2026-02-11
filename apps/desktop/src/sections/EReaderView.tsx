@@ -17,7 +17,7 @@ import { Button } from "../components/ui/Button";
 import { Panel } from "../components/ui/Panel";
 import type { EReaderBook, EReaderDevice, LibraryItem, ScanProgress, SyncProgress, SyncQueueItem } from "../types/library";
 
-type EReaderFilter = "all" | "in-library" | "on-device" | "not-on-device" | "device-only" | "queued";
+type EReaderFilter = "on-device" | "device-only" | "queued" | "all";
 
 type EReaderViewProps = {
   devices: EReaderDevice[];
@@ -32,8 +32,9 @@ type EReaderViewProps = {
   onQueueAdd: (itemId: string) => Promise<void>;
   onQueueRemove: (ereaderPath: string) => Promise<void>;
   onQueueImport: (ereaderPath: string) => Promise<void>;
-  onRemoveFromQueue: (queueId: string) => Promise<void>;
+  onQueueUpdate: (itemId: string, ereaderPath: string) => Promise<void>;
   onExecuteSync: () => void;
+  onOpenChanges: () => void;
   onRefreshDevices: () => Promise<void>;
   scanning: boolean;
   scanProgress: ScanProgress | null;
@@ -45,7 +46,13 @@ type UnifiedItem = {
   id: string;
   title: string | null;
   authors: string[];
-  status: "on-device" | "library-only" | "device-only" | "queued-add" | "queued-remove";
+  status:
+    | "on-device"
+    | "device-only"
+    | "queued-add"
+    | "queued-remove"
+    | "queued-import"
+    | "queued-update";
   confidence: "exact" | "isbn" | "title" | "fuzzy" | null;
   libraryItemId: string | null;
   ereaderPath: string | null;
@@ -70,11 +77,11 @@ export function EReaderView({
   onAddDevice,
   onRemoveDevice,
   onScanDevice,
-  onQueueAdd,
   onQueueRemove,
   onQueueImport,
-  onRemoveFromQueue,
+  onQueueUpdate,
   onExecuteSync,
+  onOpenChanges,
   onRefreshDevices,
   scanning,
   scanProgress,
@@ -82,7 +89,7 @@ export function EReaderView({
   syncProgress,
 }: EReaderViewProps) {
   const { t } = useTranslation();
-  const [filter, setFilter] = useState<EReaderFilter>("all");
+  const [filter, setFilter] = useState<EReaderFilter>("on-device");
   const [isFilterPending, startFilterTransition] = useTransition();
 
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId) ?? null;
@@ -90,20 +97,14 @@ export function EReaderView({
     () => syncQueue.filter((q) => q.status === "pending"),
     [syncQueue]
   );
+  const libraryItemsById = useMemo(
+    () => new Map(libraryItems.map((item) => [item.id, item])),
+    [libraryItems]
+  );
   const coverSrcCacheRef = useRef<Map<string, string>>(new Map());
 
   // Helper to get extension/format
   const getFormat = (filename: string) => filename.split(".").pop()?.toUpperCase() || "UNKNOWN";
-
-  const pendingQueueByLibraryItemId = useMemo(() => {
-    const map = new Map<string, SyncQueueItem>();
-    pendingQueue.forEach((item) => {
-      if (item.itemId && !map.has(item.itemId)) {
-        map.set(item.itemId, item);
-      }
-    });
-    return map;
-  }, [pendingQueue]);
 
   const pendingQueueByDevicePath = useMemo(() => {
     const map = new Map<string, SyncQueueItem>();
@@ -115,90 +116,95 @@ export function EReaderView({
     return map;
   }, [pendingQueue]);
 
-  const onDeviceByLibraryItemId = useMemo(() => {
-    const map = new Map<string, EReaderBook>();
-    ereaderBooks.forEach((book) => {
-      if (!book.matchedItemId || book.filename.startsWith(".")) return;
-      if (!map.has(book.matchedItemId)) {
-        map.set(book.matchedItemId, book);
-      }
-    });
-    return map;
-  }, [ereaderBooks]);
-
   const unifiedItems = useMemo(() => {
     const items: UnifiedItem[] = [];
+    const seenQueuedAddItemIds = new Set<string>();
 
-    libraryItems.forEach((libraryItem) => {
-      const onDevice = onDeviceByLibraryItemId.get(libraryItem.id);
-      const queued = pendingQueueByLibraryItemId.get(libraryItem.id);
-
-      let status: UnifiedItem["status"] = "library-only";
-      if (queued?.action === "add") status = "queued-add";
-      else if (queued?.action === "remove") status = "queued-remove";
-      else if (onDevice) status = "on-device";
-
-      const format =
-        libraryItem.formats.length > 0 ? libraryItem.formats[0].toUpperCase() : "UNKNOWN";
-
-      items.push({
-        id: `lib-${libraryItem.id}`,
-        title: libraryItem.title,
-        authors: libraryItem.authors,
-        status,
-        confidence:
-          (onDevice?.matchConfidence as "exact" | "isbn" | "title" | "fuzzy" | null) ?? null,
-        libraryItemId: libraryItem.id,
-        ereaderPath: onDevice?.path ?? null,
-        coverPath: libraryItem.cover_path ?? null,
-        format,
-        filename: onDevice?.filename ?? null,
-      });
-    });
-
-    ereaderBooks.forEach((book) => {
+    const visibleDeviceBooks = ereaderBooks.filter((book) => !book.filename.startsWith("."));
+    visibleDeviceBooks.forEach((book) => {
       // Filter out hidden/system files (like ._ files from macOS)
-      if (book.filename.startsWith(".") || book.matchedItemId) return;
       const queued = pendingQueueByDevicePath.get(book.path);
+      const matchedLibraryItem = book.matchedItemId ? libraryItemsById.get(book.matchedItemId) ?? null : null;
+      const status: UnifiedItem["status"] =
+        queued?.action === "remove"
+          ? "queued-remove"
+          : queued?.action === "update"
+            ? "queued-update"
+          : queued?.action === "import"
+            ? "queued-import"
+            : matchedLibraryItem
+              ? "on-device"
+              : "device-only";
+      if (queued?.action === "add" && matchedLibraryItem) {
+        seenQueuedAddItemIds.add(matchedLibraryItem.id);
+      }
 
       items.push({
         id: `dev-${book.path}`,
-        title: book.title,
-        authors: book.authors,
-        status: queued?.action === "import" ? "queued-add" : "device-only",
-        confidence: null,
-        libraryItemId: null,
+        title: matchedLibraryItem?.title ?? book.title,
+        authors: matchedLibraryItem?.authors ?? book.authors,
+        status,
+        confidence:
+          (book.matchConfidence as "exact" | "isbn" | "title" | "fuzzy" | null) ?? null,
+        libraryItemId: matchedLibraryItem?.id ?? null,
         ereaderPath: book.path,
-        coverPath: null,
+        coverPath: matchedLibraryItem?.cover_path ?? null,
         format: getFormat(book.filename),
         filename: book.filename,
       });
     });
 
+    pendingQueue.forEach((queueItem) => {
+      if (queueItem.action !== "add" || !queueItem.itemId) return;
+      if (seenQueuedAddItemIds.has(queueItem.itemId)) return;
+      const libraryItem = libraryItemsById.get(queueItem.itemId);
+      if (!libraryItem) return;
+      seenQueuedAddItemIds.add(queueItem.itemId);
+      items.push({
+        id: `queue-add-${queueItem.id}`,
+        title: libraryItem.title,
+        authors: libraryItem.authors,
+        status: "queued-add",
+        confidence: null,
+        libraryItemId: libraryItem.id,
+        ereaderPath: null,
+        coverPath: libraryItem.cover_path ?? null,
+        format:
+          libraryItem.formats.length > 0 ? libraryItem.formats[0].toUpperCase() : "UNKNOWN",
+        filename: null,
+      });
+    });
+
     return items;
-  }, [ereaderBooks, libraryItems, onDeviceByLibraryItemId, pendingQueueByDevicePath, pendingQueueByLibraryItemId]);
+  }, [ereaderBooks, libraryItemsById, pendingQueue, pendingQueueByDevicePath]);
 
   // Apply filter
   const itemsByFilter = useMemo(() => {
     const buckets: Record<EReaderFilter, UnifiedItem[]> = {
-      all: [],
-      "in-library": [],
       "on-device": [],
-      "not-on-device": [],
       "device-only": [],
       queued: [],
+      all: [],
     };
 
     unifiedItems.forEach((item) => {
       buckets.all.push(item);
-
-      if (item.libraryItemId !== null) buckets["in-library"].push(item);
-      if (item.status === "on-device") buckets["on-device"].push(item);
-      if (item.status === "library-only" || item.status === "queued-add") {
-        buckets["not-on-device"].push(item);
+      if (
+        item.status === "on-device" ||
+        item.status === "queued-remove" ||
+        item.status === "queued-update"
+      ) {
+        buckets["on-device"].push(item);
       }
-      if (item.status === "device-only") buckets["device-only"].push(item);
-      if (item.status === "queued-add" || item.status === "queued-remove") {
+      if (item.status === "device-only" || item.status === "queued-import") {
+        buckets["device-only"].push(item);
+      }
+      if (
+        item.status === "queued-add" ||
+        item.status === "queued-remove" ||
+        item.status === "queued-import" ||
+        item.status === "queued-update"
+      ) {
         buckets.queued.push(item);
       }
     });
@@ -207,6 +213,31 @@ export function EReaderView({
   }, [unifiedItems]);
 
   const filteredItems = itemsByFilter[filter];
+  const stats = useMemo(() => {
+    const onDeviceCount = unifiedItems.filter(
+      (item) =>
+        item.status === "on-device" ||
+        item.status === "queued-remove" ||
+        item.status === "queued-update" ||
+        item.status === "device-only" ||
+        item.status === "queued-import"
+    ).length;
+    const matchedCount = unifiedItems.filter(
+      (item) => item.libraryItemId !== null && item.status !== "queued-add"
+    ).length;
+    const deviceOnlyCount = unifiedItems.filter(
+      (item) =>
+        item.status === "device-only" ||
+        item.status === "queued-import" ||
+        (item.status === "queued-remove" && item.libraryItemId === null)
+    ).length;
+    return {
+      onDeviceCount,
+      matchedCount,
+      deviceOnlyCount,
+      queuedCount: pendingQueue.length,
+    };
+  }, [pendingQueue.length, unifiedItems]);
   const getCoverSrc = useCallback((coverPath: string | null | undefined) => {
     if (!coverPath) return null;
 
@@ -251,10 +282,11 @@ export function EReaderView({
 
     const badges: Record<UnifiedItem["status"], BadgeConfig> = {
       "on-device": getOnDeviceBadge(),
-      "library-only": { label: t("ereader.library"), variant: "muted", title: t("ereader.onlyInLibrary") },
       "device-only": { label: t("ereader.device"), variant: "warning", title: t("ereader.onlyOnDevice") },
       "queued-add": { label: t("ereader.queueAdd"), variant: "muted", title: t("ereader.queuedToAdd") },
       "queued-remove": { label: t("ereader.queueRemove"), variant: "danger", title: t("ereader.queuedToRemove") },
+      "queued-import": { label: t("ereader.queueImport"), variant: "info", title: t("ereader.queuedToImport") },
+      "queued-update": { label: t("ereader.queueUpdate"), variant: "info", title: t("ereader.queuedToUpdate") },
     };
     const badge = badges[status];
 
@@ -280,44 +312,67 @@ export function EReaderView({
         </span>
       );
     }
-
-    if (item.status === "library-only" && item.libraryItemId) {
+    if (item.status === "queued-import") {
       return (
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => onQueueAdd(item.libraryItemId!)}
-          className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 p-0"
-          title={t("ereader.addToDevice")}
-        >
-          <Plus size={16} />
-        </Button>
+        <span className="text-xs text-[var(--app-text-muted)] italic flex items-center gap-1">
+          <Import size={12} /> {t("ereader.queueImport")}
+        </span>
       );
     }
+    if (item.status === "queued-update") {
+      return (
+        <span className="text-xs text-[var(--app-text-muted)] italic flex items-center gap-1">
+          <RefreshCw size={12} /> {t("ereader.queueUpdate")}
+        </span>
+      );
+    }
+
     if (item.status === "on-device" && item.ereaderPath) {
       return (
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => onQueueRemove(item.ereaderPath!)}
-          className="h-7 w-7 text-[var(--app-text-muted)] hover:text-red-600 hover:bg-red-50 p-0"
-          title={t("ereader.removeFromDevice")}
-        >
-          <Trash2 size={16} />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onQueueUpdate(item.libraryItemId!, item.ereaderPath!)}
+            className="h-7 w-7 p-0"
+            title={t("ereader.syncFromLibrary")}
+          >
+            <RefreshCw size={14} />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => onQueueRemove(item.ereaderPath!)}
+            className="h-7 w-7 text-[var(--app-text-muted)] hover:text-red-600 hover:bg-red-50 p-0"
+            title={t("ereader.removeFromDevice")}
+          >
+            <Trash2 size={16} />
+          </Button>
+        </div>
       );
     }
     if (item.status === "device-only" && item.ereaderPath) {
       return (
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => onQueueImport(item.ereaderPath!)}
-          className="h-7 text-xs"
-          title={t("ereader.addToLibrary")}
-        >
-          {t("ereader.import")}
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onQueueImport(item.ereaderPath!)}
+            className="h-7 text-xs"
+            title={t("ereader.addToLibrary")}
+          >
+            {t("ereader.import")}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => onQueueRemove(item.ereaderPath!)}
+            className="h-7 w-7 text-[var(--app-text-muted)] hover:text-red-600 hover:bg-red-50 p-0"
+            title={t("ereader.removeFromDevice")}
+          >
+            <Trash2 size={16} />
+          </Button>
+        </div>
       );
     }
     return null;
@@ -400,27 +455,44 @@ export function EReaderView({
             size="sm"
             onClick={() => selectedDeviceId && onScanDevice(selectedDeviceId)}
             disabled={!selectedDevice?.isConnected || scanning}
+            className="min-w-[138px] justify-center whitespace-nowrap"
           >
             <RefreshCw className={`w-4 h-4 mr-2 ${scanning ? "animate-spin" : ""}`} />
             {scanning ? t("ereader.scanning") : t("ereader.scanDevice")}
           </Button>
           {(pendingQueue.length > 0 || syncing) && (
-            <Button size="sm" onClick={onExecuteSync} disabled={syncing}>
-              {syncing ? (
-                <>
-                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                  {t("ereader.syncing")}
-                </>
-              ) : (
-                t("ereader.syncCount", { count: pendingQueue.length })
-              )}
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onOpenChanges}
+                className="min-w-[180px] justify-center whitespace-nowrap"
+              >
+                {t("ereader.reviewInChanges", { count: pendingQueue.length })}
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={onExecuteSync}
+                disabled={syncing}
+                className="min-w-[150px] justify-center whitespace-nowrap"
+              >
+                {syncing ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    {t("ereader.syncing")}
+                  </>
+                ) : (
+                  t("ereader.applyQueued", { count: pendingQueue.length })
+                )}
+              </Button>
+            </>
           )}
         </div>
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-2 p-4 border-b border-[var(--app-border)]">
+      <div className="flex flex-wrap items-center gap-2 p-4 border-b border-[var(--app-border)]">
         <span className="inline-flex items-center gap-2 text-sm text-[var(--app-text-muted)]">
           {t("ereader.filter")}
           <span className="inline-flex h-3 w-3 items-center justify-center">
@@ -430,7 +502,7 @@ export function EReaderView({
             />
           </span>
         </span>
-        {(["all", "in-library", "on-device", "not-on-device", "device-only", "queued"] as const).map((f) => (
+        {(["on-device", "device-only", "queued", "all"] as const).map((f) => (
           <button
             key={f}
             onClick={() =>
@@ -443,14 +515,39 @@ export function EReaderView({
               : "bg-[var(--app-bg-secondary)] hover:bg-[var(--app-bg-tertiary)]"
               }`}
           >
-            {f === "all" && t("ereader.filters.all")}
-            {f === "in-library" && t("ereader.filters.inLibrary")}
             {f === "on-device" && t("ereader.filters.onDevice")}
-            {f === "not-on-device" && t("ereader.filters.notOnDevice")}
             {f === "device-only" && t("ereader.filters.deviceOnly")}
             {f === "queued" && t("ereader.filters.queued")}
+            {f === "all" && t("ereader.filters.all")}
           </button>
         ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 px-4 pb-3 sm:grid-cols-4">
+        <div className="rounded-md border border-[var(--app-border-soft)] bg-app-surface/70 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--app-text-muted)]">
+            {t("ereader.stats.onDevice")}
+          </div>
+          <div className="text-base font-semibold text-app-ink">{stats.onDeviceCount}</div>
+        </div>
+        <div className="rounded-md border border-[var(--app-border-soft)] bg-app-surface/70 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--app-text-muted)]">
+            {t("ereader.stats.matched")}
+          </div>
+          <div className="text-base font-semibold text-app-ink">{stats.matchedCount}</div>
+        </div>
+        <div className="rounded-md border border-[var(--app-border-soft)] bg-app-surface/70 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--app-text-muted)]">
+            {t("ereader.stats.deviceOnly")}
+          </div>
+          <div className="text-base font-semibold text-app-ink">{stats.deviceOnlyCount}</div>
+        </div>
+        <div className="rounded-md border border-[var(--app-border-soft)] bg-app-surface/70 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--app-text-muted)]">
+            {t("ereader.stats.queued")}
+          </div>
+          <div className="text-base font-semibold text-app-ink">{stats.queuedCount}</div>
+        </div>
       </div>
 
       {/* Sync Progress */}
@@ -470,46 +567,6 @@ export function EReaderView({
         </div>
       )}
 
-      {/* Sync Queue (collapsible) */}
-      {pendingQueue.length > 0 && !syncing && (
-        <div className="border-b border-[var(--app-border)] bg-[var(--app-bg-secondary)]">
-          <div className="p-3">
-            <h3 className="text-sm font-medium mb-2">{t("ereader.syncQueue", { count: pendingQueue.length })}</h3>
-            <div className="space-y-1">
-              {pendingQueue.map((item) => (
-                <div key={item.id} className="flex items-center justify-between text-sm py-1">
-                  <span className="flex items-center gap-2">
-                    <span
-                      className={
-                        item.action === "add"
-                          ? "text-emerald-600"
-                          : item.action === "remove"
-                            ? "text-red-600"
-                            : "text-blue-600"
-                      }
-                    >
-                      {item.action === "add" ? <Plus size={14} /> : item.action === "remove" ? <Minus size={14} /> : <Import size={14} />}
-                    </span>
-                    <span className="font-medium text-app-ink">{item.action === "add" ? t("ereader.add") : item.action === "remove" ? t("ereader.remove") : t("ereader.import")}</span>
-                    <span className="text-[var(--app-text-muted)]">
-                      {item.itemId
-                        ? libraryItems.find((i) => i.id === item.itemId)?.title
-                        : item.ereaderPath?.split("/").pop() ?? t("ereader.unknown")}
-                    </span>
-                  </span>
-                  <button
-                    onClick={() => onRemoveFromQueue(item.id)}
-                    className="text-xs text-[var(--app-text-muted)] hover:text-red-600"
-                  >
-                    {t("ereader.cancel")}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Book List */}
       <div className="flex-1 overflow-hidden p-4">
         <Panel className="flex flex-col h-full overflow-hidden p-0 bg-app-surface/50">
@@ -518,7 +575,7 @@ export function EReaderView({
               <HardDrive className="w-12 h-12 mb-4 opacity-20" />
               <p>{t("ereader.deviceDisconnected")}</p>
             </div>
-          ) : ereaderBooks.length === 0 && libraryItems.length === 0 ? (
+          ) : ereaderBooks.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-[var(--app-text-muted)] py-8">
               <RefreshCw className="w-12 h-12 mb-4 opacity-20" />
               <p>{t("ereader.clickScanHint")}</p>
