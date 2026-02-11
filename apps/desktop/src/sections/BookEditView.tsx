@@ -112,7 +112,7 @@ export function BookEditView({
     const [selectedEmbeddedIndex, setSelectedEmbeddedIndex] = useState(0);
     const [embeddedSelectionDirty, setEmbeddedSelectionDirty] = useState(false);
     const [selectedCategoryToAdd, setSelectedCategoryToAdd] = useState("");
-    const [openSearchMode, setOpenSearchMode] = useState(false);
+    const [isMatchQueryDirty, setIsMatchQueryDirty] = useState(false);
     const [formData, setFormData] = useState<ItemMetadata>({
         title: "",
         authors: [],
@@ -144,7 +144,7 @@ export function BookEditView({
         activeItemIdRef.current = selectedItemId;
         setError(null);
         setInfoMessage(null);
-        setOpenSearchMode(false);
+        setIsMatchQueryDirty(false);
         setEmbeddedCandidates([]);
         setSelectedEmbeddedIndex(0);
         setEmbeddedSelectionDirty(false);
@@ -236,12 +236,12 @@ export function BookEditView({
     }, [t]);
 
     useEffect(() => {
-        if (openSearchMode || !selectedItemId || isLoading) return;
+        if (isMatchQueryDirty || !selectedItemId || isLoading) return;
         if (metadataSearchQuery !== matchQuery) {
             onMatchQueryChange(metadataSearchQuery);
         }
     }, [
-        openSearchMode,
+        isMatchQueryDirty,
         selectedItemId,
         isLoading,
         metadataSearchQuery,
@@ -249,20 +249,11 @@ export function BookEditView({
         onMatchQueryChange,
     ]);
 
-    const handleToggleOpenSearch = useCallback(() => {
-        setOpenSearchMode((current) => {
-            const next = !current;
-            if (!next && metadataSearchQuery !== matchQuery) {
-                onMatchQueryChange(metadataSearchQuery);
-            }
-            return next;
-        });
-    }, [metadataSearchQuery, matchQuery, onMatchQueryChange]);
-
     const handleUseCurrentMetadataQuery = useCallback(() => {
         if (metadataSearchQuery !== matchQuery) {
             onMatchQueryChange(metadataSearchQuery);
         }
+        setIsMatchQueryDirty(false);
     }, [metadataSearchQuery, matchQuery, onMatchQueryChange]);
 
     const handleSave = async () => {
@@ -931,33 +922,21 @@ export function BookEditView({
                                 : "flex flex-col rounded-lg border border-[var(--app-border-soft)] bg-app-panel p-4 shadow-none"
                         }
                     >
-                        <div className="mb-3 flex items-center justify-between gap-2">
+                        <div className="mb-3 flex items-center">
                             <h2 className="text-xs font-semibold uppercase tracking-wider text-app-ink-muted">
                                 {t("bookEdit.matchMetadata")}
                             </h2>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={handleToggleOpenSearch}
-                                className={
-                                    openSearchMode
-                                        ? "h-7 border-[var(--app-accent)] bg-[rgba(201,122,58,0.12)] px-2 text-[11px] text-[var(--app-accent-strong)] hover:bg-[rgba(201,122,58,0.2)]"
-                                        : "h-7 border-[var(--app-border-soft)] bg-[var(--app-bg-secondary)] px-2 text-[11px] text-app-ink-muted hover:text-app-ink"
-                                }
-                            >
-                                {t("bookEdit.openSearch")}
-                            </Button>
                         </div>
                         <div className="flex gap-2">
                             <Input
                                 value={matchQuery}
                                 onChange={(e) => {
-                                    if (!openSearchMode) return;
-                                    onMatchQueryChange(e.target.value);
+                                    const value = e.target.value;
+                                    onMatchQueryChange(value);
+                                    setIsMatchQueryDirty(value !== metadataSearchQuery);
                                 }}
                                 placeholder={t("bookEdit.searchTitleOrAuthor")}
                                 className="flex-1 text-sm"
-                                readOnly={!openSearchMode}
                                 onKeyDown={(e) => {
                                     if (e.key === "Enter") {
                                         onMatchSearch(matchQuery);

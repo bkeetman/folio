@@ -103,6 +103,16 @@ const DEFAULT_METADATA_SOURCES: MetadataSourceSetting[] = [
 ];
 
 const SYNC_CHANGE_ID_PREFIX = "sync:";
+const LIBRARY_SORT_SESSION_KEY = "folio.session.librarySort";
+const LIBRARY_SORT_VALUES: LibrarySort[] = [
+  "default",
+  "title-asc",
+  "title-desc",
+  "author-asc",
+  "year-desc",
+  "year-asc",
+  "recent",
+];
 type PendingChangeStatus = "pending" | "applied" | "error";
 type ChangesSourceFilter = "all" | "library" | "ereader";
 
@@ -114,6 +124,14 @@ function App() {
     if (!Number.isFinite(parsed)) return 320;
     return Math.min(460, Math.max(260, parsed));
   };
+  const readInitialLibrarySort = () => {
+    if (typeof window === "undefined") return "default" as LibrarySort;
+    const raw = window.sessionStorage.getItem(LIBRARY_SORT_SESSION_KEY);
+    if (!raw) return "default";
+    return LIBRARY_SORT_VALUES.includes(raw as LibrarySort)
+      ? (raw as LibrarySort)
+      : "default";
+  };
   const [view, setView] = useState<View>("library-books");
   const [isViewTransitionPending, startViewTransition] = useTransition();
   const [pendingView, setPendingView] = useState<View | null>(null);
@@ -124,7 +142,7 @@ function App() {
   const debouncedQuery = useDebouncedValue(queryInput, 180);
   const query = useDeferredValue(debouncedQuery);
   const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>("all");
-  const [librarySort, setLibrarySort] = useState<LibrarySort>("default");
+  const [librarySort, setLibrarySort] = useState<LibrarySort>(readInitialLibrarySort);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [scanStatus, setScanStatus] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -2101,6 +2119,11 @@ function App() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem("folio.inspectorWidth", String(inspectorWidth));
   }, [inspectorWidth]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem(LIBRARY_SORT_SESSION_KEY, librarySort);
+  }, [librarySort]);
 
   useEffect(() => {
     if (!inspectorResizing || typeof window === "undefined") return;

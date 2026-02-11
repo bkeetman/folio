@@ -936,7 +936,7 @@ fn get_library_items(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, String> 
        LEFT JOIN item_authors ON item_authors.item_id = items.id \
        LEFT JOIN authors ON authors.id = item_authors.author_id \
        LEFT JOIN files ON files.item_id = items.id AND files.status = 'active' \
-       LEFT JOIN covers ON covers.item_id = items.id \
+       LEFT JOIN covers ON covers.item_id = items.id AND covers.source != 'generated' \
        LEFT JOIN ( \
          SELECT item_id, GROUP_CONCAT(tag_entry, '||') as tags \
          FROM ( \
@@ -1017,7 +1017,7 @@ fn get_library_items_light(app: tauri::AppHandle) -> Result<Vec<LibraryItem>, St
        LEFT JOIN item_authors ON item_authors.item_id = items.id \
        LEFT JOIN authors ON authors.id = item_authors.author_id \
        LEFT JOIN files ON files.item_id = items.id AND files.status = 'active' \
-       LEFT JOIN covers ON covers.item_id = items.id \
+       LEFT JOIN covers ON covers.item_id = items.id AND covers.source != 'generated' \
        WHERE EXISTS (SELECT 1 FROM files WHERE item_id = items.id AND status = 'active') \
        GROUP BY items.id",
         )
@@ -1358,31 +1358,23 @@ fn remove_tag_from_item(
 #[tauri::command]
 fn get_cover_blob(app: tauri::AppHandle, item_id: String) -> Result<Option<CoverBlob>, String> {
     let conn = open_db(&app)?;
-    let path: Option<String> = conn
-        .query_row(
-            "SELECT local_path FROM covers WHERE item_id = ?1 ORDER BY created_at DESC LIMIT 1",
-            params![item_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|err| err.to_string())?;
-    let path = match path {
-        Some(value) => value,
-        None => return Ok(None),
-    };
-    let bytes = std::fs::read(&path).map_err(|err| err.to_string())?;
-    if bytes.is_empty() {
-        return Ok(None);
+    if let Some(path) = latest_cover_path(&conn, &item_id)? {
+        if let Some(blob) = cover_blob_from_path(&path).ok().flatten() {
+            return Ok(Some(blob));
+        }
+        log::warn!("stored cover path unreadable for item {}: {}", item_id, path);
     }
-    let mime = mime_from_extension(
-        std::path::Path::new(&path)
-            .extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or(""),
-    )
-    .to_string();
 
-    Ok(Some(CoverBlob { mime, bytes }))
+    let now = chrono::Utc::now().timestamp_millis();
+    if maybe_seed_embedded_cover_for_item(&app, &conn, &item_id, now)? {
+        if let Some(path) = latest_cover_path(&conn, &item_id)? {
+            if let Some(blob) = cover_blob_from_path(&path).ok().flatten() {
+                return Ok(Some(blob));
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 fn mime_from_extension(extension: &str) -> &'static str {
@@ -1408,6 +1400,20 @@ fn cover_blob_from_path(path: &str) -> Result<Option<CoverBlob>, String> {
         mime: mime_from_extension(extension).to_string(),
         bytes,
     }))
+}
+
+fn latest_cover_path(conn: &Connection, item_id: &str) -> Result<Option<String>, String> {
+    conn
+        .query_row(
+            "SELECT local_path FROM covers \
+             WHERE item_id = ?1 AND source != 'generated' \
+             ORDER BY created_at DESC LIMIT 1",
+            params![item_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map(|value| value.flatten())
+        .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -1481,7 +1487,9 @@ fn get_pending_cover_preview(
         Some(item_id) => {
             let path: Option<String> = conn
                 .query_row(
-                    "SELECT local_path FROM covers WHERE item_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                    "SELECT local_path FROM covers \
+                     WHERE item_id = ?1 AND source != 'generated' \
+                     ORDER BY created_at DESC LIMIT 1",
                     params![item_id],
                     |row| row.get(0),
                 )
@@ -2267,7 +2275,9 @@ fn apply_epub_cover_change(conn: &Connection, change: &PendingChange) -> Result<
         .map_err(|err| err.to_string())?;
     let cover_path: Option<String> = conn
         .query_row(
-            "SELECT local_path FROM covers WHERE item_id = ?1 ORDER BY created_at DESC LIMIT 1",
+            "SELECT local_path FROM covers \
+             WHERE item_id = ?1 AND source != 'generated' \
+             ORDER BY created_at DESC LIMIT 1",
             params![item_id],
             |row| row.get(0),
         )
@@ -2856,7 +2866,7 @@ fn get_library_health(app: tauri::AppHandle) -> Result<LibraryHealth, String> {
        AND TRIM(title) != ''
        AND id IN (SELECT item_id FROM item_authors)
        AND id IN (SELECT item_id FROM identifiers WHERE type IN ('ISBN10','ISBN13','OTHER','isbn10','isbn13','other'))
-       AND id IN (SELECT item_id FROM covers)",
+       AND id IN (SELECT item_id FROM covers WHERE source != 'generated')",
       params![],
       |row| row.get(0),
     )
@@ -2866,7 +2876,7 @@ fn get_library_health(app: tauri::AppHandle) -> Result<LibraryHealth, String> {
             "SELECT COUNT(*) FROM (
          SELECT DISTINCT item_id FROM files WHERE status = 'active'
        ) active_items
-       WHERE item_id NOT IN (SELECT item_id FROM covers)",
+       WHERE item_id NOT IN (SELECT item_id FROM covers WHERE source != 'generated')",
             params![],
             |row| row.get(0),
         )
@@ -4088,31 +4098,10 @@ fn save_item_metadata_sync(
         );
     }
 
+    let _ = maybe_seed_embedded_cover_for_item(&app, &conn, &item_id, now)?;
     let mut cover_updated = false;
     if let Ok(false) = has_cover(&conn, &item_id) {
         cover_updated = fetch_cover_fallback(&app, &conn, &item_id, now).unwrap_or(false);
-    }
-
-    if let Ok(false) = has_cover(&conn, &item_id) {
-        let title: String = conn
-            .query_row(
-                "SELECT title FROM items WHERE id = ?1",
-                params![item_id],
-                |row| row.get(0),
-            )
-            .unwrap_or_else(|_| "Untitled".to_string());
-        let author: String = conn
-      .query_row(
-        "SELECT GROUP_CONCAT(a.name, ', ') FROM authors a JOIN item_authors ia ON ia.author_id = a.id WHERE ia.item_id = ?1",
-        params![item_id],
-        |row| row.get::<_, Option<String>>(0),
-      )
-      .unwrap_or(None)
-      .unwrap_or_else(|| "Unknown".to_string());
-        if let Ok(bytes) = crate::generate_text_cover(&title, &author) {
-            let _ = crate::save_cover(&app, &conn, &item_id, bytes, "png", now, "generated", None);
-            cover_updated = true;
-        }
     }
 
     if cover_updated {
@@ -4128,7 +4117,7 @@ fn save_item_metadata_sync(
 
     let cover_count: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM covers WHERE item_id = ?1",
+            "SELECT COUNT(*) FROM covers WHERE item_id = ?1 AND source != 'generated'",
             params![item_id],
             |row| row.get(0),
         )
@@ -5925,36 +5914,7 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
                             );
                         }
                         Ok(None) => {
-                            log::info!("epub cover missing, generating text cover: {}", path_str);
-                            // Generate text-based cover as fallback
-                            let title: String = conn
-                                .query_row(
-                                    "SELECT title FROM items WHERE id = ?1",
-                                    params![item_id],
-                                    |row| row.get(0),
-                                )
-                                .unwrap_or_else(|_| "Untitled".to_string());
-                            let author: String = conn
-              .query_row(
-                "SELECT GROUP_CONCAT(a.name, ', ') FROM authors a JOIN item_authors ia ON ia.author_id = a.id WHERE ia.item_id = ?1",
-                params![item_id],
-                |row| row.get::<_, Option<String>>(0),
-              )
-              .unwrap_or(None)
-              .unwrap_or_else(|| "Unknown".to_string());
-                            if let Ok(bytes) = crate::generate_text_cover(&title, &author) {
-                                let _ = crate::save_cover(
-                                    &app,
-                                    &conn,
-                                    &item_id,
-                                    bytes,
-                                    "png",
-                                    now,
-                                    "generated",
-                                    None,
-                                );
-                                log::info!("generated text cover for: {}", path_str);
-                            }
+                            log::info!("epub cover missing: {}", path_str);
                         }
                         Err(error) => {
                             log::warn!("epub cover error {}: {}", path_str, error);
@@ -5963,41 +5923,6 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
                 }
                 if let Ok(false) = has_cover(&conn, &item_id) {
                     let _ = fetch_cover_fallback(&app, &conn, &item_id, now);
-                }
-                // Final fallback: generate text cover if still no cover
-                if let Ok(false) = has_cover(&conn, &item_id) {
-                    log::info!(
-                        "generating text cover as final fallback for existing item: {}",
-                        path_str
-                    );
-                    let title: String = conn
-                        .query_row(
-                            "SELECT title FROM items WHERE id = ?1",
-                            params![item_id],
-                            |row| row.get(0),
-                        )
-                        .unwrap_or_else(|_| "Untitled".to_string());
-                    let author: String = conn
-          .query_row(
-            "SELECT GROUP_CONCAT(a.name, ', ') FROM authors a JOIN item_authors ia ON ia.author_id = a.id WHERE ia.item_id = ?1",
-            params![item_id],
-            |row| row.get::<_, Option<String>>(0),
-          )
-          .unwrap_or(None)
-          .unwrap_or_else(|| "Unknown".to_string());
-                    if let Ok(bytes) = crate::generate_text_cover(&title, &author) {
-                        let _ = crate::save_cover(
-                            &app,
-                            &conn,
-                            &item_id,
-                            bytes,
-                            "png",
-                            now,
-                            "generated",
-                            None,
-                        );
-                        log::info!("generated text cover for existing item: {}", path_str);
-                    }
                 }
             }
             continue;
@@ -6054,36 +5979,7 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
                     );
                 }
                 Ok(None) => {
-                    log::info!("epub cover missing, generating text cover: {}", path_str);
-                    // Generate text-based cover as fallback
-                    let title: String = conn
-                        .query_row(
-                            "SELECT title FROM items WHERE id = ?1",
-                            params![item_id],
-                            |row| row.get(0),
-                        )
-                        .unwrap_or_else(|_| "Untitled".to_string());
-                    let author: String = conn
-              .query_row(
-                "SELECT GROUP_CONCAT(a.name, ', ') FROM authors a JOIN item_authors ia ON ia.author_id = a.id WHERE ia.item_id = ?1",
-                params![item_id],
-                |row| row.get::<_, Option<String>>(0),
-              )
-              .unwrap_or(None)
-              .unwrap_or_else(|| "Unknown".to_string());
-                    if let Ok(bytes) = crate::generate_text_cover(&title, &author) {
-                        let _ = crate::save_cover(
-                            &app,
-                            &conn,
-                            &item_id,
-                            bytes,
-                            "png",
-                            now,
-                            "generated",
-                            None,
-                        );
-                        log::info!("generated text cover for: {}", path_str);
-                    }
+                    log::info!("epub cover missing: {}", path_str);
                 }
                 Err(error) => {
                     log::warn!("epub cover error {}: {}", path_str, error);
@@ -6092,33 +5988,6 @@ fn scan_folder_sync(app: tauri::AppHandle, root: String) -> Result<ScanStats, St
         }
         if let Ok(false) = has_cover(&conn, &item_id) {
             let _ = fetch_cover_fallback(&app, &conn, &item_id, now);
-        }
-        // Final fallback: generate text cover if still no cover
-        if let Ok(false) = has_cover(&conn, &item_id) {
-            log::info!(
-                "generating text cover as final fallback for new item: {}",
-                path_str
-            );
-            let title: String = conn
-                .query_row(
-                    "SELECT title FROM items WHERE id = ?1",
-                    params![item_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or_else(|_| "Untitled".to_string());
-            let author: String = conn
-        .query_row(
-          "SELECT GROUP_CONCAT(a.name, ', ') FROM authors a JOIN item_authors ia ON ia.author_id = a.id WHERE ia.item_id = ?1",
-          params![item_id],
-          |row| row.get::<_, Option<String>>(0),
-        )
-        .unwrap_or(None)
-        .unwrap_or_else(|| "Unknown".to_string());
-            if let Ok(bytes) = crate::generate_text_cover(&title, &author) {
-                let _ =
-                    crate::save_cover(&app, &conn, &item_id, bytes, "png", now, "generated", None);
-                log::info!("generated text cover for new item: {}", path_str);
-            }
         }
     }
 
@@ -7010,21 +6879,11 @@ fn import_new_book(
     .map_err(|err| err.to_string())?;
     }
 
-    // Extract and save embedded cover if available
-    if candidate.has_cover && candidate.extension == "epub" {
-        if let Ok(Some((cover_bytes, cover_ext))) = extract_embedded_cover_for_item(conn, &item_id)
-        {
-            let _ = save_cover(
-                app,
-                conn,
-                &item_id,
-                cover_bytes,
-                &cover_ext,
-                now,
-                "embedded",
-                None,
-            );
-        }
+    // Seed cover from EPUB when missing (more robust than import-time has_cover flag).
+    if candidate.extension.eq_ignore_ascii_case("epub")
+        || candidate.extension.eq_ignore_ascii_case(".epub")
+    {
+        let _ = maybe_seed_embedded_cover_for_item(app, conn, &item_id, now);
     }
 
     Ok(())
@@ -7032,7 +6891,7 @@ fn import_new_book(
 
 fn replace_file_for_item(
     conn: &Connection,
-    _app: &tauri::AppHandle,
+    app: &tauri::AppHandle,
     item_id: &str,
     candidate: &ImportCandidateInput,
     request: &ImportRequest,
@@ -7118,12 +6977,18 @@ fn replace_file_for_item(
     .map_err(|err| err.to_string())?;
     }
 
+    if candidate.extension.eq_ignore_ascii_case("epub")
+        || candidate.extension.eq_ignore_ascii_case(".epub")
+    {
+        let _ = maybe_seed_embedded_cover_for_item(app, conn, item_id, now);
+    }
+
     Ok(())
 }
 
 fn add_file_to_item(
     conn: &Connection,
-    _app: &tauri::AppHandle,
+    app: &tauri::AppHandle,
     item_id: &str,
     candidate: &ImportCandidateInput,
     request: &ImportRequest,
@@ -7177,6 +7042,12 @@ fn add_file_to_item(
     params![file_id, item_id, target_path, filename, candidate.extension, size_bytes, candidate.hash, modified_at, now],
   )
   .map_err(|err| err.to_string())?;
+
+    if candidate.extension.eq_ignore_ascii_case("epub")
+        || candidate.extension.eq_ignore_ascii_case(".epub")
+    {
+        let _ = maybe_seed_embedded_cover_for_item(app, conn, item_id, now);
+    }
 
     Ok(())
 }
@@ -8988,13 +8859,44 @@ fn save_cover(
 fn has_cover(conn: &Connection, item_id: &str) -> Result<bool, String> {
     let existing: Option<String> = conn
         .query_row(
-            "SELECT id FROM covers WHERE item_id = ?1 LIMIT 1",
+            "SELECT id FROM covers WHERE item_id = ?1 AND source != 'generated' LIMIT 1",
             params![item_id],
             |row| row.get(0),
         )
         .optional()
         .map_err(|err| err.to_string())?;
     Ok(existing.is_some())
+}
+
+fn maybe_seed_embedded_cover_for_item(
+    app: &tauri::AppHandle,
+    conn: &Connection,
+    item_id: &str,
+    now: i64,
+) -> Result<bool, String> {
+    if has_cover(conn, item_id)? {
+        return Ok(false);
+    }
+
+    let embedded = match extract_embedded_cover_for_item(conn, item_id) {
+        Ok(value) => value,
+        Err(err) => {
+            log::debug!(
+                "could not extract embedded cover for item {}: {}",
+                item_id,
+                err
+            );
+            return Ok(false);
+        }
+    };
+
+    let Some((bytes, extension)) = embedded else {
+        return Ok(false);
+    };
+
+    save_cover(app, conn, item_id, bytes, &extension, now, "embedded", None)?;
+    log::info!("seeded embedded cover for item {}", item_id);
+    Ok(true)
 }
 
 fn fetch_cover_from_url(
