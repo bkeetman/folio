@@ -15,6 +15,8 @@ type EReaderSyncStatus = {
   matchConfidence: "exact" | "isbn" | "title" | "fuzzy" | null;
 };
 
+const AUTHOR_BOOKS_PAGE_SIZE = 8;
+
 function formatMetadataDate(timestampMs: number | null): string | null {
   if (!timestampMs) return null;
   const parsed = new Date(timestampMs);
@@ -50,6 +52,14 @@ function formatAuthorMetadataSource(source: string | null | undefined): string |
 }
 
 type InspectorProps = {
+  allBooks: Array<{
+    id: string;
+    title: string;
+    authors: string[];
+    year: number | string;
+    format: string;
+    cover: string | null;
+  }>;
   selectedItem: {
     id: string;
     title: string;
@@ -87,6 +97,7 @@ type InspectorProps = {
 };
 
 export function Inspector({
+  allBooks,
   selectedItem,
   availableLanguages = [],
   selectedTags,
@@ -119,6 +130,10 @@ export function Inspector({
   const [authorProfileError, setAuthorProfileError] = useState<string | null>(null);
   const [bookAuthorProfiles, setBookAuthorProfiles] = useState<Record<string, AuthorProfile | null>>({});
   const [bookAuthorProfilesLoading, setBookAuthorProfilesLoading] = useState(false);
+  const [authorBooksVisibleCount, setAuthorBooksVisibleCount] = useState(AUTHOR_BOOKS_PAGE_SIZE);
+  const [authorBookCoverUrls, setAuthorBookCoverUrls] = useState<Record<string, string>>({});
+  const [authorBookCoverLoadingIds, setAuthorBookCoverLoadingIds] = useState<Record<string, boolean>>({});
+  const authorBookCoverCacheRef = useRef<Map<string, string | null>>(new Map());
   const bookAuthorProfileCacheRef = useRef<Map<string, AuthorProfile | null>>(new Map());
   const autoFetchAttemptedRef = useRef<Set<string>>(new Set());
   const authorProfileLoadInFlightRef = useRef(false);
@@ -137,6 +152,35 @@ export function Inspector({
     const fallback = selectedItem.author?.trim() ?? "";
     return fallback ? [fallback] : [];
   }, [selectedItem]);
+  const selectedAuthorBooks = useMemo(() => {
+    const normalizedAuthor = selectedAuthorName?.trim().toLocaleLowerCase() ?? "";
+    if (!normalizedAuthor) return [] as typeof allBooks;
+    const parseYear = (value: number | string) => {
+      if (typeof value === "number") return value;
+      const parsed = Number.parseInt(String(value), 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    return allBooks
+      .filter((book) =>
+        book.authors.some((author) => author.trim().toLocaleLowerCase() === normalizedAuthor)
+      )
+      .slice()
+      .sort((a, b) => {
+        const yearA = parseYear(a.year);
+        const yearB = parseYear(b.year);
+        if (yearA !== null && yearB !== null && yearA !== yearB) {
+          return yearB - yearA;
+        }
+        if (yearA === null && yearB !== null) return 1;
+        if (yearA !== null && yearB === null) return -1;
+        return a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+      });
+  }, [allBooks, selectedAuthorName]);
+  const visibleAuthorBooks = useMemo(
+    () => selectedAuthorBooks.slice(0, authorBooksVisibleCount),
+    [authorBooksVisibleCount, selectedAuthorBooks]
+  );
+  const remainingAuthorBookCount = Math.max(0, selectedAuthorBooks.length - visibleAuthorBooks.length);
 
   useEffect(() => {
     if (!selectedItemId) return;
@@ -338,6 +382,98 @@ export function Inspector({
     authorMetadataLoading,
     handleRefreshAuthorProfile,
   ]);
+
+  useEffect(() => {
+    setAuthorBooksVisibleCount(AUTHOR_BOOKS_PAGE_SIZE);
+  }, [selectedAuthorName]);
+
+  useEffect(() => {
+    for (const value of authorBookCoverCacheRef.current.values()) {
+      if (value) URL.revokeObjectURL(value);
+    }
+    authorBookCoverCacheRef.current.clear();
+    setAuthorBookCoverUrls({});
+    setAuthorBookCoverLoadingIds({});
+  }, [selectedAuthorName]);
+
+  useEffect(() => {
+    if (!selectedAuthorName || visibleAuthorBooks.length === 0) return;
+    const missingBookIds = visibleAuthorBooks
+      .filter((book) => !book.cover && !authorBookCoverCacheRef.current.has(book.id))
+      .map((book) => book.id);
+    if (missingBookIds.length === 0) return;
+
+    let cancelled = false;
+    setAuthorBookCoverLoadingIds((prev) => {
+      const next = { ...prev };
+      for (const id of missingBookIds) {
+        next[id] = true;
+      }
+      return next;
+    });
+
+    void Promise.all(
+      missingBookIds.map(async (bookId) => {
+        try {
+          const result = await invoke<{ mime: string; bytes: number[] } | null>("get_cover_blob", {
+            itemId: bookId,
+          });
+          if (!result) return [bookId, null] as const;
+          const blob = new Blob([new Uint8Array(result.bytes)], { type: result.mime });
+          const url = URL.createObjectURL(blob);
+          return [bookId, url] as const;
+        } catch {
+          return [bookId, null] as const;
+        }
+      })
+    )
+      .then((results) => {
+        if (cancelled) {
+          for (const [, url] of results) {
+            if (url) URL.revokeObjectURL(url);
+          }
+          return;
+        }
+        const nextUrls: Record<string, string> = {};
+        for (const [bookId, url] of results) {
+          authorBookCoverCacheRef.current.set(bookId, url);
+          if (url) {
+            nextUrls[bookId] = url;
+          }
+        }
+        if (Object.keys(nextUrls).length > 0) {
+          setAuthorBookCoverUrls((prev) => ({
+            ...prev,
+            ...nextUrls,
+          }));
+        }
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setAuthorBookCoverLoadingIds((prev) => {
+          const next = { ...prev };
+          for (const id of missingBookIds) {
+            delete next[id];
+          }
+          return next;
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedAuthorName, visibleAuthorBooks]);
+
+  useEffect(() => {
+    const coverCache = authorBookCoverCacheRef.current;
+    return () => {
+      for (const value of coverCache.values()) {
+        if (value) URL.revokeObjectURL(value);
+      }
+      coverCache.clear();
+    };
+  }, []);
+
   return (
     <aside className="flex h-screen flex-col gap-3 overflow-hidden border-l border-[var(--app-border-soft)] bg-[var(--app-surface)] px-3 py-4">
       <div className="flex items-center justify-between">
@@ -763,6 +899,78 @@ export function Inspector({
                 )}
               </div>
             )}
+
+            {selectedAuthorBooks.length > 0 ? (
+              <div className="mt-3">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
+                    {t("inspector.books", { defaultValue: "Books" })}
+                  </div>
+                  <div className="text-[10px] text-[var(--app-ink-muted)]">
+                    {visibleAuthorBooks.length}/{selectedAuthorBooks.length}
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  {visibleAuthorBooks.map((book) => {
+                    const coverUrl = book.cover ?? authorBookCoverUrls[book.id] ?? null;
+                    const isCoverLoading = Boolean(authorBookCoverLoadingIds[book.id]);
+                    return (
+                      <div
+                        key={book.id}
+                        className="flex items-center gap-2 rounded-md border border-[var(--app-border-soft)] bg-app-bg/30 px-2 py-1.5"
+                      >
+                        <div className="flex h-11 w-8 flex-none items-center justify-center overflow-hidden rounded border border-[var(--app-border-soft)] bg-app-bg">
+                          {coverUrl ? (
+                            <img src={coverUrl} alt="" className="h-full w-full object-cover" />
+                          ) : isCoverLoading ? (
+                            <Loader2 size={10} className="animate-spin text-[var(--app-ink-muted)]" />
+                          ) : (
+                            <span className="text-[8px] font-medium uppercase tracking-[0.1em] text-[var(--app-ink-muted)]">
+                              {book.format}
+                            </span>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="line-clamp-2 text-[11px] font-medium leading-snug text-app-ink">
+                            {book.title}
+                          </div>
+                          <div className="mt-0.5 text-[10px] text-[var(--app-ink-muted)]">{book.year}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {selectedAuthorBooks.length > AUTHOR_BOOKS_PAGE_SIZE ? (
+                  <div className="mt-2 flex gap-2">
+                    {remainingAuthorBookCount > 0 ? (
+                      <Button
+                        variant="toolbar"
+                        size="sm"
+                        className="h-7 px-2.5 text-[11px]"
+                        onClick={() =>
+                          setAuthorBooksVisibleCount((prev) => prev + AUTHOR_BOOKS_PAGE_SIZE)
+                        }
+                      >
+                        {t("inspector.showMoreBooks", {
+                          defaultValue: "Show {{count}} more",
+                          count: Math.min(AUTHOR_BOOKS_PAGE_SIZE, remainingAuthorBookCount),
+                        })}
+                      </Button>
+                    ) : null}
+                    {authorBooksVisibleCount > AUTHOR_BOOKS_PAGE_SIZE ? (
+                      <Button
+                        variant="toolbar"
+                        size="sm"
+                        className="h-7 px-2.5 text-[11px]"
+                        onClick={() => setAuthorBooksVisibleCount(AUTHOR_BOOKS_PAGE_SIZE)}
+                      >
+                        {t("inspector.showLessBooks", { defaultValue: "Show less" })}
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="mt-3">
               <Button

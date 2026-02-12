@@ -60,20 +60,6 @@ const findSignature = (dir, fileName) => {
   }
   return null;
 };
-const findFirstFile = (dir, predicate) => {
-  const entries = readdirSync(dir);
-  for (const entry of entries) {
-    const fullPath = join(dir, entry);
-    if (statSync(fullPath).isDirectory()) {
-      const nested = findFirstFile(fullPath, predicate);
-      if (nested) return nested;
-    } else if (predicate(entry)) {
-      return fullPath;
-    }
-  }
-  return null;
-};
-
 const resolveArch = () => {
   const raw = process.env.TAURI_ARCH || process.env.RUNNER_ARCH;
   if (!raw) return null;

@@ -4,6 +4,7 @@ import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, SetStateAction } fr
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input } from "../components/ui";
+import { useAuthorSuggestions } from "../hooks/useAuthorSuggestions";
 import { LANGUAGE_OPTIONS } from "../lib/languageFlags";
 import { cleanupMetadataTitle } from "../lib/metadataCleanup";
 import { PREDEFINED_BOOK_CATEGORIES } from "../lib/categories";
@@ -121,10 +122,7 @@ export function BookEditView({
     const [selectedCategoryToAdd, setSelectedCategoryToAdd] = useState("");
     const [isMatchQueryDirty, setIsMatchQueryDirty] = useState(false);
     const [authorsInput, setAuthorsInput] = useState("");
-    const [authorSuggestions, setAuthorSuggestions] = useState<AuthorSuggestion[]>([]);
-    const [authorSuggestionsLoading, setAuthorSuggestionsLoading] = useState(false);
     const [authorsFocused, setAuthorsFocused] = useState(false);
-    const [activeAuthorSuggestionIndex, setActiveAuthorSuggestionIndex] = useState(-1);
     const [formData, setFormData] = useState<ItemMetadata>({
         title: "",
         authors: [],
@@ -148,10 +146,20 @@ export function BookEditView({
         const parts = authorsInput.split(",");
         return parts.at(-1)?.trim() ?? "";
     }, [authorsInput]);
-    const showAuthorSuggestions =
-        authorsFocused &&
-        authorLookupQuery.length >= 2 &&
-        (authorSuggestionsLoading || authorSuggestions.length > 0);
+    const {
+        suggestions: authorSuggestions,
+        loading: authorSuggestionsLoading,
+        activeIndex: activeAuthorSuggestionIndex,
+        setActiveIndex: setActiveAuthorSuggestionIndex,
+        listRef: authorSuggestionsListRef,
+        showSuggestions: showAuthorSuggestions,
+        clearSuggestions: clearAuthorSuggestions,
+        handleKeyDown: handleAuthorSuggestionsKeyDown,
+    } = useAuthorSuggestions({
+        isDesktop,
+        enabled: authorsFocused,
+        query: authorLookupQuery,
+    });
 
     const selectedItem = libraryItems.find((item) => item.id === selectedItemId);
     const displayCoverUrl = localCoverUrl ?? coverUrl;
@@ -159,7 +167,6 @@ export function BookEditView({
     const activeItemIdRef = useRef<string | null>(selectedItemId);
     const embeddedPreviewUrlRef = useRef<string | null>(null);
     const localCoverUrlRef = useRef<string | null>(null);
-    const authorSuggestionsListRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         activeItemIdRef.current = selectedItemId;
@@ -167,10 +174,8 @@ export function BookEditView({
         setInfoMessage(null);
         setIsMatchQueryDirty(false);
         setAuthorsInput("");
-        setAuthorSuggestions([]);
-        setAuthorSuggestionsLoading(false);
+        clearAuthorSuggestions();
         setAuthorsFocused(false);
-        setActiveAuthorSuggestionIndex(-1);
         setEmbeddedCandidates([]);
         setSelectedEmbeddedIndex(0);
         setEmbeddedSelectionDirty(false);
@@ -182,7 +187,7 @@ export function BookEditView({
             if (previous) URL.revokeObjectURL(previous);
             return null;
         });
-    }, [selectedItemId]);
+    }, [clearAuthorSuggestions, selectedItemId]);
 
     const loadLocalCoverBlob = useCallback(async (itemId: string) => {
         try {
@@ -276,47 +281,6 @@ export function BookEditView({
         onMatchQueryChange,
     ]);
 
-    useEffect(() => {
-        if (!isDesktop || !authorsFocused || authorLookupQuery.length < 2) {
-            setAuthorSuggestions([]);
-            setAuthorSuggestionsLoading(false);
-            setActiveAuthorSuggestionIndex(-1);
-            return;
-        }
-        let cancelled = false;
-        const timer = window.setTimeout(() => {
-            setAuthorSuggestionsLoading(true);
-            void invoke<AuthorSuggestion[]>("search_authors", {
-                query: authorLookupQuery,
-                limit: 8,
-            })
-                .then((suggestions) => {
-                    if (cancelled) return;
-                    setAuthorSuggestions(suggestions);
-                    setActiveAuthorSuggestionIndex((current) => {
-                        if (suggestions.length === 0) return -1;
-                        if (current >= 0 && current < suggestions.length) return current;
-                        return 0;
-                    });
-                })
-                .catch((error) => {
-                    if (cancelled) return;
-                    console.error("Failed to lookup author suggestions", error);
-                    setAuthorSuggestions([]);
-                    setActiveAuthorSuggestionIndex(-1);
-                })
-                .finally(() => {
-                    if (!cancelled) {
-                        setAuthorSuggestionsLoading(false);
-                    }
-                });
-        }, 180);
-        return () => {
-            cancelled = true;
-            window.clearTimeout(timer);
-        };
-    }, [isDesktop, authorsFocused, authorLookupQuery]);
-
     const handleUseCurrentMetadataQuery = useCallback(() => {
         if (metadataSearchQuery !== matchQuery) {
             onMatchQueryChange(metadataSearchQuery);
@@ -329,7 +293,7 @@ export function BookEditView({
         setAuthorsInput(value);
         setFormData((current) => ({ ...current, authors: parsed }));
         setActiveAuthorSuggestionIndex(-1);
-    }, []);
+    }, [setActiveAuthorSuggestionIndex]);
 
     const handleApplyAuthorSuggestion = useCallback((suggestion: AuthorSuggestion) => {
         const parts = authorsInput.split(",");
@@ -341,66 +305,12 @@ export function BookEditView({
         const parsed = parseAuthorsInput(parts.join(","));
         setAuthorsInput(parsed.length ? `${parsed.join(", ")}, ` : "");
         setFormData((current) => ({ ...current, authors: parsed }));
-        setAuthorSuggestions([]);
-        setActiveAuthorSuggestionIndex(-1);
-    }, [authorsInput]);
+        clearAuthorSuggestions();
+    }, [authorsInput, clearAuthorSuggestions]);
 
     const handleAuthorsInputKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>) => {
-        if (!showAuthorSuggestions || authorSuggestions.length === 0) return;
-        const lastIndex = authorSuggestions.length - 1;
-        if (event.key === "ArrowDown") {
-            event.preventDefault();
-            setActiveAuthorSuggestionIndex((current) => {
-                if (current < 0) return 0;
-                return current >= lastIndex ? 0 : current + 1;
-            });
-            return;
-        }
-        if (event.key === "ArrowUp") {
-            event.preventDefault();
-            setActiveAuthorSuggestionIndex((current) => {
-                if (current < 0) return lastIndex;
-                if (current === 0) return lastIndex;
-                return current - 1;
-            });
-            return;
-        }
-        if (event.key === "Enter") {
-            const pickedIndex = activeAuthorSuggestionIndex >= 0 ? activeAuthorSuggestionIndex : 0;
-            const picked = authorSuggestions[pickedIndex];
-            if (!picked) return;
-            event.preventDefault();
-            handleApplyAuthorSuggestion(picked);
-            return;
-        }
-        if (event.key === "Escape") {
-            event.preventDefault();
-            setAuthorSuggestions([]);
-            setActiveAuthorSuggestionIndex(-1);
-        }
-    }, [
-        activeAuthorSuggestionIndex,
-        authorSuggestions,
-        handleApplyAuthorSuggestion,
-        showAuthorSuggestions,
-    ]);
-
-    useEffect(() => {
-        if (!showAuthorSuggestions || activeAuthorSuggestionIndex < 0) return;
-        const list = authorSuggestionsListRef.current;
-        if (!list) return;
-        const activeEl = list.querySelector<HTMLButtonElement>(
-            `[data-suggestion-index='${activeAuthorSuggestionIndex}']`,
-        );
-        activeEl?.scrollIntoView({ block: "nearest" });
-    }, [showAuthorSuggestions, activeAuthorSuggestionIndex]);
-
-    useEffect(() => {
-        if (!showAuthorSuggestions || authorSuggestionsLoading || authorSuggestions.length === 0) return;
-        if (activeAuthorSuggestionIndex < 0 || activeAuthorSuggestionIndex >= authorSuggestions.length) {
-            setActiveAuthorSuggestionIndex(0);
-        }
-    }, [showAuthorSuggestions, authorSuggestionsLoading, authorSuggestions.length, activeAuthorSuggestionIndex]);
+        handleAuthorSuggestionsKeyDown(event, handleApplyAuthorSuggestion);
+    }, [handleApplyAuthorSuggestion, handleAuthorSuggestionsKeyDown]);
 
     const handleSave = async () => {
         if (!selectedItemId) return;
