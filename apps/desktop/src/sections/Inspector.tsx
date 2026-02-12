@@ -41,7 +41,11 @@ function authorProfileKey(name: string): string {
 function formatAuthorMetadataSource(source: string | null | undefined): string | null {
   const value = source?.trim();
   if (!value) return null;
-  if (value.toLowerCase() === "openlibrary") return "Open Library";
+  const normalized = value.toLowerCase();
+  if (normalized === "openlibrary") return "Open Library";
+  if (normalized === "wikipedia") return "Wikipedia";
+  if (normalized === "wikidata") return "Wikidata";
+  if (normalized === "merged") return "Merged sources";
   return value;
 }
 
@@ -380,7 +384,9 @@ export function Inspector({
                     {bookAuthorNames.map((author, i) => {
                       const profile = bookAuthorProfiles[authorProfileKey(author)] ?? null;
                       const showAuthorCard = hasAuthorMetadata(profile) || hasFetchedAuthorMetadata(profile);
-                      const metadataSourceLabel = formatAuthorMetadataSource(profile?.metadataSource);
+                      const metadataSourceLabel = hasAuthorMetadata(profile)
+                        ? formatAuthorMetadataSource(profile?.metadataSource)
+                        : null;
                       if (!showAuthorCard) {
                         return (
                           <div key={`${author}-${i}`}>
@@ -704,9 +710,9 @@ export function Inspector({
                       count: authorProfile?.bookCount ?? 0,
                     })}
                   </span>
-                  {authorProfile?.metadataSource ? (
+                  {hasAuthorMetadata(authorProfile) && authorProfile?.metadataSource ? (
                     <span className="rounded-full border border-[var(--app-border-soft)] bg-app-bg/40 px-2 py-0.5 text-[11px] text-[var(--app-ink-muted)]">
-                      {authorProfile.metadataSource}
+                      {formatAuthorMetadataSource(authorProfile.metadataSource)}
                     </span>
                   ) : null}
                   {authorMetadataLoading ? (

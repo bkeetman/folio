@@ -109,13 +109,17 @@ export const nlTranslation = {
         fixTitlesInBatch: "Titels in batch herstellen",
         metadataSources: "Metadata-bronnen",
         metadataSourcesHint:
-          "Kies welke metadata-providers Folio gebruikt. Open Library, Google Books en Apple Books staan standaard aan. ISFDB kun je optioneel inschakelen voor extra sci-fi resultaten.",
+          "Kies welke metadata-providers Folio gebruikt. Open Library, Google Books, Apple Books, Wikidata en Wikipedia staan standaard aan. ISFDB kun je optioneel inschakelen voor extra sci-fi resultaten.",
         metadataSourceOpenLibraryStrength:
           "Sterk in brede catalogusdekking en ISBN/titel-matches.",
         metadataSourceGoogleStrength:
           "Sterk in gangbare boeken, covers en rijke publicatie-metadata.",
         metadataSourceAppleStrength:
           "Sterk in ebook-store metadata en hoge-resolutie coverafbeeldingen.",
+        metadataSourceWikidataStrength:
+          "Sterk in gestructureerde auteur-entiteiten, stabiele IDs en gekoppelde metadata.",
+        metadataSourceWikipediaStrength:
+          "Sterk in rijke auteursbiografieën en publieke profielfoto's.",
         metadataSourceIsfdbStrength:
           "Sterk in sciencefiction, fantasy en genrespecifieke bibliografische data.",
         metadataSourceArchiveStrength:

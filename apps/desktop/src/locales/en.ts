@@ -109,13 +109,17 @@ export const enTranslation = {
         fixTitlesInBatch: "Fix titles in batch",
         metadataSources: "Metadata Sources",
         metadataSourcesHint:
-          "Choose which metadata providers Folio uses for lookup. Open Library, Google Books, and Apple Books are enabled by default. ISFDB can be enabled for extra sci-fi coverage.",
+          "Choose which metadata providers Folio uses for lookup. Open Library, Google Books, Apple Books, Wikidata, and Wikipedia are enabled by default. ISFDB can be enabled for extra sci-fi coverage.",
         metadataSourceOpenLibraryStrength:
           "Good for broad catalog coverage and ISBN/title matches.",
         metadataSourceGoogleStrength:
           "Good for mainstream books, covers, and rich publication metadata.",
         metadataSourceAppleStrength:
           "Good for ebook storefront metadata and high-resolution cover art.",
+        metadataSourceWikidataStrength:
+          "Good for structured author entities, canonical IDs, and linked metadata.",
+        metadataSourceWikipediaStrength:
+          "Good for rich author biographies and public profile images.",
         metadataSourceIsfdbStrength:
           "Good for science fiction, fantasy, and genre-specific bibliography data.",
         metadataSourceArchiveStrength:

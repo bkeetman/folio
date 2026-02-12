@@ -178,6 +178,7 @@ export function LibraryView({
             onApplyBatchMetadata={onApplyBatchMetadata}
             onRemoveSelectedBooks={onRemoveSelectedBooks}
             tags={tags}
+            isDesktop={isDesktop}
             onClose={() => setBatchPanelOpen(false)}
           />
         </div>

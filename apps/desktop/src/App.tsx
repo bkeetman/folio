@@ -80,6 +80,20 @@ const DEFAULT_METADATA_SOURCES: MetadataSourceSetting[] = [
     endpoint: "https://itunes.apple.com",
   },
   {
+    id: "wikidata",
+    label: "Wikidata",
+    enabled: true,
+    sourceType: "builtin",
+    endpoint: "https://www.wikidata.org/w/api.php",
+  },
+  {
+    id: "wikipedia",
+    label: "Wikipedia",
+    enabled: true,
+    sourceType: "builtin",
+    endpoint: "https://en.wikipedia.org/api/rest_v1",
+  },
+  {
     id: "isfdb",
     label: "ISFDB",
     enabled: false,

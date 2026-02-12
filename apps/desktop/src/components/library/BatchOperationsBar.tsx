@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import {
     Check,
     ChevronDown,
@@ -7,12 +8,14 @@ import {
     Users,
     X
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PREDEFINED_BOOK_CATEGORIES } from "../../lib/categories";
 import { LANGUAGE_OPTIONS } from "../../lib/languageFlags";
 import { cn } from "../../lib/utils";
 import type {
+    AuthorSuggestion,
     BatchAuthorMode,
     BatchMetadataUpdatePayload,
     BatchTagMode,
@@ -29,8 +32,16 @@ type BatchOperationsBarProps = {
     onApplyBatchMetadata: (payload: BatchMetadataUpdatePayload) => Promise<void>;
     onRemoveSelectedBooks: (itemIds: string[]) => Promise<boolean>;
     tags: Tag[];
+    isDesktop: boolean;
     onClose: () => void;
 };
+
+function parseAuthorsInput(value: string): string[] {
+    return value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
 
 export function BatchOperationsBar({
     filteredBooks,
@@ -40,6 +51,7 @@ export function BatchOperationsBar({
     onApplyBatchMetadata,
     onRemoveSelectedBooks,
     tags,
+    isDesktop,
     onClose,
 }: BatchOperationsBarProps) {
     const { t } = useTranslation();
@@ -56,6 +68,10 @@ export function BatchOperationsBar({
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [batchAuthorInput, setBatchAuthorInput] = useState("");
     const [batchAuthorMode, setBatchAuthorMode] = useState<BatchAuthorMode>("append");
+    const [authorSuggestions, setAuthorSuggestions] = useState<AuthorSuggestion[]>([]);
+    const [authorSuggestionsLoading, setAuthorSuggestionsLoading] = useState(false);
+    const [authorsFocused, setAuthorsFocused] = useState(false);
+    const [activeAuthorSuggestionIndex, setActiveAuthorSuggestionIndex] = useState(-1);
     const [batchLanguage, setBatchLanguage] = useState("");
     const [batchClearLanguage, setBatchClearLanguage] = useState(false);
     const [batchSeries, setBatchSeries] = useState("");
@@ -66,6 +82,7 @@ export function BatchOperationsBar({
     const [batchClearPublishedYear, setBatchClearPublishedYear] = useState(false);
     const [batchTagMode, setBatchTagMode] = useState<BatchTagMode>("append");
     const [batchClearTags] = useState(false);
+    const authorSuggestionsListRef = useRef<HTMLDivElement | null>(null);
 
     // Computed
     const availableBatchCategories = useMemo(
@@ -99,6 +116,134 @@ export function BatchOperationsBar({
         return { value: parsed, invalid: false };
     }, [batchSeriesIndexInput]);
 
+    const authorLookupQuery = useMemo(() => {
+        const parts = batchAuthorInput.split(",");
+        return parts.at(-1)?.trim() ?? "";
+    }, [batchAuthorInput]);
+
+    const showAuthorSuggestions =
+        showAdvanced &&
+        authorsFocused &&
+        authorLookupQuery.length >= 2 &&
+        (authorSuggestionsLoading || authorSuggestions.length > 0);
+
+    useEffect(() => {
+        if (!isDesktop || !showAdvanced || !authorsFocused || authorLookupQuery.length < 2) {
+            setAuthorSuggestions([]);
+            setAuthorSuggestionsLoading(false);
+            setActiveAuthorSuggestionIndex(-1);
+            return;
+        }
+        let cancelled = false;
+        const timer = window.setTimeout(() => {
+            setAuthorSuggestionsLoading(true);
+            void invoke<AuthorSuggestion[]>("search_authors", {
+                query: authorLookupQuery,
+                limit: 8,
+            })
+                .then((suggestions) => {
+                    if (cancelled) return;
+                    setAuthorSuggestions(suggestions);
+                    setActiveAuthorSuggestionIndex((current) => {
+                        if (suggestions.length === 0) return -1;
+                        if (current >= 0 && current < suggestions.length) return current;
+                        return 0;
+                    });
+                })
+                .catch((error) => {
+                    if (cancelled) return;
+                    console.error("Failed to lookup author suggestions", error);
+                    setAuthorSuggestions([]);
+                    setActiveAuthorSuggestionIndex(-1);
+                })
+                .finally(() => {
+                    if (!cancelled) {
+                        setAuthorSuggestionsLoading(false);
+                    }
+                });
+        }, 180);
+
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [isDesktop, showAdvanced, authorsFocused, authorLookupQuery]);
+
+    const handleAuthorInputChange = useCallback((value: string) => {
+        setBatchAuthorInput(value);
+        setActiveAuthorSuggestionIndex(-1);
+    }, []);
+
+    const handleApplyAuthorSuggestion = useCallback((suggestion: AuthorSuggestion) => {
+        const parts = batchAuthorInput.split(",");
+        if (parts.length === 0) {
+            parts.push(suggestion.name);
+        } else {
+            parts[parts.length - 1] = suggestion.name;
+        }
+        const parsed = parseAuthorsInput(parts.join(","));
+        setBatchAuthorInput(parsed.length ? `${parsed.join(", ")}, ` : "");
+        setAuthorSuggestions([]);
+        setActiveAuthorSuggestionIndex(-1);
+    }, [batchAuthorInput]);
+
+    const handleAuthorInputKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>) => {
+        if (!showAuthorSuggestions || authorSuggestions.length === 0) return;
+        const lastIndex = authorSuggestions.length - 1;
+        if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setActiveAuthorSuggestionIndex((current) => {
+                if (current < 0) return 0;
+                return current >= lastIndex ? 0 : current + 1;
+            });
+            return;
+        }
+        if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setActiveAuthorSuggestionIndex((current) => {
+                if (current < 0) return lastIndex;
+                if (current === 0) return lastIndex;
+                return current - 1;
+            });
+            return;
+        }
+        if (event.key === "Enter") {
+            const pickedIndex = activeAuthorSuggestionIndex >= 0 ? activeAuthorSuggestionIndex : 0;
+            const picked = authorSuggestions[pickedIndex];
+            if (!picked) return;
+            event.preventDefault();
+            handleApplyAuthorSuggestion(picked);
+            return;
+        }
+        if (event.key === "Escape") {
+            event.preventDefault();
+            setAuthorSuggestions([]);
+            setActiveAuthorSuggestionIndex(-1);
+        }
+    }, [
+        activeAuthorSuggestionIndex,
+        authorSuggestions,
+        handleApplyAuthorSuggestion,
+        showAuthorSuggestions,
+    ]);
+
+    useEffect(() => {
+        if (!showAuthorSuggestions || activeAuthorSuggestionIndex < 0) return;
+        const list = authorSuggestionsListRef.current;
+        if (!list) return;
+        const activeEl = list.querySelector<HTMLButtonElement>(
+            `[data-suggestion-index='${activeAuthorSuggestionIndex}']`,
+        );
+        activeEl?.scrollIntoView({ block: "nearest" });
+    }, [showAuthorSuggestions, activeAuthorSuggestionIndex]);
+
+    useEffect(() => {
+        if (!showAuthorSuggestions || authorSuggestionsLoading || authorSuggestions.length === 0) return;
+        if (activeAuthorSuggestionIndex < 0 || activeAuthorSuggestionIndex >= authorSuggestions.length) {
+            setActiveAuthorSuggestionIndex(0);
+        }
+    }, [showAuthorSuggestions, authorSuggestionsLoading, authorSuggestions.length, activeAuthorSuggestionIndex]);
+
     const hasBatchDraft =
         batchCategories.length > 0 ||
         batchAuthorInput.trim().length > 0 ||
@@ -118,10 +263,7 @@ export function BatchOperationsBar({
         if (!batchClearPublishedYear && parsedBatchYear.invalid) return;
         if (!batchClearSeriesIndex && parsedBatchSeriesIndex.invalid) return;
 
-        const parsedAuthors = batchAuthorInput
-            .split(",")
-            .map((v) => v.trim())
-            .filter((v) => v.length > 0);
+        const parsedAuthors = parseAuthorsInput(batchAuthorInput);
 
         const payload: BatchMetadataUpdatePayload = {
             itemIds: Array.from(selectedBatchItemIds),
@@ -162,6 +304,9 @@ export function BatchOperationsBar({
             setBatchCategories([]);
             setBatchTagIds([]);
             setBatchAuthorInput("");
+            setAuthorSuggestions([]);
+            setAuthorsFocused(false);
+            setActiveAuthorSuggestionIndex(-1);
             setBatchLanguage("");
             setBatchSeries("");
             setBatchSeriesIndexInput("");
@@ -188,7 +333,12 @@ export function BatchOperationsBar({
     };
 
     return (
-        <div className="flex flex-col rounded-lg border border-app-border bg-app-surface/90 shadow-lg backdrop-blur-md overflow-hidden transition-all duration-200">
+        <div
+            className={cn(
+                "flex flex-col rounded-lg border border-app-border bg-app-surface/90 shadow-lg backdrop-blur-md transition-all duration-200",
+                showAuthorSuggestions ? "overflow-visible" : "overflow-hidden",
+            )}
+        >
 
             {/* Primary Bar */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 p-3 border-b border-transparent">
@@ -310,6 +460,9 @@ export function BatchOperationsBar({
                             setBatchCategories([]);
                             setBatchTagIds([]);
                             setBatchAuthorInput("");
+                            setAuthorSuggestions([]);
+                            setAuthorsFocused(false);
+                            setActiveAuthorSuggestionIndex(-1);
                             setBatchLanguage("");
                             setBatchSeries("");
                             setBatchSeriesIndexInput("");
@@ -370,12 +523,55 @@ export function BatchOperationsBar({
                             <Users size={12} /> {t("library.batchAuthors")}
                         </label>
                         <div className="flex gap-2">
-                            <input
-                                value={batchAuthorInput}
-                                onChange={(e) => setBatchAuthorInput(e.target.value)}
-                                className="flex-1 h-8 rounded-md border border-app-border-soft bg-app-surface px-2.5 text-[11px] placeholder:text-app-ink-muted/50 focus:border-app-accent focus:ring-1 focus:ring-app-accent outline-none"
-                                placeholder="Author One, Author Two"
-                            />
+                            <div className="relative flex-1">
+                                <input
+                                    value={batchAuthorInput}
+                                    onFocus={() => setAuthorsFocused(true)}
+                                    onBlur={() => {
+                                        window.setTimeout(() => {
+                                            setAuthorsFocused(false);
+                                        }, 120);
+                                    }}
+                                    onChange={(e) => handleAuthorInputChange(e.target.value)}
+                                    onKeyDown={handleAuthorInputKeyDown}
+                                    className="h-8 w-full rounded-md border border-app-border-soft bg-app-surface px-2.5 text-[11px] placeholder:text-app-ink-muted/50 focus:border-app-accent focus:ring-1 focus:ring-app-accent outline-none"
+                                    placeholder="Author One, Author Two"
+                                />
+                                {showAuthorSuggestions && (
+                                    <div
+                                        ref={authorSuggestionsListRef}
+                                        className="absolute z-20 mt-1 max-h-52 w-full overflow-y-auto rounded-md border border-[var(--app-border-soft)] bg-app-surface shadow-lg"
+                                    >
+                                        {authorSuggestionsLoading ? (
+                                            <div className="px-3 py-2 text-xs text-app-ink-muted">{t("common.loading")}</div>
+                                        ) : (
+                                            authorSuggestions.map((suggestion, suggestionIndex) => (
+                                                <button
+                                                    key={suggestion.id}
+                                                    type="button"
+                                                    data-suggestion-index={suggestionIndex}
+                                                    className={`flex w-full items-center justify-between border-l-2 px-3 py-2 text-left text-xs text-app-ink transition-colors ${
+                                                        suggestionIndex === activeAuthorSuggestionIndex
+                                                            ? "border-[var(--app-accent)] bg-[rgba(249,115,22,0.12)]"
+                                                            : "border-transparent hover:bg-app-surface-hover"
+                                                    }`}
+                                                    aria-selected={suggestionIndex === activeAuthorSuggestionIndex}
+                                                    onMouseDown={(event) => {
+                                                        event.preventDefault();
+                                                        handleApplyAuthorSuggestion(suggestion);
+                                                    }}
+                                                    onMouseEnter={() => setActiveAuthorSuggestionIndex(suggestionIndex)}
+                                                >
+                                                    <span className="truncate">{suggestion.name}</span>
+                                                    <span className="ml-3 shrink-0 text-[10px] text-app-ink-muted">
+                                                        {suggestion.bookCount}
+                                                    </span>
+                                                </button>
+                                            ))
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                             <select
                                 value={batchAuthorMode}
                                 onChange={(e) => setBatchAuthorMode(e.target.value as BatchAuthorMode)}

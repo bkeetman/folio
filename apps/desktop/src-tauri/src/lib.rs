@@ -1,3 +1,4 @@
+use crate::author_metadata::{fetch_merged_author_metadata, AuthorSourceSelection};
 use ab_glyph::{FontRef, PxScale};
 use chrono::Datelike;
 use image::codecs::png::PngEncoder;
@@ -29,6 +30,7 @@ pub mod db;
 pub mod models;
 pub mod parser;
 pub mod scanner;
+mod author_metadata;
 
 const MIGRATION_SQL: &str =
     include_str!("../../../../packages/core/drizzle/0000_nebulous_mysterio.sql");
@@ -100,12 +102,6 @@ struct AuthorProfile {
     metadata_source: Option<String>,
     metadata_source_id: Option<String>,
     metadata_updated_at: Option<i64>,
-}
-
-struct OpenLibraryAuthorMetadata {
-    source_id: String,
-    bio: Option<String>,
-    photo_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1253,23 +1249,37 @@ fn enrich_author_metadata_sync(
     };
 
     let now = chrono::Utc::now().timestamp_millis();
-    let metadata = fetch_openlibrary_author_metadata(&profile.name)
-        .or_else(|| fetch_openlibrary_author_metadata(&author_name));
+    let lookup_settings = read_metadata_lookup_settings(&conn);
+    let enabled_sources = enabled_metadata_source_ids(&lookup_settings);
+    let selection = AuthorSourceSelection {
+        open_library: enabled_sources.iter().any(|id| id == "open-library"),
+        wikidata: enabled_sources.iter().any(|id| id == "wikidata"),
+        wikipedia: enabled_sources.iter().any(|id| id == "wikipedia"),
+    }
+    .with_fallback();
+    let metadata = fetch_merged_author_metadata(&profile.name, selection).or_else(|| {
+        if profile.name.eq_ignore_ascii_case(author_name.trim()) {
+            None
+        } else {
+            fetch_merged_author_metadata(&author_name, selection)
+        }
+    });
 
     if let Some(metadata) = metadata {
         conn.execute(
             "UPDATE authors \
              SET bio = COALESCE(?1, bio), \
                  photo_url = COALESCE(?2, photo_url), \
-                 metadata_source = 'openlibrary', \
-                 metadata_source_id = ?3, \
-                 metadata_updated_at = ?4, \
-                 updated_at = ?4 \
-             WHERE id = ?5",
+                 metadata_source = ?3, \
+                 metadata_source_id = COALESCE(?4, metadata_source_id), \
+                 metadata_updated_at = ?5, \
+                 updated_at = ?5 \
+             WHERE id = ?6",
             params![
                 metadata.bio,
                 metadata.photo_url,
-                metadata.source_id,
+                metadata.metadata_source,
+                metadata.metadata_source_id,
                 now,
                 profile.id
             ],
@@ -1279,8 +1289,7 @@ fn enrich_author_metadata_sync(
         // Mark attempt timestamp so automatic fetch is not retried on every selection.
         conn.execute(
             "UPDATE authors \
-             SET metadata_source = 'openlibrary', \
-                 metadata_updated_at = ?1, \
+             SET metadata_updated_at = ?1, \
                  updated_at = ?1 \
              WHERE id = ?2",
             params![now, profile.id],
@@ -7949,6 +7958,20 @@ fn default_metadata_sources() -> Vec<MetadataSourceSetting> {
             endpoint: Some("https://itunes.apple.com".to_string()),
         },
         MetadataSourceSetting {
+            id: "wikidata".to_string(),
+            label: "Wikidata".to_string(),
+            enabled: true,
+            source_type: "builtin".to_string(),
+            endpoint: Some("https://www.wikidata.org/w/api.php".to_string()),
+        },
+        MetadataSourceSetting {
+            id: "wikipedia".to_string(),
+            label: "Wikipedia".to_string(),
+            enabled: true,
+            source_type: "builtin".to_string(),
+            endpoint: Some("https://en.wikipedia.org/api/rest_v1".to_string()),
+        },
+        MetadataSourceSetting {
             id: "isfdb".to_string(),
             label: "ISFDB".to_string(),
             enabled: false,
@@ -11080,129 +11103,6 @@ fn fetch_openlibrary_search(title: &str, author: Option<&str>) -> Vec<Enrichment
             }
         })
         .collect()
-}
-
-fn extract_openlibrary_author_bio(value: &serde_json::Value) -> Option<String> {
-    let bio = value.get("bio")?;
-    match bio {
-        serde_json::Value::String(text) => non_empty(text.to_string()),
-        serde_json::Value::Object(map) => map
-            .get("value")
-            .and_then(|entry| entry.as_str())
-            .map(|text| text.to_string())
-            .and_then(non_empty),
-        _ => None,
-    }
-}
-
-fn fetch_openlibrary_author_metadata(author_name: &str) -> Option<OpenLibraryAuthorMetadata> {
-    let cleaned = normalize_ws(author_name);
-    if cleaned.is_empty() {
-        return None;
-    }
-
-    let search_url = format!(
-        "https://openlibrary.org/search/authors.json?q={}&limit=6",
-        urlencoding::encode(&cleaned)
-    );
-    let search_data = fetch_json_with_retry(&search_url)?;
-    let docs = search_data
-        .get("docs")
-        .and_then(|value| value.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let target_key = normalize_author_key(&cleaned);
-    let mut best: Option<(&serde_json::Value, i32)> = None;
-
-    for doc in &docs {
-        let key = doc
-            .get("key")
-            .and_then(|value| value.as_str())
-            .map(|value| value.trim())
-            .unwrap_or("");
-        if key.is_empty() {
-            continue;
-        }
-        let doc_name = doc
-            .get("name")
-            .and_then(|value| value.as_str())
-            .map(|value| value.trim())
-            .unwrap_or("");
-        let doc_normalized = normalize_author_key(doc_name);
-        let score = if !target_key.is_empty() && !doc_normalized.is_empty() {
-            if doc_normalized == target_key {
-                100
-            } else if doc_normalized.starts_with(&(target_key.clone() + " ")) {
-                80
-            } else if doc_normalized.contains(&target_key) || target_key.contains(&doc_normalized) {
-                60
-            } else {
-                20
-            }
-        } else {
-            10
-        };
-        if best.map(|(_, current)| score > current).unwrap_or(true) {
-            best = Some((doc, score));
-        }
-    }
-
-    let (best_doc, _) = best?;
-    let source_id = best_doc
-        .get("key")
-        .and_then(|value| value.as_str())
-        .map(|value| value.trim().to_string())?;
-    let details_path = if source_id.starts_with("http://") || source_id.starts_with("https://") {
-        source_id.clone()
-    } else if source_id.starts_with("/authors/") {
-        if source_id.ends_with(".json") {
-            source_id.clone()
-        } else {
-            format!("{}.json", source_id)
-        }
-    } else if source_id.starts_with('/') {
-        if source_id.ends_with(".json") {
-            source_id.clone()
-        } else {
-            format!("{}.json", source_id)
-        }
-    } else if source_id.starts_with("OL") && source_id.ends_with('A') {
-        format!("/authors/{}.json", source_id)
-    } else if source_id.ends_with(".json") {
-        format!("/{}", source_id)
-    } else {
-        format!("/{}.json", source_id)
-    };
-    let details_url = if details_path.starts_with("http://") || details_path.starts_with("https://")
-    {
-        details_path
-    } else {
-        format!("https://openlibrary.org{}", details_path)
-    };
-    let details = fetch_json_with_retry(&details_url)?;
-
-    let photo_url = details
-        .get("photos")
-        .and_then(|value| value.as_array())
-        .and_then(|values| values.first())
-        .and_then(|entry| {
-            if let Some(id) = entry.as_i64() {
-                Some(format!("https://covers.openlibrary.org/a/id/{}-L.jpg", id))
-            } else {
-                entry
-                    .as_str()
-                    .map(|value| value.trim())
-                    .filter(|value| !value.is_empty())
-                    .map(|value| format!("https://covers.openlibrary.org/a/id/{}-L.jpg", value))
-            }
-        });
-
-    Some(OpenLibraryAuthorMetadata {
-        source_id,
-        bio: extract_openlibrary_author_bio(&details)
-            .or_else(|| extract_openlibrary_author_bio(best_doc)),
-        photo_url,
-    })
 }
 
 fn parse_search_query(query: &str) -> (String, Option<String>) {

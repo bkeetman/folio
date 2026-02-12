@@ -48,6 +48,10 @@ export function SettingsView({
         return t("settings.metadataSourceGoogleStrength");
       case "apple-books":
         return t("settings.metadataSourceAppleStrength");
+      case "wikidata":
+        return t("settings.metadataSourceWikidataStrength");
+      case "wikipedia":
+        return t("settings.metadataSourceWikipediaStrength");
       case "isfdb":
         return t("settings.metadataSourceIsfdbStrength");
       case "internet-archive":
