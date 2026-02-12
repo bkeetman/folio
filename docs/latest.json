@@ -1,18 +1,17 @@
 {
-  "version": "0.1.48",
-  "notes": "Release 0.1.48",
-  "pub_date": "2026-02-11T16:39:46.297Z",
+  "version": "0.1.49",
+  "notes": "Release 0.1.49",
+  "pub_date": "2026-02-12T15:51:26.732Z",
   "platforms": {
     "darwin-aarch64": {
-      "url": "https://github.com/bkeetman/folio/releases/download/v0.1.48/Folio_aarch64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTTnVFRUU5eldVYTI1bVBmQ1RNaXdwSENKVUNCOVdaR09KTHVmR1FQQUdTR0g4U20vV2ZHdkMraE40azZQZ0tFTjZsNnFBdHUvWTcycW12ekNMc2U3ZytQdCtNN0J5d0FRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcwODI3OTgwCWZpbGU6Rm9saW8uYXBwLnRhci5negpET2k1bzFjT0x0dTdCRFRnendKZng4U3Q3Zk9QTVRzb0l1aVVCUWJzRlRCWURrc1l0dGMveitOLzhneEdha2tXNHdoeEtnbW9yenZnS00zQ0hkRzJBdz09Cg=="
+      "url": "https://github.com/bkeetman/folio/releases/download/v0.1.49/Folio_aarch64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTTnVFRUU5eldVYTNVenNOdU94Z09iakl6TXFSb202UUsvR1dVd0NhUHJZZEtQVkNkUG1QQ0cvYTJ4OVJIeU14RlBGamJhUUtsWnFCM05MUk1XQ3plQmU5UkhUT01CRFF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcwOTExNDgwCWZpbGU6Rm9saW8uYXBwLnRhci5negpjb0xVS0NWQ0ZCWmZiNTFiaGpPSU5WeE5SeC8rUWs4TnRCRnF1V2V0blFHNDEwaEFKZVUxR2dxVmxDNlFJZk5EMlRvL0U1N09PS2FBMDd0YjBHQnNEQT09Cg=="
     }
   },
   "downloads": {
     "macos": {
-      "arm64": "https://github.com/bkeetman/folio/releases/download/v0.1.48/Folio_0.1.48_aarch64.dmg",
-      "x64": "https://github.com/bkeetman/folio/releases/download/v0.1.48/Folio_0.1.48_x64.dmg",
-      "dmg": "https://github.com/bkeetman/folio/releases/download/v0.1.48/Folio_0.1.48_aarch64.dmg"
+      "arm64": "https://github.com/bkeetman/folio/releases/download/v0.1.49/Folio_0.1.49_aarch64.dmg",
+      "dmg": "https://github.com/bkeetman/folio/releases/download/v0.1.49/Folio_0.1.49_aarch64.dmg"
     }
   }
 }
