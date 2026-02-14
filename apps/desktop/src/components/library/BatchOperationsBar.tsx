@@ -179,6 +179,55 @@ export function BatchOperationsBar({
         batchTagIds.length,
     ]);
 
+    const draftSummaryItems = useMemo(() => {
+        const items: string[] = [];
+        if (batchCategories.length > 0) {
+            items.push(`${t("library.batchCategories")} (${batchCategories.length})`);
+        }
+        if (batchTagIds.length > 0) {
+            const tagModeLabel = batchTagMode === "append"
+                ? t("library.batchTagModeAppend")
+                : batchTagMode === "replace"
+                    ? t("library.batchTagModeReplace")
+                    : t("library.batchTagModeRemove");
+            items.push(`${t("library.batchTags")} (${tagModeLabel})`);
+        }
+        if (parsedBatchAuthors.length > 0) {
+            const authorModeLabel = batchAuthorMode === "append" ? t("library.append") : t("library.replace");
+            items.push(`${t("library.batchAuthors")} (${authorModeLabel})`);
+        }
+        if (batchClearLanguage) {
+            items.push(`${t("library.batchLanguage")} (${t("library.batchClearLanguage")})`);
+        } else if (batchLanguage.trim().length > 0) {
+            const languageLabel = LANGUAGE_OPTIONS.find((option) => option.code === batchLanguage)?.name ?? batchLanguage;
+            items.push(`${t("library.batchLanguage")} (${languageLabel})`);
+        }
+        if (batchClearPublishedYear) {
+            items.push(`${t("library.batchPublicationYear")} (${t("library.batchClearPublicationYear")})`);
+        } else if (parsedBatchYear.value !== null) {
+            items.push(`${t("library.batchPublicationYear")} (${parsedBatchYear.value})`);
+        }
+        if (batchClearSeries || batchSeries.trim().length > 0 || batchClearSeriesIndex || parsedBatchSeriesIndex.value !== null) {
+            items.push(t("library.seriesPrefix"));
+        }
+        return items;
+    }, [
+        batchCategories.length,
+        batchTagIds.length,
+        batchTagMode,
+        parsedBatchAuthors.length,
+        batchAuthorMode,
+        batchClearLanguage,
+        batchLanguage,
+        batchClearPublishedYear,
+        parsedBatchYear.value,
+        batchClearSeries,
+        batchSeries,
+        batchClearSeriesIndex,
+        parsedBatchSeriesIndex.value,
+        t,
+    ]);
+
     const hasBatchDraft = draftFieldCount > 0;
     const hasFilteredBooks = filteredBookIds.length > 0;
     const allFilteredSelected = useMemo(() => {
@@ -362,7 +411,7 @@ export function BatchOperationsBar({
                                 : "bg-transparent border-transparent text-app-ink-muted hover:bg-app-surface-hover hover:text-app-ink"
                         )}
                     >
-                        {t("library.moreOptions")}
+                        {showAdvanced ? t("library.batchAdvancedHide") : t("library.batchAdvancedShow")}
                         <ChevronDown size={12} className={cn("transition-transform", showAdvanced && "rotate-180")} />
                     </button>
                 </div>
@@ -377,6 +426,18 @@ export function BatchOperationsBar({
                             })}
                         </span>
                     )}
+                    {hasBatchDraft && draftSummaryItems.length > 0 && (
+                        <div className="flex max-w-full flex-wrap justify-end gap-1">
+                            {draftSummaryItems.map((item) => (
+                                <span
+                                    key={item}
+                                    className="rounded border border-app-border-soft bg-app-bg px-1.5 py-0.5 text-[10px] text-app-ink-muted"
+                                >
+                                    {item}
+                                </span>
+                            ))}
+                        </div>
+                    )}
                     <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
                         <Button
                             variant="danger"
@@ -385,6 +446,14 @@ export function BatchOperationsBar({
                             onClick={() => void handleRemoveSelected()}
                         >
                             {batchRemoving ? "Removing..." : t("changes.removeSelected")}
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={!hasBatchDraft || batchApplying || batchRemoving}
+                            onClick={resetBatchDraft}
+                        >
+                            {t("library.batchResetFields")}
                         </Button>
                         <Button
                             variant="ghost"
@@ -459,7 +528,7 @@ export function BatchOperationsBar({
                                     onChange={(e) => handleAuthorInputChange(e.target.value)}
                                     onKeyDown={handleAuthorInputKeyDown}
                                     className="h-8 w-full rounded-md border border-app-border-soft bg-app-surface px-2.5 text-[11px] placeholder:text-app-ink-muted/50 focus:border-app-accent focus:ring-1 focus:ring-app-accent outline-none"
-                                    placeholder="Author One, Author Two"
+                                    placeholder={t("library.batchAuthorsPlaceholder")}
                                 />
                                 {showAuthorSuggestions && (
                                     <div
@@ -522,7 +591,7 @@ export function BatchOperationsBar({
                                         "w-full h-8 rounded-md border border-app-border-soft bg-app-surface px-2.5 text-[11px] placeholder:text-app-ink-muted/50 focus:border-app-accent focus:ring-1 focus:ring-app-accent outline-none",
                                         batchClearPublishedYear && "opacity-50 pointer-events-none"
                                     )}
-                                    placeholder="Year (e.g. 2024)"
+                                    placeholder={t("library.batchPublicationYearPlaceholder")}
                                 />
                                 <div className="absolute right-1 top-1/2 -translate-y-1/2">
                                     <label className="flex items-center gap-1 cursor-pointer" title={t("library.clearYear")}>
