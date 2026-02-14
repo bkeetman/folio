@@ -1677,6 +1677,94 @@ fn get_cover_blob(app: tauri::AppHandle, item_id: String) -> Result<Option<Cover
     Ok(None)
 }
 
+#[tauri::command]
+async fn get_author_photo_blob(
+    app: tauri::AppHandle,
+    photo_url: String,
+    allow_network: Option<bool>,
+) -> Result<Option<CoverBlob>, String> {
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        get_author_photo_blob_sync(&app_handle, &photo_url, allow_network.unwrap_or(true))
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+fn get_author_photo_blob_sync(
+    app: &tauri::AppHandle,
+    photo_url: &str,
+    allow_network: bool,
+) -> Result<Option<CoverBlob>, String> {
+    let trimmed_url = photo_url.trim();
+    if trimmed_url.is_empty() {
+        return Ok(None);
+    }
+
+    if !trimmed_url.starts_with("http://") && !trimmed_url.starts_with("https://") {
+        return cover_blob_from_path(trimmed_url).or(Ok(None));
+    }
+
+    let app_dir = app.path().app_data_dir().map_err(|err| err.to_string())?;
+    let cache_dir = app_dir.join("author-photos");
+    std::fs::create_dir_all(&cache_dir).map_err(|err| err.to_string())?;
+
+    let mut hasher = Sha256::new();
+    hasher.update(trimmed_url.as_bytes());
+    let digest = hasher.finalize();
+    let hash: String = digest
+        .iter()
+        .map(|byte| format!("{:02x}", byte))
+        .collect();
+
+    let known_extensions = ["jpg", "png", "webp", "gif"];
+    for extension in known_extensions {
+        let cached_path = cache_dir.join(format!("author_{}.{}", hash, extension));
+        if !cached_path.exists() {
+            continue;
+        }
+        let cached_path_str = cached_path.to_string_lossy().to_string();
+        if let Some(blob) = cover_blob_from_path(&cached_path_str).ok().flatten() {
+            return Ok(Some(blob));
+        }
+        let _ = std::fs::remove_file(&cached_path);
+    }
+
+    if !allow_network {
+        return Ok(None);
+    }
+
+    let client = match build_cover_http_client() {
+        Ok(value) => value,
+        Err(err) => {
+            log::warn!("author photo fetch client init failed: {}", err);
+            return Ok(None);
+        }
+    };
+    let Some((bytes, extension)) = download_cover_bytes_with_retry(&client, trimmed_url)? else {
+        return Ok(None);
+    };
+
+    let cached_path = cache_dir.join(format!("author_{}.{}", hash, extension));
+    std::fs::write(&cached_path, &bytes).map_err(|err| err.to_string())?;
+
+    for stale_extension in known_extensions {
+        if stale_extension == extension {
+            continue;
+        }
+        let stale_path = cache_dir.join(format!("author_{}.{}", hash, stale_extension));
+        if stale_path.exists() {
+            let _ = std::fs::remove_file(stale_path);
+        }
+    }
+
+    let mime = detect_image_mime(&bytes).unwrap_or(mime_from_extension(&extension));
+    Ok(Some(CoverBlob {
+        mime: mime.to_string(),
+        bytes,
+    }))
+}
+
 fn mime_from_extension(extension: &str) -> &'static str {
     match extension.to_lowercase().as_str() {
         "png" => "image/png",
@@ -13014,6 +13102,7 @@ pub fn run() {
             add_tag_to_item,
             remove_tag_from_item,
             get_cover_blob,
+            get_author_photo_blob,
             get_pending_cover_preview,
             get_duplicate_groups,
             get_title_duplicate_groups,

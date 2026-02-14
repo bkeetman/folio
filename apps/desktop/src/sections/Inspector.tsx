@@ -3,6 +3,7 @@ import { BookOpen, FileText, FolderOpen, Globe, HardDrive, Loader2, PencilLine, 
 import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AuthorPhotoImage } from "../components/AuthorPhotoImage";
 import { Badge, Button, Separator } from "../components/ui";
 import { emitAuthorProfileUpdated } from "../lib/authorProfileEvents";
 import { getLanguageFlag, getLanguageName, isKnownLanguageCode } from "../lib/languageFlags";
@@ -543,11 +544,14 @@ export function Inspector({
                           onClick={() => handleAuthorClick(author)}
                         >
                           <span className="flex h-9 w-9 flex-none items-center justify-center overflow-hidden rounded-full border border-[var(--app-border-soft)] bg-app-bg">
-                            {profile?.photoUrl ? (
-                              <img src={profile.photoUrl} alt={author} className="h-full w-full object-cover" />
-                            ) : (
-                              <UserRound size={16} className="text-[var(--app-ink-muted)]" />
-                            )}
+                            <AuthorPhotoImage
+                              photoUrl={profile?.photoUrl}
+                              retryKey={profile?.metadataUpdatedAt}
+                              allowNetwork={false}
+                              alt={author}
+                              className="h-full w-full object-cover"
+                              fallback={<UserRound size={16} className="text-[var(--app-ink-muted)]" />}
+                            />
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="block break-words text-sm leading-snug text-[var(--app-accent-strong)]">
@@ -802,17 +806,23 @@ export function Inspector({
                     : "relative h-32 w-24 flex-none overflow-hidden rounded-md border border-[var(--app-border-muted)] bg-app-bg"
                 }
               >
-                {authorProfile?.photoUrl ? (
-                  <img
-                    className="h-full w-full object-cover"
-                    src={authorProfile.photoUrl}
-                    alt={authorProfile.name}
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-[var(--app-ink-muted)]">
-                    <UserRound size={22} />
-                  </div>
-                )}
+                <AuthorPhotoImage
+                  photoUrl={authorProfile?.photoUrl}
+                  retryKey={authorProfile?.metadataUpdatedAt}
+                  allowNetwork
+                  alt={authorProfile?.name ?? selectedAuthorName}
+                  className="h-full w-full object-cover"
+                  loadingFallback={
+                    <div className="flex h-full w-full items-center justify-center text-[var(--app-ink-muted)]">
+                      <Loader2 size={14} className="animate-spin" />
+                    </div>
+                  }
+                  fallback={
+                    <div className="flex h-full w-full items-center justify-center text-[var(--app-ink-muted)]">
+                      <UserRound size={22} />
+                    </div>
+                  }
+                />
                 {authorMetadataLoading ? (
                   <div className="absolute inset-0 flex items-center justify-center bg-app-bg/45">
                     <Loader2 size={14} className="animate-spin text-[var(--app-ink-muted)]" />

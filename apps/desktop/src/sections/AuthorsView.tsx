@@ -3,6 +3,7 @@ import { BookOpen, ChevronDown, ChevronUp, Grip, List, Loader2, RefreshCcw, Sear
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
+import { AuthorPhotoImage } from "../components/AuthorPhotoImage";
 import {
   AUTHOR_PROFILE_UPDATED_EVENT,
   emitAuthorProfileUpdated,
@@ -445,13 +446,18 @@ export function AuthorsView({
                     ) : null}
                     <div className="flex items-start gap-3">
                       <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-[var(--app-border-soft)] bg-app-bg/60">
-                        {profile?.photoUrl ? (
-                          <img className="h-full w-full object-cover" src={profile.photoUrl} alt={author.name} />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center text-[var(--app-ink-muted)]">
-                            <UserRound size={18} />
-                          </div>
-                        )}
+                        <AuthorPhotoImage
+                          photoUrl={profile?.photoUrl}
+                          retryKey={profile?.metadataUpdatedAt}
+                          allowNetwork={false}
+                          alt={author.name}
+                          className="h-full w-full object-cover"
+                          fallback={
+                            <div className="flex h-full w-full items-center justify-center text-[var(--app-ink-muted)]">
+                              <UserRound size={18} />
+                            </div>
+                          }
+                        />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-semibold text-app-ink">{author.name}</div>
@@ -546,13 +552,18 @@ export function AuthorsView({
                             onClick={() => handleAuthorSelect(author.name)}
                           >
                             <div className="h-6 w-6 shrink-0 overflow-hidden rounded-md border border-[var(--app-border-soft)] bg-app-bg/60">
-                              {profile?.photoUrl ? (
-                                <img className="h-full w-full object-cover" src={profile.photoUrl} alt={author.name} />
-                              ) : (
-                                <div className="flex h-full w-full items-center justify-center text-[var(--app-ink-muted)]">
-                                  <UserRound size={12} />
-                                </div>
-                              )}
+                              <AuthorPhotoImage
+                                photoUrl={profile?.photoUrl}
+                                retryKey={profile?.metadataUpdatedAt}
+                                allowNetwork={false}
+                                alt={author.name}
+                                className="h-full w-full object-cover"
+                                fallback={
+                                  <div className="flex h-full w-full items-center justify-center text-[var(--app-ink-muted)]">
+                                    <UserRound size={12} />
+                                  </div>
+                                }
+                              />
                             </div>
                             <span className="min-w-0 flex-1 truncate font-medium">{author.name}</span>
                             <span className="shrink-0 text-xs text-[var(--app-ink-muted)]">{author.bookCount}</span>
