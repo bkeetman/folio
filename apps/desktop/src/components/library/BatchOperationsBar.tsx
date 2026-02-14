@@ -90,6 +90,7 @@ export function BatchOperationsBar({
         () => tags.filter((t) => !batchTagIds.includes(t.id)),
         [batchTagIds, tags]
     );
+    const parsedBatchAuthors = useMemo(() => parseAuthorsInput(batchAuthorInput), [batchAuthorInput]);
 
     const parsedBatchYear = useMemo(() => {
         const trimmed = batchYearInput.trim();
@@ -153,34 +154,64 @@ export function BatchOperationsBar({
         handleAuthorSuggestionsKeyDown(event, handleApplyAuthorSuggestion);
     }, [handleApplyAuthorSuggestion, handleAuthorSuggestionsKeyDown]);
 
-    const hasBatchDraft =
-        batchCategories.length > 0 ||
-        batchAuthorInput.trim().length > 0 ||
-        batchClearLanguage ||
-        batchLanguage.trim().length > 0 ||
-        batchClearSeries ||
-        batchSeries.trim().length > 0 ||
-        batchClearSeriesIndex ||
-        parsedBatchSeriesIndex.value !== null ||
-        batchClearPublishedYear ||
-        parsedBatchYear.value !== null ||
-        batchClearTags ||
-        batchTagIds.length > 0;
+    const draftFieldCount = useMemo(() => {
+        let count = 0;
+        if (batchCategories.length > 0) count += 1;
+        if (parsedBatchAuthors.length > 0) count += 1;
+        if (batchClearLanguage || batchLanguage.trim().length > 0) count += 1;
+        if (batchClearSeries || batchSeries.trim().length > 0) count += 1;
+        if (batchClearSeriesIndex || parsedBatchSeriesIndex.value !== null) count += 1;
+        if (batchClearPublishedYear || parsedBatchYear.value !== null) count += 1;
+        if (batchClearTags || batchTagIds.length > 0) count += 1;
+        return count;
+    }, [
+        batchCategories.length,
+        parsedBatchAuthors.length,
+        batchClearLanguage,
+        batchLanguage,
+        batchClearSeries,
+        batchSeries,
+        batchClearSeriesIndex,
+        parsedBatchSeriesIndex.value,
+        batchClearPublishedYear,
+        parsedBatchYear.value,
+        batchClearTags,
+        batchTagIds.length,
+    ]);
+
+    const hasBatchDraft = draftFieldCount > 0;
+    const hasFilteredBooks = filteredBookIds.length > 0;
+    const allFilteredSelected = useMemo(() => {
+        if (!hasFilteredBooks || selectedBatchCount !== filteredBookIds.length) return false;
+        return filteredBookIds.every((id) => selectedBatchItemIds.has(id));
+    }, [filteredBookIds, hasFilteredBooks, selectedBatchCount, selectedBatchItemIds]);
+
+    const resetBatchDraft = useCallback(() => {
+        setBatchCategories([]);
+        setBatchTagIds([]);
+        setBatchAuthorInput("");
+        clearAuthorSuggestions();
+        setAuthorsFocused(false);
+        setBatchLanguage("");
+        setBatchSeries("");
+        setBatchSeriesIndexInput("");
+        setBatchYearInput("");
+        setBatchTagMode("append");
+        setShowAdvanced(false);
+    }, [clearAuthorSuggestions]);
 
     const handleApplyBatch = async () => {
         if (batchApplying || batchRemoving || selectedBatchCount === 0) return;
         if (!batchClearPublishedYear && parsedBatchYear.invalid) return;
         if (!batchClearSeriesIndex && parsedBatchSeriesIndex.invalid) return;
 
-        const parsedAuthors = parseAuthorsInput(batchAuthorInput);
-
         const payload: BatchMetadataUpdatePayload = {
             itemIds: Array.from(selectedBatchItemIds),
         };
 
         if (batchCategories.length > 0) payload.genres = batchCategories;
-        if (parsedAuthors.length > 0) {
-            payload.authors = parsedAuthors;
+        if (parsedBatchAuthors.length > 0) {
+            payload.authors = parsedBatchAuthors;
             payload.authorMode = batchAuthorMode;
         }
         if (batchClearLanguage) payload.clearLanguage = true;
@@ -209,18 +240,7 @@ export function BatchOperationsBar({
         setBatchApplying(true);
         try {
             await onApplyBatchMetadata(payload);
-            // Reset after success
-            setBatchCategories([]);
-            setBatchTagIds([]);
-            setBatchAuthorInput("");
-            clearAuthorSuggestions();
-            setAuthorsFocused(false);
-            setBatchLanguage("");
-            setBatchSeries("");
-            setBatchSeriesIndexInput("");
-            setBatchYearInput("");
-            setBatchTagMode("append");
-            setShowAdvanced(false);
+            resetBatchDraft();
             onClose(); // Optional: close panel on success
         } finally {
             setBatchApplying(false);
@@ -252,26 +272,28 @@ export function BatchOperationsBar({
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 p-3 border-b border-transparent">
 
                 {/* Selection Status */}
-                <div className="flex items-center gap-2 min-w-[140px]">
+                <div className="flex items-center gap-2 min-w-[220px]">
                     <div className="flex h-6 w-6 items-center justify-center rounded-full bg-app-accent/10 text-app-accent-strong">
                         <Check size={14} strokeWidth={3} />
                     </div>
-                    <div className="flex flex-col">
+                    <div className="flex flex-col gap-1">
                         <span className="text-[11px] font-bold text-app-ink leading-tight">
-                            {selectedBatchCount} {t("library.selected")}
+                            {t("library.batchSelectedCount", { count: selectedBatchCount })}
                         </span>
-                        <div className="flex gap-2">
+                        <div className="flex items-center gap-1.5">
                             <button
                                 onClick={() => onClearBatchSelection()}
-                                className="text-[10px] text-app-ink-muted hover:text-app-ink hover:underline"
+                                disabled={selectedBatchCount === 0 || batchApplying || batchRemoving}
+                                className="h-6 rounded-md px-2 text-[10px] text-app-ink-muted transition-colors hover:bg-app-surface-hover hover:text-app-ink disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                                {t("library.clear")}
+                                {t("library.batchClearSelection")}
                             </button>
                             <button
                                 onClick={() => onSetBatchSelection(filteredBookIds)}
-                                className="text-[10px] text-app-ink-muted hover:text-app-ink hover:underline"
+                                disabled={!hasFilteredBooks || allFilteredSelected || batchApplying || batchRemoving}
+                                className="h-6 rounded-md border border-app-border-soft bg-app-bg px-2 text-[10px] font-medium text-app-ink transition-colors hover:bg-app-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                                {t("library.selectAll")}
+                                {t("library.batchSelectFiltered", { count: filteredBookIds.length })}
                             </button>
                         </div>
                     </div>
@@ -346,54 +368,49 @@ export function BatchOperationsBar({
                 </div>
 
                 {/* Action Buttons */}
-                <div className="flex items-center gap-2 ml-auto">
+                <div className="ml-auto flex w-full flex-col gap-1 sm:w-auto sm:items-end">
                     {hasBatchDraft && (
-                        <span className="text-[10px] text-app-ink-muted hidden sm:inline-block mr-1">
-                            {t("library.unsavedChanges")}
+                        <span className="text-[11px] text-app-ink-muted sm:text-[10px]">
+                            {t("library.batchPreview", {
+                                count: selectedBatchCount,
+                                changes: draftFieldCount,
+                            })}
                         </span>
                     )}
-                    <Button
-                        variant="danger"
-                        size="sm"
-                        disabled={selectedBatchCount === 0 || batchApplying || batchRemoving}
-                        onClick={() => void handleRemoveSelected()}
-                    >
-                        {batchRemoving ? "Removing..." : t("changes.removeSelected")}
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={batchApplying || batchRemoving}
-                        onClick={() => {
-                            setBatchCategories([]);
-                            setBatchTagIds([]);
-                            setBatchAuthorInput("");
-                            clearAuthorSuggestions();
-                            setAuthorsFocused(false);
-                            setBatchLanguage("");
-                            setBatchSeries("");
-                            setBatchSeriesIndexInput("");
-                            setBatchYearInput("");
-                            setBatchTagMode("append");
-                            setShowAdvanced(false);
-                            onClose();
-                        }}
-                    >
-                        {t("library.cancel")}
-                    </Button>
-                    <Button
-                        variant="primary"
-                        size="sm"
-                        disabled={
-                            !hasBatchDraft ||
-                            selectedBatchCount === 0 ||
-                            batchApplying ||
-                            batchRemoving
-                        }
-                        onClick={() => void handleApplyBatch()}
-                    >
-                        {batchApplying ? t("library.saving") : t("library.apply")}
-                    </Button>
+                    <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
+                        <Button
+                            variant="danger"
+                            size="sm"
+                            disabled={selectedBatchCount === 0 || batchApplying || batchRemoving}
+                            onClick={() => void handleRemoveSelected()}
+                        >
+                            {batchRemoving ? "Removing..." : t("changes.removeSelected")}
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={batchApplying || batchRemoving}
+                            onClick={() => {
+                                resetBatchDraft();
+                                onClose();
+                            }}
+                        >
+                            {t("library.cancel")}
+                        </Button>
+                        <Button
+                            variant="primary"
+                            size="sm"
+                            disabled={
+                                !hasBatchDraft ||
+                                selectedBatchCount === 0 ||
+                                batchApplying ||
+                                batchRemoving
+                            }
+                            onClick={() => void handleApplyBatch()}
+                        >
+                            {batchApplying ? t("library.saving") : t("library.apply")}
+                        </Button>
+                    </div>
                 </div>
             </div>
 
