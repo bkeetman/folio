@@ -43,6 +43,8 @@ pnpm folio books missing --limit 25 --json
 pnpm folio metadata suggest <book-id> --json
 ```
 
+Metadata suggestions include `coverUrl` and `sourceUrl` when the catalogue provider supplies them. Suggestions, including cover candidates, are read-only and are never applied automatically.
+
 Queue a metadata proposal without overwriting populated fields:
 
 ```bash

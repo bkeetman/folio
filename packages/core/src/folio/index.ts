@@ -81,6 +81,7 @@ export type MetadataSuggestion = {
   changes: MetadataChanges;
   source: string;
   confidence: number;
+  coverUrl?: string;
   sourceUrl?: string;
 };
 
@@ -144,6 +145,7 @@ export function createFolioLibrary(
         changes,
         source: candidate.source,
         confidence: candidate.confidence,
+        ...(candidate.coverUrl ? { coverUrl: candidate.coverUrl } : {}),
         ...(candidate.sourceUrl ? { sourceUrl: candidate.sourceUrl } : {}),
       };
     });

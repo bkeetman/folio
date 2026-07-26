@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { createDb, type FolioDb } from "../db";
+import type { EnrichedCandidate } from "../enrichment";
 import { createFolioLibrary } from "./index";
 
 const fixedNow = 1_700_000_000_000;
@@ -224,11 +225,79 @@ test("returns enrichment suggestions without applying them", async () => {
   assert.equal(folio.getBook("book-dune")?.publishedYear, null);
 });
 
+test("returns cover URLs from enrichment suggestions without applying them", async () => {
+  using fixture = createFixture();
+  fixture.seedBook({ id: "book-dune", title: "Dune", authors: ["Frank Herbert"] });
+  const query = "title:Dune|author:Frank Herbert";
+  fixture.seedEnrichmentResult({
+    itemId: "book-dune",
+    query,
+    candidate: {
+      title: "Dune",
+      authors: ["Frank Herbert"],
+      source: "openlibrary",
+      confidence: 0.6,
+      raw: {},
+    },
+  });
+  fixture.seedEnrichmentResult({
+    itemId: "book-dune",
+    query,
+    candidate: {
+      title: "Dune",
+      authors: ["Frank Herbert"],
+      source: "googlebooks",
+      confidence: 0.7,
+      raw: {},
+    },
+  });
+  fixture.seedEnrichmentResult({
+    itemId: "book-dune",
+    query,
+    candidate: {
+      title: "Dune",
+      authors: ["Frank Herbert"],
+      coverUrl: "https://example.com/dune-cover.jpg",
+      sourceUrl: "https://example.com/dune",
+      source: "applebooks",
+      confidence: 0.9,
+      raw: {},
+    },
+  });
+
+  const suggestions = await createFolioLibrary(fixture.db).suggestMetadata("book-dune");
+
+  assert.deepEqual(
+    suggestions.find(({ source }) => source === "applebooks"),
+    {
+      itemId: "book-dune",
+      changes: {
+        title: "Dune",
+        authors: ["Frank Herbert"],
+      },
+      source: "applebooks",
+      confidence: 0.9,
+      coverUrl: "https://example.com/dune-cover.jpg",
+      sourceUrl: "https://example.com/dune",
+    },
+  );
+  const coverCount = fixture.db.$client
+    .prepare("SELECT count(*) AS count FROM covers")
+    .get() as { count: number };
+  assert.equal(coverCount.count, 0);
+});
+
 type SeedBook = {
   id: string;
   title?: string;
   authors?: string[];
   isbn?: string;
+};
+
+type SeedEnrichmentResult = {
+  itemId: string;
+  query: string;
+  candidate: EnrichedCandidate;
 };
 
 function createFixture() {
@@ -314,6 +383,32 @@ function createFixture() {
       applied_at INTEGER,
       error TEXT
     );
+    CREATE TABLE covers (
+      id TEXT PRIMARY KEY NOT NULL,
+      item_id TEXT NOT NULL REFERENCES items(id),
+      source TEXT NOT NULL,
+      url TEXT,
+      local_path TEXT,
+      width INTEGER,
+      height INTEGER,
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE enrichment_sources (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      rate_limit_per_min INTEGER,
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE enrichment_results (
+      id TEXT PRIMARY KEY NOT NULL,
+      item_id TEXT NOT NULL REFERENCES items(id),
+      source_id TEXT NOT NULL REFERENCES enrichment_sources(id),
+      query_type TEXT NOT NULL,
+      query TEXT NOT NULL,
+      response_json TEXT NOT NULL,
+      confidence REAL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
   `);
 
   const seedBook = ({ id, title, authors = [], isbn }: SeedBook) => {
@@ -339,12 +434,47 @@ function createFixture() {
     }
   };
 
+  const seedEnrichmentResult = ({
+    itemId,
+    query,
+    candidate,
+  }: SeedEnrichmentResult) => {
+    const { source } = candidate;
+    const sourceId = `source-${source}`;
+    db.$client
+      .prepare(
+        "INSERT OR IGNORE INTO enrichment_sources (id, name, created_at) VALUES (?, ?, ?)",
+      )
+      .run(sourceId, source, fixedNow);
+    db.$client
+      .prepare(
+        `INSERT INTO enrichment_results
+           (id, item_id, source_id, query_type, query, response_json, confidence, created_at)
+         VALUES (?, ?, ?, 'title_author', ?, ?, ?, ?)`,
+      )
+      .run(
+        `result-${source}-${itemId}`,
+        itemId,
+        sourceId,
+        query,
+        JSON.stringify(candidate),
+        candidate.confidence,
+        Date.now(),
+      );
+  };
+
   return {
     db,
     seedBook,
+    seedEnrichmentResult,
     [Symbol.dispose]() {
       db.$client.close();
       rmSync(directory, { force: true, recursive: true });
     },
-  } satisfies { db: FolioDb; seedBook: (book: SeedBook) => void; [Symbol.dispose](): void };
+  } satisfies {
+    db: FolioDb;
+    seedBook: (book: SeedBook) => void;
+    seedEnrichmentResult: (result: SeedEnrichmentResult) => void;
+    [Symbol.dispose](): void;
+  };
 }
