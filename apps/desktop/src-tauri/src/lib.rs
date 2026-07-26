@@ -27,8 +27,9 @@ static METADATA_DEBUG_ENABLED: OnceLock<bool> = OnceLock::new();
 const MAX_METADATA_CANDIDATES: usize = 12;
 const FOLIO_METADATA_CHANGE_TYPE: &str = "folio_metadata";
 
-pub mod parser;
 mod author_metadata;
+mod folio_metadata_changes;
+pub mod parser;
 
 const MIGRATION_SQL: &str =
     include_str!("../../../../packages/core/drizzle/0000_nebulous_mysterio.sql");
@@ -2089,12 +2090,12 @@ fn get_pending_changes(
     .prepare(
       "SELECT id, file_id, type, from_path, to_path, changes_json, status, created_at, applied_at, error \
        FROM pending_changes \
-       WHERE status = ?1 AND type != ?2 \
+       WHERE status = ?1 \
        ORDER BY created_at DESC",
     )
     .map_err(|err| err.to_string())?;
     let rows = stmt
-        .query_map(params![status, FOLIO_METADATA_CHANGE_TYPE], |row| {
+        .query_map(params![status], |row| {
             Ok(PendingChange {
                 id: row.get(0)?,
                 file_id: row.get(1)?,
@@ -2111,7 +2112,14 @@ fn get_pending_changes(
         .map_err(|err| err.to_string())?;
     let mut changes = Vec::new();
     for row in rows {
-        changes.push(row.map_err(|err| err.to_string())?);
+        let mut change = row.map_err(|err| err.to_string())?;
+        let (change_type, changes_json) = folio_metadata_changes::desktop_representation(
+            &change.change_type,
+            change.changes_json.take(),
+        )?;
+        change.change_type = change_type;
+        change.changes_json = changes_json;
+        changes.push(change);
     }
     Ok(changes)
 }
@@ -2194,12 +2202,10 @@ fn reset_failed_pending_changes(conn: &Connection, ids: &[String]) -> Result<Vec
     let mut reset_ids = Vec::new();
     if ids.is_empty() {
         let mut stmt = conn
-            .prepare("SELECT id FROM pending_changes WHERE status = 'error' AND type != ?1")
+            .prepare("SELECT id FROM pending_changes WHERE status = 'error'")
             .map_err(|err| err.to_string())?;
         let rows = stmt
-            .query_map(params![FOLIO_METADATA_CHANGE_TYPE], |row| {
-                row.get::<_, String>(0)
-            })
+            .query_map([], |row| row.get::<_, String>(0))
             .map_err(|err| err.to_string())?;
         for row in rows {
             reset_ids.push(row.map_err(|err| err.to_string())?);
@@ -2213,15 +2219,15 @@ fn reset_failed_pending_changes(conn: &Connection, ids: &[String]) -> Result<Vec
         let affected = conn
             .execute(
                 "UPDATE pending_changes SET status = 'pending', error = NULL \
-                 WHERE id = ?1 AND status = 'error' AND type != ?2",
-                params![id, FOLIO_METADATA_CHANGE_TYPE],
+                 WHERE id = ?1 AND status = 'error'",
+                params![id],
             )
             .map_err(|err| err.to_string())?;
         let already_pending = if affected == 0 {
             conn.query_row(
                 "SELECT 1 FROM pending_changes \
-                 WHERE id = ?1 AND status = 'pending' AND type != ?2 LIMIT 1",
-                params![id, FOLIO_METADATA_CHANGE_TYPE],
+                 WHERE id = ?1 AND status = 'pending' LIMIT 1",
+                params![id],
                 |_| Ok(()),
             )
             .optional()
@@ -2272,8 +2278,8 @@ fn remove_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<i64
         // Remove all pending changes
         removed = conn
             .execute(
-                "DELETE FROM pending_changes WHERE status = 'pending' AND type != ?1",
-                params![FOLIO_METADATA_CHANGE_TYPE],
+                "DELETE FROM pending_changes WHERE status = 'pending'",
+                [],
             )
             .map_err(|err| err.to_string())? as i64;
     } else {
@@ -2281,8 +2287,8 @@ fn remove_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<i64
         for id in &ids {
             let result = conn
                 .execute(
-                    "DELETE FROM pending_changes WHERE id = ?1 AND status = 'pending' AND type != ?2",
-                    params![id, FOLIO_METADATA_CHANGE_TYPE],
+                    "DELETE FROM pending_changes WHERE id = ?1 AND status = 'pending'",
+                    params![id],
                 )
                 .map_err(|err| err.to_string())?;
             removed += result as i64;
@@ -2391,11 +2397,11 @@ fn apply_pending_changes_sync(app: &tauri::AppHandle, ids: Vec<String>) -> Resul
         let mut stmt = conn
       .prepare(
         "SELECT id, file_id, type, from_path, to_path, changes_json, status, created_at, applied_at, error \
-         FROM pending_changes WHERE status = 'pending' AND type != ?1 ORDER BY created_at ASC",
+         FROM pending_changes WHERE status = 'pending' ORDER BY created_at ASC",
       )
       .map_err(|err| err.to_string())?;
         let rows = stmt
-            .query_map(params![FOLIO_METADATA_CHANGE_TYPE], |row| {
+            .query_map([], |row| {
                 Ok(PendingChange {
                     id: row.get(0)?,
                     file_id: row.get(1)?,
@@ -2417,12 +2423,12 @@ fn apply_pending_changes_sync(app: &tauri::AppHandle, ids: Vec<String>) -> Resul
         let mut stmt = conn
       .prepare(
         "SELECT id, file_id, type, from_path, to_path, changes_json, status, created_at, applied_at, error \
-         FROM pending_changes WHERE status = 'pending' AND type != ?2 AND id = ?1",
+         FROM pending_changes WHERE status = 'pending' AND id = ?1",
       )
       .map_err(|err| err.to_string())?;
         for id in ids {
             let row = stmt
-                .query_row(params![id, FOLIO_METADATA_CHANGE_TYPE], |row| {
+                .query_row(params![id], |row| {
                     Ok(PendingChange {
                         id: row.get(0)?,
                         file_id: row.get(1)?,
@@ -2473,6 +2479,16 @@ fn apply_pending_changes_sync(app: &tauri::AppHandle, ids: Vec<String>) -> Resul
             "epub_cover" => apply_epub_cover_change(&conn, change),
             "delete" => apply_delete_change(&conn, change, now),
             "item_metadata" => apply_item_metadata_change(app, change),
+            FOLIO_METADATA_CHANGE_TYPE => match change.changes_json.as_deref() {
+                Some(payload) => folio_metadata_changes::apply_proposal(
+                    &conn,
+                    &change.id,
+                    &change.file_id,
+                    payload,
+                    now,
+                ),
+                None => Err("Missing Folio metadata payload".to_string()),
+            },
             "fix_candidate" => apply_fix_candidate_change(app, change),
             "item_tag_add" => apply_item_tag_change(&conn, change, true),
             "item_tag_remove" => apply_item_tag_change(&conn, change, false),

@@ -53,6 +53,35 @@ fn retrying_file_changes_only_resets_requested_errors() {
 }
 
 #[test]
+fn retrying_folio_metadata_changes_resets_the_requested_error() {
+    let conn = Connection::open_in_memory().expect("in-memory database");
+    conn.execute_batch(
+        "CREATE TABLE pending_changes (
+            id TEXT PRIMARY KEY,
+            type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            error TEXT
+        );
+        INSERT INTO pending_changes (id, type, status, error)
+        VALUES ('folio-failed', 'folio_metadata', 'error', 'stale metadata');",
+    )
+    .expect("pending changes schema");
+
+    assert_eq!(
+        reset_failed_pending_changes(&conn, &["folio-failed".to_string()]).unwrap(),
+        vec!["folio-failed".to_string()]
+    );
+    let status: (String, Option<String>) = conn
+        .query_row(
+            "SELECT status, error FROM pending_changes WHERE id = 'folio-failed'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("reset proposal");
+    assert_eq!(status, ("pending".to_string(), None));
+}
+
+#[test]
 fn retrying_sync_changes_only_resets_requested_errors() {
     let conn = Connection::open_in_memory().expect("in-memory database");
     conn.execute_batch(

@@ -45,6 +45,7 @@
 - If adding tests, document the single-test command here.
 - Apple Books provider tests: `pnpm -C packages/core exec tsx --test src/enrichment/providers/apple-books.test.ts`.
 - Folio CLI/MCP shared interface tests: `pnpm -C packages/core test:folio`.
+- Folio desktop metadata proposal tests: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml folio_metadata_changes::tests`.
 - Platform adapter tests: `pnpm -C apps/desktop test:platform`.
 - Changes model tests: `pnpm -C apps/desktop test:changes`.
 - Changes retry tests (Rust): `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml changes_retry_tests`.

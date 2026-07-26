@@ -99,7 +99,7 @@ The server offers these tools:
 
 Only `apply_metadata_change` changes canonical book metadata. `propose_metadata_update` writes a reviewable proposal to Folio's existing `pending_changes` table.
 
-Folio desktop intentionally excludes `folio_metadata` proposals from its Changes screen for now. Review and apply them through the CLI or MCP tools, which share the validation, conflict detection, transaction, and provenance implementation.
+Folio desktop presents `folio_metadata` proposals as item-metadata changes in its Changes screen. Applying through desktop, CLI, or MCP uses the same reviewed-value conflict checks and records source confidence in field provenance.
 
 ## Trust model
 
