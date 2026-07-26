@@ -144,3 +144,17 @@
 - Keep changes atomic; avoid mixing concerns in one commit.
 - Do not edit unrelated files that are already dirty in the working tree.
 - If you add tests, document the exact single-test command here.
+
+## Agent skills
+
+### Issue tracker
+
+Work is tracked in GitHub Issues; external pull requests are not a triage request surface. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The repository uses the canonical engineering-skill label vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain documentation uses a single-context layout. See `docs/agents/domain.md`.
