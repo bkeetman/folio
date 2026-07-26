@@ -27,6 +27,7 @@ type SidebarProps = {
   view: View;
   setView: Dispatch<SetStateAction<View>>;
   scanning: boolean;
+  operationsBusy: boolean;
   handleScan: () => void;
   libraryHealth: LibraryHealth | null;
   pendingChangesCount: number;
@@ -45,6 +46,7 @@ export function Sidebar({
   view,
   setView,
   scanning,
+  operationsBusy,
   handleScan,
   libraryHealth,
   pendingChangesCount,
@@ -164,7 +166,7 @@ export function Sidebar({
           <div className="text-[11px] font-semibold text-app-ink-muted/70 px-2 py-2 mb-1">
             {t("sidebar.maintenance").toUpperCase()}
           </div>
-          <SidebarItem active={scanning} onClick={handleScan}>
+          <SidebarItem active={scanning} onClick={handleScan} disabled={operationsBusy}>
             <FolderOpen size={16} />
             <span className="min-w-0 truncate">{t("sidebar.addBooks")}</span>
           </SidebarItem>
@@ -246,6 +248,7 @@ export function Sidebar({
           </SidebarItem>
           <SidebarItem
             onClick={handleClearLibrary}
+            disabled={operationsBusy}
             className="text-red-600 hover:text-red-700"
           >
             <AlertTriangle size={16} />

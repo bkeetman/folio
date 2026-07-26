@@ -3822,7 +3822,10 @@ fn enrich_all(app: tauri::AppHandle, item_ids: Option<Vec<String>>) -> Result<()
     let target_item_ids = item_ids.clone();
     // Spawn the enrichment in a background thread so UI stays responsive
     std::thread::spawn(move || {
-        let _ = enrich_all_sync(&app, target_item_ids);
+        if let Err(error) = enrich_all_sync(&app, target_item_ids) {
+            log::error!("enrichment failed: {}", error);
+            let _ = app.emit("enrich-error", error);
+        }
     });
     Ok(())
 }
@@ -5180,7 +5183,20 @@ fn set_title_cleanup_ignored(
 }
 
 #[tauri::command]
-fn plan_organize(
+async fn plan_organize(
+    app: tauri::AppHandle,
+    mode: String,
+    library_root: String,
+    template: String,
+) -> Result<OrganizePlan, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        plan_organize_sync(app, mode, library_root, template)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+fn plan_organize_sync(
     app: tauri::AppHandle,
     mode: String,
     library_root: String,
@@ -5313,7 +5329,18 @@ fn plan_organize(
 }
 
 #[tauri::command]
-fn generate_pending_changes_from_organize(
+async fn generate_pending_changes_from_organize(
+    app: tauri::AppHandle,
+    plan: OrganizePlan,
+) -> Result<i64, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        generate_pending_changes_from_organize_sync(app, plan)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+fn generate_pending_changes_from_organize_sync(
     app: tauri::AppHandle,
     plan: OrganizePlan,
 ) -> Result<i64, String> {
@@ -5718,7 +5745,17 @@ fn clear_library(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn normalize_item_descriptions(app: tauri::AppHandle) -> Result<DescriptionCleanupResult, String> {
+async fn normalize_item_descriptions(
+    app: tauri::AppHandle,
+) -> Result<DescriptionCleanupResult, String> {
+    tauri::async_runtime::spawn_blocking(move || normalize_item_descriptions_sync(app))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn normalize_item_descriptions_sync(
+    app: tauri::AppHandle,
+) -> Result<DescriptionCleanupResult, String> {
     let conn = open_db(&app)?;
     let now = chrono::Utc::now().timestamp_millis();
     let mut stmt = conn
@@ -5926,7 +5963,13 @@ fn is_plausible_author_prefix(prefix: &str) -> bool {
 }
 
 #[tauri::command]
-fn batch_cleanup_titles(app: tauri::AppHandle) -> Result<TitleCleanupBatchResult, String> {
+async fn batch_cleanup_titles(app: tauri::AppHandle) -> Result<TitleCleanupBatchResult, String> {
+    tauri::async_runtime::spawn_blocking(move || batch_cleanup_titles_sync(app))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn batch_cleanup_titles_sync(app: tauri::AppHandle) -> Result<TitleCleanupBatchResult, String> {
     let conn = open_db(&app)?;
     let now = chrono::Utc::now().timestamp_millis();
 

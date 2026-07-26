@@ -2,7 +2,7 @@ import { Download, LayoutGrid, List, Search } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge, Button, Input } from "../components/ui";
-import type { ActivityLogItem, OperationProgress, ScanProgress, View } from "../types/library";
+import type { ActivityLogItem, OperationProgress, View } from "../types/library";
 
 type TopToolbarProps = {
   view: View;
@@ -16,8 +16,7 @@ type TopToolbarProps = {
   updateAvailable: boolean;
   updateVersion: string | null;
   scanStatus: string | null;
-  scanProgress: ScanProgress | null;
-  importProgress: OperationProgress | null;
+  operationProgress: OperationProgress | null;
   activityLog: ActivityLogItem[];
 };
 
@@ -33,8 +32,7 @@ export function TopToolbar({
   updateAvailable,
   updateVersion,
   scanStatus,
-  scanProgress,
-  importProgress,
+  operationProgress,
   activityLog,
 }: TopToolbarProps) {
   const { t } = useTranslation();
@@ -43,8 +41,8 @@ export function TopToolbar({
   const activityTime = latestActivity
     ? new Date(latestActivity.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : null;
-  const progressCurrent = scanProgress?.processed ?? importProgress?.current ?? null;
-  const progressTotal = scanProgress?.total ?? importProgress?.total ?? null;
+  const progressCurrent = operationProgress?.current ?? null;
+  const progressTotal = operationProgress?.total ?? null;
   const progressPercent =
     progressCurrent !== null && progressTotal !== null && progressTotal > 0
       ? Math.min(100, Math.round((progressCurrent / progressTotal) * 100))
@@ -89,7 +87,7 @@ export function TopToolbar({
                 <span className="text-[10px] tabular-nums text-app-ink-muted">{activityTime}</span>
               ) : null}
             </div>
-            {(scanProgress || importProgress) ? (
+            {operationProgress ? (
               <div className="flex items-center gap-2">
                 <div className="h-1 w-32 overflow-hidden rounded-full bg-app-border/40">
                   <div

@@ -4,7 +4,7 @@ import type { OperationProgress, ScanProgress, SyncProgress } from "../types/lib
 export type ProgressBarVariant = "accent" | "purple" | "blue" | "green";
 
 type ProgressBarProps = {
-  /** Progress data from useBackgroundOperation */
+  /** Progress data from the shared operation coordinator */
   progress: OperationProgress | null;
   /** Label to show (e.g., "Enriching", "Applying changes") */
   label: string;

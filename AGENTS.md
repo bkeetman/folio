@@ -48,6 +48,7 @@
 - Folio desktop metadata proposal tests: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml folio_metadata_changes::tests`.
 - Platform adapter tests: `pnpm -C apps/desktop test:platform`.
 - Changes model tests: `pnpm -C apps/desktop test:changes`.
+- Background operation model tests: `pnpm -C apps/desktop test:operations`.
 - Changes retry tests (Rust): `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml changes_retry_tests`.
 - Author metadata merge tests (Rust): `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml author_metadata::tests`.
 - Author metadata live source probe (manual, network): `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml author_metadata::tests::live_source_probe -- --ignored --nocapture`.

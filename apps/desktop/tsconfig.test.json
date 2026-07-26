@@ -9,6 +9,8 @@
     "src/features/changes/changes-model.test.ts",
     "src/features/changes/changes-controller.ts",
     "src/features/changes/changes-controller.test.ts",
+    "src/operations/operation-model.ts",
+    "src/operations/operation-model.test.ts",
     "src/platform/native.ts",
     "src/platform/native.test.ts",
     "src/types/library.ts"

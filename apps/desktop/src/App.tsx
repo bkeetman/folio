@@ -11,7 +11,7 @@ import {
   type SetStateAction,
 } from "react";
 import { confirm, invoke, isTauri, open } from "./platform/native";
-import { ProgressBar, ScanProgressBar } from "./components/ProgressBar";
+import { OperationStatusPanel } from "./components/OperationStatusPanel";
 import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
 import { useChangesFeature } from "./features/changes/useChangesFeature";
 import { useCoverOverrides } from "./hooks/useCoverOverrides";
@@ -34,6 +34,7 @@ import {
   sampleTags,
 } from "./lib/sampleData";
 import { TAG_COLORS } from "./lib/tagColors";
+import { useOperationCoordinator } from "./operations/useOperationCoordinator";
 import { AppRoutes } from "./sections/AppRoutes";
 import { Inspector } from "./sections/Inspector";
 import { Sidebar } from "./sections/Sidebar";
@@ -46,8 +47,6 @@ import type {
   LibraryFilter,
   LibrarySort,
   MetadataSourceSetting,
-  OperationProgress,
-  ScanProgress,
   Tag,
   View,
 } from "./types/library";
@@ -154,21 +153,11 @@ function App() {
   const [librarySort, setLibrarySort] = useState<LibrarySort>(readInitialLibrarySort);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [scanStatus, setScanStatus] = useState<string | null>(null);
-  const [scanning, setScanning] = useState(false);
-  const [scanStartedAt, setScanStartedAt] = useState<number | null>(null);
-  const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
-  const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
-  const [enriching, setEnriching] = useState(false);
-  const [enrichingItems, setEnrichingItems] = useState<Set<string>>(new Set());
-  const [enrichProgress, setEnrichProgress] = useState<OperationProgress | null>(null);
   const [fixCandidates, setFixCandidates] = useState<EnrichmentCandidate[]>([]);
-  const [fixLoading, setFixLoading] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [selectedBatchItemIds, setSelectedBatchItemIds] = useState<Set<string>>(new Set());
   const [editMatchQuery, setEditMatchQuery] = useState("");
-  const [editMatchLoading, setEditMatchLoading] = useState(false);
   const [editMatchCandidates, setEditMatchCandidates] = useState<EnrichmentCandidate[]>([]);
-  const [editMatchApplying, setEditMatchApplying] = useState<string | null>(null);
   const [editDetailsVersion, setEditDetailsVersion] = useState(0);
   const mainScrollRef = useRef<HTMLDivElement | null>(null);
   const savedScrollByViewRef = useRef<Partial<Record<View, number>>>({});
@@ -193,10 +182,7 @@ function App() {
   });
   const [selectedFixItemId, setSelectedFixItemId] = useState<string | null>(null);
   const [fixSearchQuery, setFixSearchQuery] = useState("");
-  const [fixApplyingCandidateId, setFixApplyingCandidateId] = useState<string | null>(null);
   const fixSearchRequestIdRef = useRef(0);
-  const [importProgress, setImportProgress] = useState<OperationProgress | null>(null);
-  const [importingBooks, setImportingBooks] = useState(false);
   const [tags, setTags] = useState<Tag[]>([]);
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0].value);
@@ -205,6 +191,7 @@ function App() {
   const [selectedAuthorNames, setSelectedAuthorNames] = useState<string[]>([]);
   const [selectedSeries, setSelectedSeries] = useState<string[]>([]);
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const operations = useOperationCoordinator();
 
   const setViewWithTransition = useCallback<Dispatch<SetStateAction<View>>>(
     (nextView) => {
@@ -304,6 +291,27 @@ function App() {
   } = useLibraryData({ setScanStatus });
 
   const {
+    scanning,
+    scanStartedAt,
+    scanProgress,
+    currentTimeMs,
+    enriching,
+    enrichingItems,
+    enrichProgress,
+    handleScan,
+    handleEnrichAll,
+    handleCancelEnrich,
+    handleImportCancel,
+    handleImportStart,
+  } = useLibraryOperations({
+    operations,
+    setScanStatus,
+    setActivityLog,
+    refreshLibrary,
+    setViewWithTransition,
+  });
+
+  const {
     coverOverrides,
     fetchCoverOverride,
     clearCoverOverride,
@@ -338,7 +346,7 @@ function App() {
     setOrganizeTemplate,
     handlePlanOrganize,
     handleApplyOrganize,
-  } = useOrganizer({ isDesktop });
+  } = useOrganizer({ isDesktop, operations });
 
   const {
     ereaderDevices,
@@ -538,6 +546,10 @@ function App() {
   );
 
   const {
+    fixLoading,
+    editMatchLoading,
+    fixApplyingCandidateId,
+    editMatchApplying,
     getCandidateCoverUrl,
     handleSearchFixWithQuery,
     handleApplyFixCandidate,
@@ -550,15 +562,11 @@ function App() {
     isDesktop,
     selectedFixItemId,
     selectedItemId,
-    fixApplyingCandidateId,
     fixSearchRequestIdRef,
+    operations,
     setScanStatus,
-    setFixLoading,
     setFixCandidates,
-    setFixApplyingCandidateId,
-    setEditMatchLoading,
     setEditMatchCandidates,
-    setEditMatchApplying,
     setEditDetailsVersion,
     runLibraryMutationPipeline,
   });
@@ -605,29 +613,6 @@ function App() {
     [runLibraryMutationPipeline, selectedItemId]
   );
 
-  const {
-    handleScan,
-    handleEnrichAll,
-    handleCancelEnrich,
-    handleImportCancel,
-    handleImportStart,
-  } = useLibraryOperations({
-    scanning,
-    setScanning,
-    setScanStartedAt,
-    setScanProgress,
-    setScanStatus,
-    refreshLibrary,
-    enriching,
-    setEnriching,
-    setEnrichProgress,
-    setEnrichingItems,
-    importingBooks,
-    setImportingBooks,
-    setImportProgress,
-    setViewWithTransition,
-  });
-
   const handleClearLibrary = async () => {
     if (!isTauri()) {
       setScanStatus("Clear requires the Tauri desktop runtime.");
@@ -665,6 +650,7 @@ function App() {
     handleSetMetadataSourceEnabled,
   } = useMetadataSettings({
     initialMetadataSources: DEFAULT_METADATA_SOURCES,
+    operations,
     setScanStatus,
     runLibraryMutationPipeline,
   });
@@ -700,19 +686,9 @@ function App() {
 
   useOperationEventListeners({
     isDesktop,
-    scanning,
-    scanStartedAt,
-    setCurrentTimeMs,
     setScanStatus,
     handleScan,
-    setScanProgress,
-    setScanning,
-    setScanStartedAt,
     setActivityLog,
-    setEnrichProgress,
-    setEnrichingItems,
-    setEnriching,
-    refreshLibrary,
   });
 
   const handleQueueRemoveItem = useCallback(async (itemId: string) => {
@@ -921,6 +897,7 @@ function App() {
         view={view}
         setView={setViewWithTransition}
         scanning={scanning}
+        operationsBusy={operations.isBusy}
         handleScan={() => setViewWithTransition("import")}
         libraryHealth={libraryHealth}
         pendingChangesCount={pendingChangesCount}
@@ -953,25 +930,30 @@ function App() {
               updateAvailable={updateAvailable}
               updateVersion={updateVersion}
               scanStatus={scanStatus}
-              scanProgress={scanProgress}
-              importProgress={importProgress}
+              operationProgress={
+                operations.state.status === "running" || operations.state.status === "cancelling"
+                  ? operations.state.progress
+                  : null
+              }
               activityLog={activityLog}
             />
           )}
 
-          <ScanProgressBar
-            scanning={scanning}
-            progress={scanProgress}
-            etaLabel={scanEtaLabel}
-            variant="accent"
+          <OperationStatusPanel
+            state={operations.state}
+            etaLabel={operations.isRunning("scan") ? scanEtaLabel : null}
+            onCancel={
+              (operations.state.status === "running" || operations.state.status === "cancelling") &&
+              operations.state.kind === "enrich"
+                ? handleCancelEnrich
+                : undefined
+            }
+            onDismiss={operations.reset}
           />
-          <ProgressBar
-            show={importingBooks}
-            progress={importProgress}
-            label="Importing"
-            variant="blue"
-          />
-          <div className="flex min-h-0 flex-1 flex-col gap-4">
+          <fieldset
+            disabled={operations.isBusy}
+            className="flex min-h-0 flex-1 flex-col gap-4 border-0 p-0"
+          >
             <AppRoutes
               view={view}
               setView={setViewWithTransition}
@@ -1140,7 +1122,7 @@ function App() {
                 ereaderSyncProgress,
               }}
             />
-          </div>
+          </fieldset>
         </div>
 
         <SyncConfirmDialog
