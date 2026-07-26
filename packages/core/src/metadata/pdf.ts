@@ -59,8 +59,8 @@ function extractIdentifiers(info: PdfInfo, text: string, maxPages: number) {
 }
 
 async function loadPdfParse(): Promise<
-  (data: Buffer, options?: { max?: number }) => Promise<any>
+  (typeof import("pdf-parse"))["default"]
 > {
-  const module = await import("pdf-parse");
-  return (module as any).default ?? module;
+  const { default: pdfParse } = await import("pdf-parse");
+  return pdfParse;
 }

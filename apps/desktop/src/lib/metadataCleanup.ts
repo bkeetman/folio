@@ -7,6 +7,24 @@ type CleanupResult = {
 };
 
 const YEAR_RE = /(19|20)\d{2}/;
+const TITLE_SEPARATOR_PATTERN = "(?:-|:|–|—)";
+const DANGLING_SEPARATOR_PATTERN = "(?:-|:|–|—|\\|)+";
+const YEAR_SUFFIX_RE = new RegExp(
+  `(?:\\s+|${TITLE_SEPARATOR_PATTERN}\\s*)(19|20)\\d{2}\\s*$`,
+  "u",
+);
+const YEAR_SEPARATOR_SUFFIX_RE = new RegExp(
+  `\\s*${TITLE_SEPARATOR_PATTERN}\\s*(19|20)\\d{2}\\s*$`,
+  "gu",
+);
+const LEADING_SEPARATOR_RE = new RegExp(
+  `^\\s*${DANGLING_SEPARATOR_PATTERN}\\s*`,
+  "u",
+);
+const TRAILING_SEPARATOR_RE = new RegExp(
+  `\\s*${DANGLING_SEPARATOR_PATTERN}\\s*$`,
+  "u",
+);
 
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -66,7 +84,7 @@ function stripAuthorPrefix(title: string, authors: string[]): string {
 function parseYear(rawTitle: string): number | null {
   const yearMatch =
     rawTitle.match(/\((19|20)\d{2}\)\s*$/u) ??
-    rawTitle.match(/(?:\s+|[-:–—]\s*)(19|20)\d{2}\s*$/u);
+    rawTitle.match(YEAR_SUFFIX_RE);
 
   if (!yearMatch) return null;
   const yearString = yearMatch[0].match(YEAR_RE)?.[0];
@@ -80,7 +98,7 @@ function parseYear(rawTitle: string): number | null {
 function stripYearNoise(title: string): string {
   let cleaned = title;
   cleaned = cleaned.replace(/\s*\((19|20)\d{2}\)\s*$/gu, "").trim();
-  cleaned = cleaned.replace(/\s*[-:–—]\s*(19|20)\d{2}\s*$/gu, "").trim();
+  cleaned = cleaned.replace(YEAR_SEPARATOR_SUFFIX_RE, "").trim();
   cleaned = cleaned.replace(/\s+(19|20)\d{2}\s*$/gu, "").trim();
   cleaned = cleaned.replace(/\s*\(\s*\)\s*$/gu, "").trim();
   return cleaned;
@@ -92,8 +110,8 @@ function stripTrailingCounter(title: string): string {
 
 function stripDanglingSeparators(title: string): string {
   return title
-    .replace(/^\s*[-:–—|]+\s*/u, "")
-    .replace(/\s*[-:–—|]+\s*$/u, "")
+    .replace(LEADING_SEPARATOR_RE, "")
+    .replace(TRAILING_SEPARATOR_RE, "")
     .trim();
 }
 

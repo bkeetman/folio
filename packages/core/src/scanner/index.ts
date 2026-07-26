@@ -200,7 +200,9 @@ export async function scanRoot(
         action: "updated",
         fileId: existingByPath.id,
       });
-      await applyMetadata(db, existingByPath.itemId, filePath);
+      if (existingByPath.itemId) {
+        await applyMetadata(db, existingByPath.itemId, filePath);
+      }
       continue;
     }
 

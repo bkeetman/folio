@@ -7,9 +7,13 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+function timestampMs<TName extends string>(name: TName) {
+  return integer(name, { mode: "number" });
+}
+
 const timestamps = {
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  createdAt: timestampMs("created_at").notNull(),
+  updatedAt: timestampMs("updated_at").notNull(),
 };
 
 export const items = sqliteTable("items", {
@@ -34,9 +38,9 @@ export const files = sqliteTable("files", {
   sizeBytes: integer("size_bytes"),
   sha256: text("sha256"),
   hashAlgo: text("hash_algo").default("sha256"),
-  modifiedAt: integer("modified_at", { mode: "timestamp_ms" }),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  modifiedAt: timestampMs("modified_at"),
+  createdAt: timestampMs("created_at").notNull(),
+  updatedAt: timestampMs("updated_at").notNull(),
   status: text("status").default("active"),
 });
 
@@ -51,9 +55,9 @@ export const authors = sqliteTable(
     photoUrl: text("photo_url"),
     metadataSource: text("metadata_source"),
     metadataSourceId: text("metadata_source_id"),
-    metadataUpdatedAt: integer("metadata_updated_at", { mode: "timestamp_ms" }),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    metadataUpdatedAt: timestampMs("metadata_updated_at"),
+    createdAt: timestampMs("created_at").notNull(),
+    updatedAt: timestampMs("updated_at").notNull(),
   },
   (table) => ({
     normalizedNameIdx: uniqueIndex("authors_normalized_name").on(table.normalizedName),
@@ -88,7 +92,7 @@ export const identifiers = sqliteTable(
     value: text("value").notNull(),
     source: text("source"),
     confidence: real("confidence").default(0),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: timestampMs("created_at").notNull(),
   },
   (table) => ({
     uniq: uniqueIndex("identifiers_type_value").on(table.type, table.value),
@@ -100,7 +104,7 @@ export const tags = sqliteTable("tags", {
   name: text("name").notNull(),
   normalized: text("normalized").notNull(),
   color: text("color"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  createdAt: timestampMs("created_at").notNull(),
 });
 
 export const itemTags = sqliteTable(
@@ -130,14 +134,14 @@ export const covers = sqliteTable("covers", {
   localPath: text("local_path"),
   width: integer("width"),
   height: integer("height"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  createdAt: timestampMs("created_at").notNull(),
 });
 
 export const enrichmentSources = sqliteTable("enrichment_sources", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   rateLimitPerMin: integer("rate_limit_per_min"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  createdAt: timestampMs("created_at").notNull(),
 });
 
 export const enrichmentResults = sqliteTable("enrichment_results", {
@@ -152,7 +156,7 @@ export const enrichmentResults = sqliteTable("enrichment_results", {
   query: text("query").notNull(),
   responseJson: text("response_json").notNull(),
   confidence: real("confidence").default(0),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  createdAt: timestampMs("created_at").notNull(),
 });
 
 export const itemFieldSources = sqliteTable("item_field_sources", {
@@ -163,7 +167,7 @@ export const itemFieldSources = sqliteTable("item_field_sources", {
   field: text("field").notNull(),
   source: text("source").notNull(),
   confidence: real("confidence").default(0),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  createdAt: timestampMs("created_at").notNull(),
 });
 
 export const issues = sqliteTable("issues", {
@@ -173,15 +177,15 @@ export const issues = sqliteTable("issues", {
   type: text("type").notNull(),
   message: text("message"),
   severity: text("severity").default("info"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  resolvedAt: integer("resolved_at", { mode: "timestamp_ms" }),
+  createdAt: timestampMs("created_at").notNull(),
+  resolvedAt: timestampMs("resolved_at"),
 });
 
 export const scanSessions = sqliteTable("scan_sessions", {
   id: text("id").primaryKey(),
   rootPath: text("root_path").notNull(),
-  startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
-  endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+  startedAt: timestampMs("started_at").notNull(),
+  endedAt: timestampMs("ended_at"),
   status: text("status").notNull(),
 });
 
@@ -191,7 +195,7 @@ export const scanEntries = sqliteTable("scan_entries", {
     .notNull()
     .references(() => scanSessions.id),
   path: text("path").notNull(),
-  modifiedAt: integer("modified_at", { mode: "timestamp_ms" }),
+  modifiedAt: timestampMs("modified_at"),
   sizeBytes: integer("size_bytes"),
   sha256: text("sha256"),
   action: text("action").notNull(),

@@ -23,6 +23,7 @@
 - Dev (desktop): `pnpm dev` (runs Vite in apps/desktop).
 - Build (desktop): `pnpm build`.
 - Lint (desktop): `pnpm lint`.
+- Full verification: `pnpm check`.
 
 ## Desktop app commands (apps/desktop)
 - Dev: `pnpm -C apps/desktop dev`.
