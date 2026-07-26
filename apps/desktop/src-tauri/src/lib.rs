@@ -2076,8 +2076,17 @@ fn get_title_like_duplicate_groups(
 }
 
 #[tauri::command]
-fn get_pending_changes(
+async fn get_pending_changes(
     app: tauri::AppHandle,
+    status: Option<String>,
+) -> Result<Vec<PendingChange>, String> {
+    tauri::async_runtime::spawn_blocking(move || get_pending_changes_sync(&app, status))
+        .await
+        .map_err(|err| format!("Could not load pending changes: {err}"))?
+}
+
+fn get_pending_changes_sync(
+    app: &tauri::AppHandle,
     status: Option<String>,
 ) -> Result<Vec<PendingChange>, String> {
     let conn = open_db(&app)?;
@@ -2116,7 +2125,8 @@ fn get_pending_changes(
         let (change_type, changes_json) = folio_metadata_changes::desktop_representation(
             &change.change_type,
             change.changes_json.take(),
-        )?;
+        )
+        .map_err(|err| format!("Could not present pending change {}: {err}", change.id))?;
         change.change_type = change_type;
         change.changes_json = changes_json;
         changes.push(change);

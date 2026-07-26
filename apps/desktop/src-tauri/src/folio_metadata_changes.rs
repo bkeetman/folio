@@ -18,6 +18,109 @@ struct FolioMetadataProposal {
     overwrite: bool,
 }
 
+#[derive(Clone, Copy)]
+enum MetadataField {
+    Title,
+    Authors,
+    PublishedYear,
+    Language,
+    Isbn,
+    Series,
+    SeriesIndex,
+    Description,
+}
+
+impl MetadataField {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "title" => Ok(Self::Title),
+            "authors" => Ok(Self::Authors),
+            "publishedYear" => Ok(Self::PublishedYear),
+            "language" => Ok(Self::Language),
+            "isbn" => Ok(Self::Isbn),
+            "series" => Ok(Self::Series),
+            "seriesIndex" => Ok(Self::SeriesIndex),
+            "description" => Ok(Self::Description),
+            _ => Err(format!("Unsupported Folio metadata field: {value}")),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Title => "title",
+            Self::Authors => "authors",
+            Self::PublishedYear => "publishedYear",
+            Self::Language => "language",
+            Self::Isbn => "isbn",
+            Self::Series => "series",
+            Self::SeriesIndex => "seriesIndex",
+            Self::Description => "description",
+        }
+    }
+
+    fn scalar_column(self) -> Option<&'static str> {
+        match self {
+            Self::Title => Some("title"),
+            Self::Language => Some("language"),
+            Self::Series => Some("series"),
+            Self::Description => Some("description"),
+            _ => None,
+        }
+    }
+
+    fn provenance_field(self) -> &'static str {
+        match self {
+            Self::PublishedYear => "published_year",
+            Self::SeriesIndex => "series_index",
+            _ => self.name(),
+        }
+    }
+
+    fn validate_change(self, value: &Value) -> Result<(), String> {
+        match self {
+            Self::Authors => {
+                let authors = value
+                    .as_array()
+                    .ok_or_else(|| "Metadata authors must be an array".to_string())?;
+                if authors.is_empty()
+                    || authors.iter().any(|author| {
+                        author
+                            .as_str()
+                            .map_or(true, |name| normalize_author_name(name).is_empty())
+                    })
+                {
+                    return Err("Metadata authors must contain non-empty names".to_string());
+                }
+            }
+            Self::PublishedYear => {
+                let year = value
+                    .as_i64()
+                    .ok_or_else(|| "Published year must be an integer".to_string())?;
+                if !(1000..=9999).contains(&year) {
+                    return Err("Published year must be a four-digit year".to_string());
+                }
+            }
+            Self::SeriesIndex => {
+                let index = value
+                    .as_f64()
+                    .ok_or_else(|| "Series index must be a number".to_string())?;
+                if !index.is_finite() || index <= 0.0 {
+                    return Err("Series index must be a positive number".to_string());
+                }
+            }
+            _ => {
+                if value.as_str().map_or(true, |text| text.trim().is_empty()) {
+                    return Err(format!(
+                        "Metadata field {} must be non-empty text",
+                        self.name()
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 pub(crate) fn desktop_representation(
     change_type: &str,
     changes_json: Option<String>,
@@ -41,8 +144,12 @@ pub(crate) fn apply_proposal(
     changes_json: &str,
     now: i64,
 ) -> Result<(), String> {
-    let proposal = parse_proposal(changes_json)?;
-    validate_proposal(&proposal)?;
+    let proposal = parse_proposal(changes_json)
+        .and_then(|proposal| {
+            validate_proposal(&proposal)?;
+            Ok(proposal)
+        })
+        .map_err(|err| format!("Metadata proposal {change_id} is invalid: {err}"))?;
     let file_item_id = conn
         .query_row(
             "SELECT item_id FROM files WHERE id = ?1 LIMIT 1",
@@ -50,28 +157,49 @@ pub(crate) fn apply_proposal(
             |row| row.get::<_, String>(0),
         )
         .optional()
-        .map_err(|err| err.to_string())?
+        .map_err(|err| {
+            format!(
+                "Could not apply metadata proposal {change_id} while looking up file {file_id}: {err}"
+            )
+        })?
         .ok_or_else(|| format!("File not found for metadata proposal: {file_id}"))?;
     if file_item_id != proposal.item_id {
-        return Err("Metadata proposal does not match its file record".to_string());
+        return Err(format!(
+            "Metadata proposal {change_id} for item {} does not match file {file_id}, which belongs to item {file_item_id}",
+            proposal.item_id
+        ));
     }
 
     let transaction = conn
         .unchecked_transaction()
-        .map_err(|err| err.to_string())?;
-    for (field, value) in &proposal.changes {
-        let expected = proposal
-            .expected
-            .get(field)
-            .ok_or_else(|| format!("Metadata proposal is missing expected value for {field}"))?;
-        let current = current_value(&transaction, &proposal.item_id, field)?;
+        .map_err(|err| format!("Could not start metadata proposal {change_id}: {err}"))?;
+    for (field_name, value) in &proposal.changes {
+        let field = MetadataField::parse(field_name)
+            .map_err(|err| format!("Metadata proposal {change_id} is invalid: {err}"))?;
+        let expected = proposal.expected.get(field_name).ok_or_else(|| {
+            format!(
+                "Metadata proposal {change_id} is missing expected value for {}",
+                field.name()
+            )
+        })?;
+        let current = current_value(&transaction, &proposal.item_id, field).map_err(|err| {
+            format!(
+                "Could not apply metadata proposal {change_id} while reading {} for item {}: {err}",
+                field.name(),
+                proposal.item_id
+            )
+        })?;
         if !metadata_values_equal(&current, expected) {
             return Err(format!(
-                "Metadata changed since this proposal was created: {field}"
+                "Metadata changed since this proposal was created: {}",
+                field.name()
             ));
         }
         if !proposal.overwrite && has_metadata_value(&current) {
-            return Err(format!("Metadata field is already populated: {field}"));
+            return Err(format!(
+                "Metadata field is already populated: {}",
+                field.name()
+            ));
         }
         apply_field(
             &transaction,
@@ -81,15 +209,23 @@ pub(crate) fn apply_proposal(
             &proposal.source,
             proposal.confidence,
             now,
-        )?;
+        )
+        .map_err(|err| {
+            format!(
+                "Could not apply metadata proposal {change_id} while updating {} for item {}: {err}",
+                field.name(), proposal.item_id
+            )
+        })?;
     }
     transaction
         .execute(
             "UPDATE pending_changes SET status = 'applied', applied_at = ?1, error = NULL WHERE id = ?2 AND status = 'pending'",
             params![now, change_id],
         )
-        .map_err(|err| err.to_string())?;
-    transaction.commit().map_err(|err| err.to_string())
+        .map_err(|err| format!("Could not mark metadata proposal {change_id} as applied: {err}"))?;
+    transaction
+        .commit()
+        .map_err(|err| format!("Could not commit metadata proposal {change_id}: {err}"))
 }
 
 fn parse_proposal(raw: &str) -> Result<FolioMetadataProposal, String> {
@@ -116,73 +252,26 @@ fn parse_proposal(raw: &str) -> Result<FolioMetadataProposal, String> {
     Ok(proposal)
 }
 
-const METADATA_FIELDS: [&str; 8] = [
-    "title",
-    "authors",
-    "publishedYear",
-    "language",
-    "isbn",
-    "series",
-    "seriesIndex",
-    "description",
-];
-
 fn validate_proposal(proposal: &FolioMetadataProposal) -> Result<(), String> {
     for field in proposal.changes.keys().chain(proposal.expected.keys()) {
-        if !METADATA_FIELDS.contains(&field.as_str()) {
-            return Err(format!("Unsupported Folio metadata field: {field}"));
-        }
+        MetadataField::parse(field)?;
     }
-    for (field, value) in &proposal.changes {
-        if !proposal.expected.contains_key(field) {
+    for (field_name, value) in &proposal.changes {
+        let field = MetadataField::parse(field_name)?;
+        if !proposal.expected.contains_key(field_name) {
             return Err(format!(
-                "Metadata proposal is missing expected value for {field}"
+                "Metadata proposal is missing expected value for {}",
+                field.name()
             ));
         }
-        match field.as_str() {
-            "authors" => {
-                let authors = value
-                    .as_array()
-                    .ok_or_else(|| "Metadata authors must be an array".to_string())?;
-                if authors.is_empty()
-                    || authors.iter().any(|author| {
-                        author
-                            .as_str()
-                            .map_or(true, |name| normalize_author_name(name).is_empty())
-                    })
-                {
-                    return Err("Metadata authors must contain non-empty names".to_string());
-                }
-            }
-            "publishedYear" => {
-                let year = value
-                    .as_i64()
-                    .ok_or_else(|| "Published year must be an integer".to_string())?;
-                if !(1000..=9999).contains(&year) {
-                    return Err("Published year must be a four-digit year".to_string());
-                }
-            }
-            "seriesIndex" => {
-                let index = value
-                    .as_f64()
-                    .ok_or_else(|| "Series index must be a number".to_string())?;
-                if !index.is_finite() || index <= 0.0 {
-                    return Err("Series index must be a positive number".to_string());
-                }
-            }
-            _ => {
-                if value.as_str().map_or(true, |text| text.trim().is_empty()) {
-                    return Err(format!("Metadata field {field} must be non-empty text"));
-                }
-            }
-        }
+        field.validate_change(value)?;
     }
     Ok(())
 }
 
-fn current_value(conn: &Connection, item_id: &str, field: &str) -> Result<Value, String> {
+fn current_value(conn: &Connection, item_id: &str, field: MetadataField) -> Result<Value, String> {
     match field {
-        "authors" => {
+        MetadataField::Authors => {
             let mut stmt = conn
                 .prepare(
                     "SELECT authors.name FROM item_authors JOIN authors ON authors.id = item_authors.author_id WHERE item_authors.item_id = ?1 ORDER BY COALESCE(item_authors.ord, 0), authors.name COLLATE NOCASE",
@@ -198,7 +287,7 @@ fn current_value(conn: &Connection, item_id: &str, field: &str) -> Result<Value,
                 authors.into_iter().map(Value::String).collect(),
             ))
         }
-        "isbn" => {
+        MetadataField::Isbn => {
             let isbn = conn
                 .query_row(
                     "SELECT value FROM identifiers WHERE item_id = ?1 AND upper(type) IN ('ISBN10', 'ISBN13', 'OTHER') ORDER BY CASE WHEN upper(type) = 'ISBN13' THEN 0 WHEN upper(type) = 'ISBN10' THEN 1 ELSE 2 END, created_at DESC LIMIT 1",
@@ -209,8 +298,13 @@ fn current_value(conn: &Connection, item_id: &str, field: &str) -> Result<Value,
                 .map_err(|err| err.to_string())?;
             Ok(isbn.map(Value::String).unwrap_or(Value::Null))
         }
-        "title" | "language" | "series" | "description" => {
-            let column = scalar_column(field)?;
+        MetadataField::Title
+        | MetadataField::Language
+        | MetadataField::Series
+        | MetadataField::Description => {
+            let column = field
+                .scalar_column()
+                .ok_or_else(|| format!("Unsupported scalar metadata field: {}", field.name()))?;
             let value = conn
                 .query_row(
                     &format!("SELECT {column} FROM items WHERE id = ?1"),
@@ -222,7 +316,7 @@ fn current_value(conn: &Connection, item_id: &str, field: &str) -> Result<Value,
                 .ok_or_else(|| format!("Book not found: {item_id}"))?;
             Ok(value.map(Value::String).unwrap_or(Value::Null))
         }
-        "publishedYear" => {
+        MetadataField::PublishedYear => {
             let value = conn
                 .query_row(
                     "SELECT published_year FROM items WHERE id = ?1",
@@ -234,7 +328,7 @@ fn current_value(conn: &Connection, item_id: &str, field: &str) -> Result<Value,
                 .ok_or_else(|| format!("Book not found: {item_id}"))?;
             Ok(value.map(Value::from).unwrap_or(Value::Null))
         }
-        "seriesIndex" => {
+        MetadataField::SeriesIndex => {
             let value = conn
                 .query_row(
                     "SELECT series_index FROM items WHERE id = ?1",
@@ -246,21 +340,20 @@ fn current_value(conn: &Connection, item_id: &str, field: &str) -> Result<Value,
                 .ok_or_else(|| format!("Book not found: {item_id}"))?;
             Ok(value.map(Value::from).unwrap_or(Value::Null))
         }
-        _ => Err(format!("Unsupported Folio metadata field: {field}")),
     }
 }
 
 fn apply_field(
     conn: &Connection,
     item_id: &str,
-    field: &str,
+    field: MetadataField,
     value: &Value,
     source: &str,
     confidence: f64,
     now: i64,
 ) -> Result<(), String> {
     match field {
-        "authors" => {
+        MetadataField::Authors => {
             conn.execute(
                 "DELETE FROM item_authors WHERE item_id = ?1",
                 params![item_id],
@@ -298,8 +391,11 @@ fn apply_field(
                 .map_err(|err| err.to_string())?;
             }
         }
-        "isbn" => {
-            let isbn = value.as_str().expect("validated ISBN value").trim();
+        MetadataField::Isbn => {
+            let isbn = value
+                .as_str()
+                .ok_or_else(|| "Metadata ISBN must be text".to_string())?
+                .trim();
             conn.execute(
                 "DELETE FROM identifiers WHERE item_id = ?1 AND upper(type) IN ('ISBN10', 'ISBN13', 'OTHER')",
                 params![item_id],
@@ -316,35 +412,42 @@ fn apply_field(
             )
             .map_err(|err| err.to_string())?;
         }
-        "publishedYear" => update_scalar(
+        MetadataField::PublishedYear => update_scalar(
             conn,
             item_id,
             "published_year",
-            value.as_i64().expect("validated published year"),
+            value
+                .as_i64()
+                .ok_or_else(|| "Published year must be an integer".to_string())?,
             now,
         )?,
-        "seriesIndex" => update_scalar(
+        MetadataField::SeriesIndex => update_scalar(
             conn,
             item_id,
             "series_index",
-            value.as_f64().expect("validated series index"),
+            value
+                .as_f64()
+                .ok_or_else(|| "Series index must be a number".to_string())?,
             now,
         )?,
-        "title" | "language" | "series" | "description" => update_scalar(
+        MetadataField::Title
+        | MetadataField::Language
+        | MetadataField::Series
+        | MetadataField::Description => update_scalar(
             conn,
             item_id,
-            scalar_column(field)?,
-            value.as_str().expect("validated text value").trim(),
+            field
+                .scalar_column()
+                .ok_or_else(|| format!("Unsupported scalar metadata field: {}", field.name()))?,
+            value
+                .as_str()
+                .ok_or_else(|| format!("Metadata field {} must be text", field.name()))?
+                .trim(),
             now,
         )?,
-        _ => return Err(format!("Unsupported Folio metadata field: {field}")),
     }
 
-    let provenance_field = match field {
-        "publishedYear" => "published_year",
-        "seriesIndex" => "series_index",
-        value => value,
-    };
+    let provenance_field = field.provenance_field();
     conn.execute(
         "INSERT INTO item_field_sources (id, item_id, field, source, confidence, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![Uuid::new_v4().to_string(), item_id, provenance_field, source, confidence, now],
@@ -366,16 +469,6 @@ fn update_scalar<T: rusqlite::ToSql>(
     )
     .map_err(|err| err.to_string())?;
     Ok(())
-}
-
-fn scalar_column(field: &str) -> Result<&'static str, String> {
-    match field {
-        "title" => Ok("title"),
-        "language" => Ok("language"),
-        "series" => Ok("series"),
-        "description" => Ok("description"),
-        _ => Err(format!("Unsupported scalar metadata field: {field}")),
-    }
 }
 
 fn normalize_author_name(value: &str) -> String {
@@ -586,6 +679,79 @@ mod tests {
             )
             .expect("pending status");
         assert_eq!(status, "pending");
+    }
+
+    #[test]
+    fn database_errors_include_the_change_and_operation_context() {
+        let conn = metadata_fixture();
+        conn.execute("DROP TABLE files", [])
+            .expect("remove files table");
+        let proposal = json!({
+            "version": 1,
+            "itemId": "book-camus",
+            "changes": { "title": "The Rebel" },
+            "expected": { "title": "Rebel, The   Albert Camus" },
+            "source": "applebooks",
+            "confidence": 0.48,
+            "reason": "Exact catalogue match.",
+            "overwrite": true
+        });
+
+        let error = apply_proposal(
+            &conn,
+            "change-camus",
+            "file-camus",
+            &proposal.to_string(),
+            1_800_000_000_000,
+        )
+        .expect_err("missing database table must be actionable");
+
+        assert!(error.contains("change-camus"));
+        assert!(error.contains("looking up file file-camus"));
+    }
+
+    #[test]
+    fn file_item_mismatches_include_both_item_ids() {
+        let conn = metadata_fixture();
+        conn.execute(
+            "UPDATE files SET item_id = 'other-book' WHERE id = 'file-camus'",
+            [],
+        )
+        .expect_err("foreign keys prevent an unknown item");
+        conn.execute(
+            "INSERT INTO items (id, title, updated_at) VALUES ('other-book', 'Other', 1)",
+            [],
+        )
+        .expect("other item");
+        conn.execute(
+            "UPDATE files SET item_id = 'other-book' WHERE id = 'file-camus'",
+            [],
+        )
+        .expect("move file to other item");
+        let proposal = json!({
+            "version": 1,
+            "itemId": "book-camus",
+            "changes": { "title": "The Rebel" },
+            "expected": { "title": "Rebel, The   Albert Camus" },
+            "source": "applebooks",
+            "confidence": 0.48,
+            "reason": "Exact catalogue match.",
+            "overwrite": true
+        });
+
+        let error = apply_proposal(
+            &conn,
+            "change-camus",
+            "file-camus",
+            &proposal.to_string(),
+            1_800_000_000_000,
+        )
+        .expect_err("mismatched item must be actionable");
+
+        assert!(error.contains("change-camus"));
+        assert!(error.contains("book-camus"));
+        assert!(error.contains("file-camus"));
+        assert!(error.contains("other-book"));
     }
 
     fn metadata_fixture() -> Connection {
