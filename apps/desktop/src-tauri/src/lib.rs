@@ -2184,14 +2184,83 @@ fn cleanup_duplicate_pending_cover_changes(conn: &Connection) -> Result<(), Stri
 }
 
 #[tauri::command]
-fn apply_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
-    // Spawn in background thread so UI stays responsive
-    std::thread::spawn(move || {
-        if let Err(e) = apply_pending_changes_sync(&app, ids) {
-            log::error!("Failed to apply pending changes: {}", e);
+async fn apply_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || apply_pending_changes_sync(&app, ids))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn reset_failed_pending_changes(conn: &Connection, ids: &[String]) -> Result<Vec<String>, String> {
+    let mut reset_ids = Vec::new();
+    if ids.is_empty() {
+        let mut stmt = conn
+            .prepare("SELECT id FROM pending_changes WHERE status = 'error' AND type != ?1")
+            .map_err(|err| err.to_string())?;
+        let rows = stmt
+            .query_map(params![FOLIO_METADATA_CHANGE_TYPE], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|err| err.to_string())?;
+        for row in rows {
+            reset_ids.push(row.map_err(|err| err.to_string())?);
         }
-    });
-    Ok(())
+    } else {
+        reset_ids.extend(ids.iter().cloned());
+    }
+
+    let mut retriable_ids = Vec::new();
+    for id in reset_ids {
+        let affected = conn
+            .execute(
+                "UPDATE pending_changes SET status = 'pending', error = NULL \
+                 WHERE id = ?1 AND status = 'error' AND type != ?2",
+                params![id, FOLIO_METADATA_CHANGE_TYPE],
+            )
+            .map_err(|err| err.to_string())?;
+        let already_pending = if affected == 0 {
+            conn.query_row(
+                "SELECT 1 FROM pending_changes \
+                 WHERE id = ?1 AND status = 'pending' AND type != ?2 LIMIT 1",
+                params![id, FOLIO_METADATA_CHANGE_TYPE],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?
+            .is_some()
+        } else {
+            false
+        };
+        if affected > 0 || already_pending {
+            retriable_ids.push(id);
+        }
+    }
+    Ok(retriable_ids)
+}
+
+#[tauri::command]
+async fn retry_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let db_app = app.clone();
+    let retriable_ids = tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_db(&db_app)?;
+        reset_failed_pending_changes(&conn, &ids)
+    })
+    .await
+    .map_err(|err| err.to_string())??;
+    if retriable_ids.is_empty() {
+        use tauri::Emitter;
+        app.emit(
+            "change-complete",
+            OperationStats {
+                total: 0,
+                processed: 0,
+                skipped: 0,
+                errors: 0,
+            },
+        )
+        .map_err(|err| format!("Failed to notify the app that retry completed: {}", err))?;
+        return Ok(());
+    }
+    apply_pending_changes(app, retriable_ids).await
 }
 
 #[tauri::command]
@@ -2386,7 +2455,7 @@ fn apply_pending_changes_sync(app: &tauri::AppHandle, ids: Vec<String>) -> Resul
 
     for (index, change) in changes.iter().enumerate() {
         // Emit "processing" event
-        let _ = app.emit(
+        app.emit(
             "change-progress",
             OperationProgress {
                 item_id: change.id.clone(),
@@ -2395,7 +2464,8 @@ fn apply_pending_changes_sync(app: &tauri::AppHandle, ids: Vec<String>) -> Resul
                 current: index + 1,
                 total,
             },
-        );
+        )
+        .map_err(|err| format!("Failed to report change progress: {}", err))?;
 
         let result = match change.change_type.as_str() {
             "rename" => apply_rename_change(&conn, change, now),
@@ -2426,7 +2496,7 @@ fn apply_pending_changes_sync(app: &tauri::AppHandle, ids: Vec<String>) -> Resul
                 );
                 stats.processed += 1;
                 // Emit "done" event
-                let _ = app.emit(
+                app.emit(
                     "change-progress",
                     OperationProgress {
                         item_id: change.id.clone(),
@@ -2435,7 +2505,8 @@ fn apply_pending_changes_sync(app: &tauri::AppHandle, ids: Vec<String>) -> Resul
                         current: index + 1,
                         total,
                     },
-                );
+                )
+                .map_err(|err| format!("Failed to report completed change: {}", err))?;
             }
             Err(message) => {
                 conn.execute(
@@ -2452,7 +2523,7 @@ fn apply_pending_changes_sync(app: &tauri::AppHandle, ids: Vec<String>) -> Resul
                 );
                 stats.errors += 1;
                 // Emit "error" event
-                let _ = app.emit(
+                app.emit(
                     "change-progress",
                     OperationProgress {
                         item_id: change.id.clone(),
@@ -2461,13 +2532,15 @@ fn apply_pending_changes_sync(app: &tauri::AppHandle, ids: Vec<String>) -> Resul
                         current: index + 1,
                         total,
                     },
-                );
+                )
+                .map_err(|err| format!("Failed to report failed change: {}", err))?;
             }
         }
     }
 
     // Emit event to notify frontend that changes are complete
-    let _ = app.emit("change-complete", stats);
+    app.emit("change-complete", stats)
+        .map_err(|err| format!("Failed to notify the app that changes completed: {}", err))?;
 
     Ok(())
 }
@@ -12860,8 +12933,56 @@ fn remove_sync_queue_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<
     Ok(removed)
 }
 
-#[tauri::command]
-fn apply_sync_queue_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<SyncResult, String> {
+fn reset_failed_sync_changes(conn: &Connection, ids: &[String]) -> Result<Vec<String>, String> {
+    let mut reset_ids = Vec::new();
+    if ids.is_empty() {
+        let mut stmt = conn
+            .prepare("SELECT id FROM ereader_sync_queue WHERE status = 'error'")
+            .map_err(|err| err.to_string())?;
+        let rows = stmt
+            .query_map(params![], |row| row.get::<_, String>(0))
+            .map_err(|err| err.to_string())?;
+        for row in rows {
+            reset_ids.push(row.map_err(|err| err.to_string())?);
+        }
+    } else {
+        reset_ids.extend(ids.iter().cloned());
+    }
+
+    let mut retriable_ids = Vec::new();
+    for id in reset_ids {
+        let affected = conn
+            .execute(
+                "UPDATE ereader_sync_queue SET status = 'pending' WHERE id = ?1 AND status = 'error'",
+                params![id],
+            )
+            .map_err(|err| err.to_string())?;
+        let already_pending = if affected == 0 {
+            conn.query_row(
+                "SELECT 1 FROM ereader_sync_queue WHERE id = ?1 AND status = 'pending' LIMIT 1",
+                params![id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?
+            .is_some()
+        } else {
+            false
+        };
+        if affected > 0 || already_pending {
+            retriable_ids.push(id);
+        }
+    }
+    Ok(retriable_ids)
+}
+
+#[cfg(test)]
+mod changes_retry_tests;
+
+fn apply_sync_queue_changes_sync(
+    app: tauri::AppHandle,
+    ids: Vec<String>,
+) -> Result<SyncResult, String> {
     use tauri::Emitter;
 
     let conn = open_db(&app)?;
@@ -12929,6 +13050,40 @@ fn apply_sync_queue_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<S
 
     let _ = app.emit("sync-complete", &result);
     Ok(result)
+}
+
+#[tauri::command]
+async fn apply_sync_queue_changes(
+    app: tauri::AppHandle,
+    ids: Vec<String>,
+) -> Result<SyncResult, String> {
+    tauri::async_runtime::spawn_blocking(move || apply_sync_queue_changes_sync(app, ids))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn retry_sync_queue_changes(
+    app: tauri::AppHandle,
+    ids: Vec<String>,
+) -> Result<SyncResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_db(&app)?;
+        let retriable_ids = reset_failed_sync_changes(&conn, &ids)?;
+        drop(conn);
+        if retriable_ids.is_empty() {
+            return Ok(SyncResult {
+                added: 0,
+                removed: 0,
+                imported: 0,
+                updated: 0,
+                errors: Vec::new(),
+            });
+        }
+        apply_sync_queue_changes_sync(app, retriable_ids)
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
@@ -13108,6 +13263,7 @@ pub fn run() {
             resolve_duplicate_group_by_files,
             get_pending_changes,
             apply_pending_changes,
+            retry_pending_changes,
             remove_pending_changes,
             queue_remove_item,
             queue_remove_items,
@@ -13142,6 +13298,7 @@ pub fn run() {
             clear_sync_queue,
             get_sync_queue_changes,
             apply_sync_queue_changes,
+            retry_sync_queue_changes,
             remove_sync_queue_changes,
             execute_sync,
             get_item_files,

@@ -1,16 +1,13 @@
-import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useEffect, type Dispatch, type SetStateAction } from "react";
 import { isTauri, listen } from "../platform/native";
 import type {
   ActivityLogItem,
   ApplyMetadataProgress,
   OperationProgress,
   OperationStats,
-  PendingChange,
   ScanProgress,
   ScanStats,
 } from "../types/library";
-
-type PendingChangeStatus = "pending" | "applied" | "error";
 
 type UseOperationEventListenersArgs = {
   isDesktop: boolean;
@@ -27,14 +24,6 @@ type UseOperationEventListenersArgs = {
   setEnrichingItems: Dispatch<SetStateAction<Set<string>>>;
   setEnriching: Dispatch<SetStateAction<boolean>>;
   refreshLibrary: () => Promise<void>;
-  setChangeProgress: Dispatch<SetStateAction<OperationProgress | null>>;
-  setApplyingChangeIds: Dispatch<SetStateAction<Set<string>>>;
-  setPendingChangesApplying: Dispatch<SetStateAction<boolean>>;
-  loadChangesByStatus: (status: PendingChangeStatus) => Promise<PendingChange[]>;
-  pendingChangesStatusRef: MutableRefObject<PendingChangeStatus>;
-  setPendingChanges: Dispatch<SetStateAction<PendingChange[]>>;
-  setPendingChangesCount: Dispatch<SetStateAction<number>>;
-  refreshPendingChanges: () => Promise<number>;
 };
 
 export function useOperationEventListeners({
@@ -52,14 +41,6 @@ export function useOperationEventListeners({
   setEnrichingItems,
   setEnriching,
   refreshLibrary,
-  setChangeProgress,
-  setApplyingChangeIds,
-  setPendingChangesApplying,
-  loadChangesByStatus,
-  pendingChangesStatusRef,
-  setPendingChanges,
-  setPendingChangesCount,
-  refreshPendingChanges,
 }: UseOperationEventListenersArgs) {
   useEffect(() => {
     if (!scanning) return;
@@ -243,70 +224,6 @@ export function useOperationEventListeners({
     setEnrichProgress,
     setEnriching,
     setEnrichingItems,
-    setScanStatus,
-  ]);
-
-  useEffect(() => {
-    if (!isDesktop) return;
-    let unlistenProgress: (() => void) | undefined;
-    let unlistenComplete: (() => void) | undefined;
-
-    listen<OperationProgress>("change-progress", (event) => {
-      console.log("change-progress event:", event.payload);
-      setChangeProgress(event.payload);
-      setApplyingChangeIds((prev) => {
-        const next = new Set(prev);
-        if (event.payload.status === "processing") {
-          next.add(event.payload.itemId);
-        } else {
-          next.delete(event.payload.itemId);
-        }
-        return next;
-      });
-      setPendingChangesApplying(true);
-    }).then((stop) => {
-      unlistenProgress = stop;
-    });
-
-    listen<OperationStats>("change-complete", async (event) => {
-      console.log("change-complete event:", event.payload);
-      setChangeProgress(null);
-      setApplyingChangeIds(new Set());
-      setPendingChangesApplying(false);
-      setScanStatus(
-        `Changes complete: ${event.payload.processed} applied, ${event.payload.errors} errors.`
-      );
-      try {
-        const result = await loadChangesByStatus(pendingChangesStatusRef.current);
-        setPendingChanges(result);
-        if (pendingChangesStatusRef.current === "pending") {
-          setPendingChangesCount(result.length);
-        } else {
-          await refreshPendingChanges();
-        }
-        await refreshLibrary();
-      } catch {
-        // ignore
-      }
-    }).then((stop) => {
-      unlistenComplete = stop;
-    });
-
-    return () => {
-      if (unlistenProgress) unlistenProgress();
-      if (unlistenComplete) unlistenComplete();
-    };
-  }, [
-    isDesktop,
-    loadChangesByStatus,
-    pendingChangesStatusRef,
-    refreshLibrary,
-    refreshPendingChanges,
-    setApplyingChangeIds,
-    setChangeProgress,
-    setPendingChanges,
-    setPendingChangesApplying,
-    setPendingChangesCount,
     setScanStatus,
   ]);
 

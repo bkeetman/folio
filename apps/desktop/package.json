@@ -12,7 +12,8 @@
     "build:tauri": "cargo tauri build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:platform": "tsc -p tsconfig.test.json && tsx --test src/platform/native.test.ts"
+    "test:platform": "tsc -p tsconfig.test.json && tsx --test src/platform/native.test.ts",
+    "test:changes": "tsc -p tsconfig.test.json && tsx --test src/features/changes/changes-model.test.ts"
   },
   "dependencies": {
     "@folio/core": "workspace:*",

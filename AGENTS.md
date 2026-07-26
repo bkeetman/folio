@@ -46,6 +46,8 @@
 - Apple Books provider tests: `pnpm -C packages/core exec tsx --test src/enrichment/providers/apple-books.test.ts`.
 - Folio CLI/MCP shared interface tests: `pnpm -C packages/core test:folio`.
 - Platform adapter tests: `pnpm -C apps/desktop test:platform`.
+- Changes model tests: `pnpm -C apps/desktop test:changes`.
+- Changes retry tests (Rust): `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml changes_retry_tests`.
 - Author metadata merge tests (Rust): `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml author_metadata::tests`.
 - Author metadata live source probe (manual, network): `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml author_metadata::tests::live_source_probe -- --ignored --nocapture`.
 

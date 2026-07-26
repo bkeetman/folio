@@ -4,6 +4,12 @@
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
     "types": ["node", "vite/client"]
   },
-  "include": ["src/platform/native.ts", "src/platform/native.test.ts"],
+  "include": [
+    "src/features/changes/changes-model.ts",
+    "src/features/changes/changes-model.test.ts",
+    "src/platform/native.ts",
+    "src/platform/native.test.ts",
+    "src/types/library.ts"
+  ],
   "exclude": []
 }

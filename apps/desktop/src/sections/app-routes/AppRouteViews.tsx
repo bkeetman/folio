@@ -10,7 +10,7 @@ const LibraryView = lazy(() =>
   import("../LibraryView").then((module) => ({ default: module.LibraryView }))
 );
 const ChangesView = lazy(() =>
-  import("../ChangesView").then((module) => ({ default: module.ChangesView }))
+  import("../../features/changes/ChangesView").then((module) => ({ default: module.ChangesView }))
 );
 const DuplicatesView = lazy(() =>
   import("../DuplicatesView").then((module) => ({ default: module.DuplicatesView }))
@@ -193,32 +193,7 @@ export function AppRouteViews({
       ) : null}
 
       {view === "changes" ? (
-        <ChangesView
-          pendingChangesStatus={changes.pendingChangesStatus}
-          setPendingChangesStatus={changes.setPendingChangesStatus}
-          changesSourceFilter={changes.changesSourceFilter}
-          setChangesSourceFilter={changes.setChangesSourceFilter}
-          changesDeviceFilter={changes.changesDeviceFilter}
-          clearChangesDeviceFilter={changes.clearChangesDeviceFilter}
-          pendingChangesApplying={changes.pendingChangesApplying}
-          pendingChangesLoading={changes.pendingChangesLoading}
-          pendingChanges={changes.pendingChanges}
-          selectedChangeIds={changes.selectedChangeIds}
-          toggleChangeSelection={changes.toggleChangeSelection}
-          handleApplyAllChanges={() => void changes.handleApplyAllChanges()}
-          handleApplySelectedChanges={() => void changes.handleApplySelectedChanges()}
-          handleApplyChange={(id) => void changes.handleApplyChange(id)}
-          handleRemoveChange={(id) => void changes.handleRemoveChange(id)}
-          handleRemoveAllChanges={() => void changes.handleRemoveAllChanges()}
-          handleRemoveSelectedChanges={() => void changes.handleRemoveSelectedChanges()}
-          confirmDeleteOpen={changes.confirmDeleteOpen}
-          confirmDeleteIds={changes.confirmDeleteIds}
-          setConfirmDeleteOpen={changes.setConfirmDeleteOpen}
-          setConfirmDeleteIds={changes.setConfirmDeleteIds}
-          handleConfirmDelete={() => void changes.handleConfirmDelete()}
-          applyingChangeIds={changes.applyingChangeIds}
-          changeProgress={changes.changeProgress}
-        />
+        <ChangesView feature={changes} />
       ) : null}
 
       {view === "organize" ? (

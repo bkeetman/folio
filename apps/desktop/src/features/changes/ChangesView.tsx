@@ -1,37 +1,14 @@
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke, isTauri } from "../platform/native";
-import { ItemSpinner, ProgressBar } from "../components/ProgressBar";
-import { cn } from "../lib/utils";
-import type { OperationProgress, PendingChange } from "../types/library";
-import { Button } from "../components/ui";
+import { ItemSpinner, ProgressBar } from "../../components/ProgressBar";
+import { Button } from "../../components/ui";
+import { cn } from "../../lib/utils";
+import { invoke, isTauri } from "../../platform/native";
+import type { ChangesFeatureView } from "./useChangesFeature";
 
 type ChangesViewProps = {
-  pendingChangesStatus: "pending" | "applied" | "error";
-  setPendingChangesStatus: (status: "pending" | "applied" | "error") => void;
-  changesSourceFilter: "all" | "library" | "ereader";
-  setChangesSourceFilter: (value: "all" | "library" | "ereader") => void;
-  changesDeviceFilter: string | null;
-  clearChangesDeviceFilter: () => void;
-  pendingChangesApplying: boolean;
-  pendingChangesLoading: boolean;
-  pendingChanges: PendingChange[];
-  selectedChangeIds: Set<string>;
-  toggleChangeSelection: (id: string) => void;
-  handleApplyAllChanges: () => void;
-  handleApplySelectedChanges: () => void;
-  handleApplyChange: (id: string) => void;
-  handleRemoveChange: (id: string) => void;
-  handleRemoveAllChanges: () => void;
-  handleRemoveSelectedChanges: () => void;
-  confirmDeleteOpen: boolean;
-  confirmDeleteIds: string[];
-  setConfirmDeleteOpen: (open: boolean) => void;
-  setConfirmDeleteIds: (ids: string[]) => void;
-  handleConfirmDelete: () => void;
-  applyingChangeIds: Set<string>;
-  changeProgress: OperationProgress | null;
+  feature: ChangesFeatureView;
 };
 
 type MetadataField = {
@@ -255,34 +232,21 @@ function PendingCoverDiff({ changeId }: { changeId: string }) {
   );
 }
 
-export function ChangesView({
-  pendingChangesStatus,
-  setPendingChangesStatus,
-  changesSourceFilter,
-  setChangesSourceFilter,
-  changesDeviceFilter,
-  clearChangesDeviceFilter,
-  pendingChangesApplying,
-  pendingChangesLoading,
-  pendingChanges,
-  selectedChangeIds,
-  toggleChangeSelection,
-  handleApplyAllChanges,
-  handleApplySelectedChanges,
-  handleApplyChange,
-  handleRemoveChange,
-  handleRemoveAllChanges,
-  handleRemoveSelectedChanges,
-  confirmDeleteOpen,
-  confirmDeleteIds,
-  setConfirmDeleteOpen,
-  setConfirmDeleteIds,
-  handleConfirmDelete,
-  applyingChangeIds,
-  changeProgress,
-}: ChangesViewProps) {
+export function ChangesView({ feature }: ChangesViewProps) {
   const { t } = useTranslation();
-  const hasPendingItems = pendingChanges.some((change) => change.status === "pending");
+  const { state, applyingChangeIds, changeProgress, confirmDeleteIds, actions } = feature;
+  const pendingChangesStatus = state.historyStatus;
+  const changesSourceFilter = state.sourceFilter;
+  const changesDeviceFilter = state.deviceFilter;
+  const pendingChangesApplying = state.operation.status === "running";
+  const pendingChangesLoading = state.operation.status === "loading";
+  const pendingChangesBusy = pendingChangesApplying || pendingChangesLoading;
+  const pendingChanges = state.visibleItems;
+  const selectedChangeIds = state.selectedIds;
+  const confirmDeleteOpen = confirmDeleteIds.length > 0;
+  const retryingHistory = pendingChangesStatus === "error";
+  const actionableStatus = retryingHistory ? "error" : "pending";
+  const hasActionableItems = pendingChanges.some((change) => change.status === actionableStatus);
 
   return (
     <section className="flex flex-col gap-4">
@@ -293,31 +257,32 @@ export function ChangesView({
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setChangesSourceFilter("all")}
-          disabled={changesSourceFilter === "all"}
+          onClick={() => actions.filterSource("all")}
+          disabled={changesSourceFilter === "all" || pendingChangesBusy}
         >
           {t("changes.sources.all")}
         </Button>
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setChangesSourceFilter("library")}
-          disabled={changesSourceFilter === "library"}
+          onClick={() => actions.filterSource("library")}
+          disabled={changesSourceFilter === "library" || pendingChangesBusy}
         >
           {t("changes.sources.library")}
         </Button>
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setChangesSourceFilter("ereader")}
-          disabled={changesSourceFilter === "ereader"}
+          onClick={() => actions.filterSource("ereader")}
+          disabled={changesSourceFilter === "ereader" || pendingChangesBusy}
         >
           {t("changes.sources.ereader")}
         </Button>
         {changesDeviceFilter ? (
           <button
             type="button"
-            onClick={clearChangesDeviceFilter}
+            onClick={actions.clearDeviceFilter}
+            disabled={pendingChangesBusy}
             className="ml-2 rounded-full border border-[var(--app-border-soft)] bg-app-bg px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[var(--app-ink-muted)] hover:border-[var(--app-accent)] hover:text-[var(--app-ink)]"
           >
             {t("changes.deviceFilterActive")} {changesDeviceFilter} ×
@@ -329,24 +294,24 @@ export function ChangesView({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setPendingChangesStatus("pending")}
-            disabled={pendingChangesStatus === "pending"}
+            onClick={() => actions.showHistory("pending")}
+            disabled={pendingChangesStatus === "pending" || pendingChangesBusy}
           >
             {t("changes.pending")}
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setPendingChangesStatus("applied")}
-            disabled={pendingChangesStatus === "applied"}
+            onClick={() => actions.showHistory("applied")}
+            disabled={pendingChangesStatus === "applied" || pendingChangesBusy}
           >
             {t("changes.applied")}
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setPendingChangesStatus("error")}
-            disabled={pendingChangesStatus === "error"}
+            onClick={() => actions.showHistory("error")}
+            disabled={pendingChangesStatus === "error" || pendingChangesBusy}
           >
             {t("changes.errors")}
           </Button>
@@ -354,37 +319,44 @@ export function ChangesView({
         <Button
           variant="primary"
           size="sm"
-          onClick={handleApplyAllChanges}
-          disabled={pendingChangesApplying || !hasPendingItems}
+          onClick={actions.applyAll}
+          disabled={pendingChangesBusy || !hasActionableItems}
         >
-          {t("changes.applyAll")}
+          {retryingHistory ? t("changes.retryAll") : t("changes.applyAll")}
         </Button>
         <Button
           variant="ghost"
           size="sm"
-          onClick={handleApplySelectedChanges}
-          disabled={!selectedChangeIds.size || pendingChangesApplying}
+          onClick={actions.applySelected}
+          disabled={!selectedChangeIds.size || pendingChangesBusy}
         >
-          {t("changes.applySelected")}
+          {retryingHistory ? t("changes.retrySelected") : t("changes.applySelected")}
         </Button>
         <div className="h-4 w-px bg-[var(--app-border)]" />
         <Button
           variant="ghost"
           size="sm"
-          onClick={handleRemoveSelectedChanges}
-          disabled={!selectedChangeIds.size || pendingChangesApplying}
+          onClick={actions.undoSelected}
+          disabled={!selectedChangeIds.size || pendingChangesBusy || retryingHistory}
         >
           {t("changes.removeSelected")}
         </Button>
         <Button
           variant="ghost"
           size="sm"
-          onClick={handleRemoveAllChanges}
-          disabled={pendingChangesApplying || !hasPendingItems}
+          onClick={actions.undoAll}
+          disabled={pendingChangesBusy || !hasActionableItems || retryingHistory}
         >
           {t("changes.removeAll")}
         </Button>
       </div>
+
+      {pendingChangesLoading ? (
+        <div className="flex items-center gap-2 rounded-md border border-[var(--app-border-soft)] bg-app-surface/70 px-3 py-2 text-xs text-[var(--app-ink-muted)]">
+          <Loader2 size={14} className="animate-spin" />
+          {t("changes.loading")}
+        </div>
+      ) : null}
 
       {/* Progress bar when applying changes */}
       <ProgressBar
@@ -393,6 +365,29 @@ export function ChangesView({
         variant="accent"
         show={pendingChangesApplying && changeProgress !== null}
       />
+
+      {state.operation.status === "partial" || state.operation.status === "error" ? (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2">
+          <div className="text-xs text-red-300">
+            {state.operation.status === "partial"
+              ? t("changes.partialFailure", {
+                  defaultValue: "{{count}} change(s) failed and can be retried.",
+                  count: state.operation.errors,
+                })
+              : state.operation.message}
+          </div>
+          <Button variant="ghost" size="sm" onClick={actions.retry}>
+            {t("changes.retry")}
+          </Button>
+        </div>
+      ) : state.operation.status === "load-error" ? (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2">
+          <div className="text-xs text-red-300">{state.operation.message}</div>
+          <Button variant="ghost" size="sm" onClick={actions.retry}>
+            {t("changes.retry")}
+          </Button>
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-1.5">
         {pendingChanges.length ? (
@@ -441,8 +436,8 @@ export function ChangesView({
                       <input
                         type="checkbox"
                         checked={selectedChangeIds.has(change.id)}
-                        onChange={() => toggleChangeSelection(change.id)}
-                        disabled={change.status !== "pending"}
+                        onChange={() => actions.toggleSelection(change.id)}
+                        disabled={pendingChangesBusy || change.status !== actionableStatus}
                       />
                     )}
                   </label>
@@ -470,17 +465,27 @@ export function ChangesView({
                           variant="ghost"
                           size="sm"
                           className="h-7 px-2"
-                          onClick={() => handleApplyChange(change.id)}
-                          disabled={pendingChangesApplying || change.status !== "pending"}
+                          onClick={() => actions.applyOne(change.id)}
+                          disabled={pendingChangesBusy || change.status !== actionableStatus}
                         >
-                          {isApplying ? <Loader2 size={13} className="animate-spin" /> : t("changes.apply")}
+                          {isApplying ? (
+                            <Loader2 size={13} className="animate-spin" />
+                          ) : retryingHistory ? (
+                            t("changes.retry")
+                          ) : (
+                            t("changes.apply")
+                          )}
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-7 px-2"
-                          onClick={() => handleRemoveChange(change.id)}
-                          disabled={pendingChangesApplying || change.status !== "pending"}
+                          onClick={() => actions.undoOne(change.id)}
+                          disabled={
+                            pendingChangesBusy ||
+                            change.status !== "pending" ||
+                            retryingHistory
+                          }
                         >
                           {t("changes.remove")}
                         </Button>
@@ -541,9 +546,9 @@ export function ChangesView({
               </div>
             );
           })
-        ) : (
+        ) : pendingChangesLoading ? null : (
           <div className="text-xs text-[var(--app-ink-muted)]">
-            {pendingChangesLoading ? t("changes.loading") : t("changes.noPending")}
+            {t("changes.noPending")}
           </div>
         )}
       </div>
@@ -558,14 +563,11 @@ export function ChangesView({
             <div className="mt-3 flex justify-end gap-2">
               <Button
                 variant="ghost"
-                onClick={() => {
-                  setConfirmDeleteOpen(false);
-                  setConfirmDeleteIds([]);
-                }}
+                onClick={actions.cancelDelete}
               >
                 {t("changes.cancel")}
               </Button>
-              <Button variant="danger" onClick={handleConfirmDelete}>
+              <Button variant="danger" onClick={actions.confirmDelete}>
                 {t("changes.delete")}
               </Button>
             </div>

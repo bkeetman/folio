@@ -1,4 +1,5 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
+import type { ChangesFeatureView } from "../../features/changes/useChangesFeature";
 import type { FilteredBook } from "../../hooks/useLibrarySelectors";
 import type { ThemeMode } from "../../hooks/useTheme";
 import type {
@@ -20,7 +21,6 @@ import type {
   OperationProgress,
   OrganizePlan,
   OrganizerLog,
-  PendingChange,
   ScanProgress,
   SyncProgress,
   SyncQueueItem,
@@ -113,32 +113,7 @@ export type AppRoutesFixProps = {
   onQueueRemoveItem: (itemId: string) => void | Promise<void>;
 };
 
-export type AppRoutesChangesProps = {
-  pendingChangesStatus: "pending" | "applied" | "error";
-  setPendingChangesStatus: Dispatch<SetStateAction<"pending" | "applied" | "error">>;
-  changesSourceFilter: "all" | "library" | "ereader";
-  setChangesSourceFilter: Dispatch<SetStateAction<"all" | "library" | "ereader">>;
-  changesDeviceFilter: string | null;
-  clearChangesDeviceFilter: () => void;
-  pendingChangesApplying: boolean;
-  pendingChangesLoading: boolean;
-  pendingChanges: PendingChange[];
-  selectedChangeIds: Set<string>;
-  toggleChangeSelection: (id: string) => void;
-  handleApplyAllChanges: () => void | Promise<void>;
-  handleApplySelectedChanges: () => void | Promise<void>;
-  handleApplyChange: (changeId: string) => void | Promise<void>;
-  handleRemoveChange: (changeId: string) => void | Promise<void>;
-  handleRemoveAllChanges: () => void | Promise<void>;
-  handleRemoveSelectedChanges: () => void | Promise<void>;
-  confirmDeleteOpen: boolean;
-  confirmDeleteIds: string[];
-  setConfirmDeleteOpen: Dispatch<SetStateAction<boolean>>;
-  setConfirmDeleteIds: Dispatch<SetStateAction<string[]>>;
-  handleConfirmDelete: () => void | Promise<void>;
-  applyingChangeIds: Set<string>;
-  changeProgress: OperationProgress | null;
-};
+export type AppRoutesChangesProps = ChangesFeatureView;
 
 export type AppRoutesOrganizerProps = {
   organizeMode: string;

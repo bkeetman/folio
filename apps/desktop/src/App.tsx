@@ -13,6 +13,7 @@ import {
 import { confirm, invoke, isTauri, open } from "./platform/native";
 import { ProgressBar, ScanProgressBar } from "./components/ProgressBar";
 import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
+import { useChangesFeature } from "./features/changes/useChangesFeature";
 import { useCoverOverrides } from "./hooks/useCoverOverrides";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
 import { useEreader } from "./hooks/useEreader";
@@ -24,7 +25,6 @@ import { useMetadataActions } from "./hooks/useMetadataActions";
 import { useMetadataSettings } from "./hooks/useMetadataSettings";
 import { useOperationEventListeners } from "./hooks/useOperationEventListeners";
 import { useOrganizer } from "./hooks/useOrganizer";
-import { usePendingChangeHandlers } from "./hooks/usePendingChangeHandlers";
 import { useTheme } from "./hooks/useTheme";
 import { useUpdater } from "./hooks/useUpdater";
 import {
@@ -47,7 +47,6 @@ import type {
   LibrarySort,
   MetadataSourceSetting,
   OperationProgress,
-  PendingChange,
   ScanProgress,
   Tag,
   View,
@@ -112,7 +111,6 @@ const DEFAULT_METADATA_SOURCES: MetadataSourceSetting[] = [
   },
 ];
 
-const SYNC_CHANGE_ID_PREFIX = "sync:";
 const LIBRARY_SORT_STORAGE_KEY = "folio.librarySort";
 const LIBRARY_SORT_LEGACY_SESSION_KEY = "folio.session.librarySort";
 const LIBRARY_SORT_VALUES: LibrarySort[] = [
@@ -124,8 +122,6 @@ const LIBRARY_SORT_VALUES: LibrarySort[] = [
   "year-asc",
   "recent",
 ];
-type PendingChangeStatus = "pending" | "applied" | "error";
-type ChangesSourceFilter = "all" | "library" | "ereader";
 
 function App() {
   const readInitialInspectorWidth = () => {
@@ -199,26 +195,11 @@ function App() {
   const [fixSearchQuery, setFixSearchQuery] = useState("");
   const [fixApplyingCandidateId, setFixApplyingCandidateId] = useState<string | null>(null);
   const fixSearchRequestIdRef = useRef(0);
-  const [pendingChanges, setPendingChanges] = useState<PendingChange[]>([]);
-  const [pendingChangesCount, setPendingChangesCount] = useState(0);
-  const [pendingChangesLoading, setPendingChangesLoading] = useState(false);
-  const [pendingChangesApplying, setPendingChangesApplying] = useState(false);
-  const [pendingChangesStatus, setPendingChangesStatus] = useState<PendingChangeStatus>("pending");
-  const [changesSourceFilter, setChangesSourceFilter] = useState<ChangesSourceFilter>("all");
-  const [changesDeviceFilter, setChangesDeviceFilter] = useState<string | null>(null);
-  const pendingChangesStatusRef = useRef<PendingChangeStatus>("pending");
-  const [applyingChangeIds, setApplyingChangeIds] = useState<Set<string>>(new Set());
-  const [changeProgress, setChangeProgress] = useState<OperationProgress | null>(null);
   const [importProgress, setImportProgress] = useState<OperationProgress | null>(null);
   const [importingBooks, setImportingBooks] = useState(false);
   const [tags, setTags] = useState<Tag[]>([]);
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0].value);
-  const [selectedChangeIds, setSelectedChangeIds] = useState<Set<string>>(
-    new Set()
-  );
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
-  const [confirmDeleteIds, setConfirmDeleteIds] = useState<string[]>([]);
 
   // Navigation filter states (for linking from Authors/Series views)
   const [selectedAuthorNames, setSelectedAuthorNames] = useState<string[]>([]);
@@ -387,6 +368,16 @@ function App() {
     setActivityLog,
   });
 
+  const changesFeature = useChangesFeature({
+    enabled: isDesktop,
+    active: view === "changes",
+    refreshSignal: ereaderSyncQueue,
+    refreshLibrary,
+    reportStatus: setScanStatus,
+  });
+  const pendingChangesCount = changesFeature.pendingCount;
+  const refreshPendingChanges = changesFeature.refreshPending;
+
   const {
     uniqueAuthors,
     uniqueSeries,
@@ -437,105 +428,6 @@ function App() {
     if (view === "library" || view === "library-books") return;
     setSelectedBatchItemIds(new Set());
   }, [view]);
-
-  useEffect(() => {
-    pendingChangesStatusRef.current = pendingChangesStatus;
-  }, [pendingChangesStatus]);
-
-  const loadChangesByStatus = useCallback(async (status: PendingChangeStatus) => {
-    const [fileChanges, syncChanges] = await Promise.all([
-      invoke<PendingChange[]>("get_pending_changes", { status }),
-      invoke<PendingChange[]>("get_sync_queue_changes", { status }),
-    ]);
-    return [...fileChanges, ...syncChanges].sort((a, b) => b.created_at - a.created_at);
-  }, []);
-
-  const splitChangeIds = useCallback((ids: string[]) => {
-    const fileIds: string[] = [];
-    const syncIds: string[] = [];
-    ids.forEach((id) => {
-      if (id.startsWith(SYNC_CHANGE_ID_PREFIX)) {
-        syncIds.push(id.slice(SYNC_CHANGE_ID_PREFIX.length));
-      } else {
-        fileIds.push(id);
-      }
-    });
-    return { fileIds, syncIds };
-  }, []);
-
-  const isEreaderChange = useCallback((change: PendingChange) => {
-    return change.id.startsWith(SYNC_CHANGE_ID_PREFIX) || change.change_type.startsWith("ereader_");
-  }, []);
-
-  const getChangeDeviceId = useCallback((change: PendingChange): string | null => {
-    if (!change.changes_json) return null;
-    try {
-      const parsed = JSON.parse(change.changes_json) as { deviceId?: unknown };
-      return typeof parsed.deviceId === "string" && parsed.deviceId.length > 0
-        ? parsed.deviceId
-        : null;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const pendingChangesForView = useMemo(() => {
-    return pendingChanges.filter((change) => {
-      const isFromEreader = isEreaderChange(change);
-      if (changesSourceFilter === "library" && isFromEreader) return false;
-      if (changesSourceFilter === "ereader" && !isFromEreader) return false;
-      if (changesDeviceFilter) {
-        if (!isFromEreader) return false;
-        return getChangeDeviceId(change) === changesDeviceFilter;
-      }
-      return true;
-    });
-  }, [changesDeviceFilter, changesSourceFilter, getChangeDeviceId, isEreaderChange, pendingChanges]);
-
-  useEffect(() => {
-    const visibleIds = new Set(pendingChangesForView.map((change) => change.id));
-    setSelectedChangeIds((previous) => {
-      if (previous.size === 0) return previous;
-      const next = new Set(Array.from(previous).filter((id) => visibleIds.has(id)));
-      return next.size === previous.size ? previous : next;
-    });
-  }, [pendingChangesForView]);
-
-  const refreshPendingChanges = useCallback(async () => {
-    if (!isTauri()) return 0;
-    try {
-      const result = await loadChangesByStatus("pending");
-      setPendingChangesCount(result.length);
-      if (pendingChangesStatus === "pending") {
-        setPendingChanges(result);
-      }
-      return result.length;
-    } catch {
-      return 0;
-    }
-  }, [loadChangesByStatus, pendingChangesStatus]);
-
-  useEffect(() => {
-    if (!isDesktop) return;
-    void refreshPendingChanges();
-  }, [isDesktop, refreshPendingChanges]);
-
-  useEffect(() => {
-    if (!isDesktop) return;
-    void refreshPendingChanges();
-  }, [ereaderSyncQueue, isDesktop, refreshPendingChanges]);
-
-  const toggleChangeSelection = (id: string) => {
-    setSelectedChangeIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
 
   const handleToggleBatchSelection = useCallback((itemId: string) => {
     setSelectedBatchItemIds((previous) => {
@@ -644,77 +536,6 @@ function App() {
     },
     [refreshCoverForItem, refreshLibrary, refreshPendingChanges]
   );
-
-  useEffect(() => {
-    if (!isDesktop || view !== "changes") return;
-    if (!isTauri()) return;
-    let active = true;
-    const load = async () => {
-      setPendingChangesLoading(true);
-      try {
-        const result = await loadChangesByStatus(pendingChangesStatus);
-        if (active) {
-          setPendingChanges(result);
-          if (pendingChangesStatus === "pending") {
-            setPendingChangesCount(result.length);
-          }
-        }
-      } catch {
-        if (active) {
-          setPendingChanges([]);
-          if (pendingChangesStatus === "pending") {
-            setPendingChangesCount(0);
-          }
-        }
-      } finally {
-        if (active) setPendingChangesLoading(false);
-      }
-    };
-    void load();
-    const interval = window.setInterval(load, 8000);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-    };
-  }, [view, isDesktop, loadChangesByStatus, pendingChangesStatus]);
-
-  const refreshCurrentChanges = useCallback(async () => {
-    const status = pendingChangesStatusRef.current;
-    const result = await loadChangesByStatus(status);
-    setPendingChanges(result);
-    if (status === "pending") {
-      setPendingChangesCount(result.length);
-    } else {
-      await refreshPendingChanges();
-    }
-    return result;
-  }, [loadChangesByStatus, refreshPendingChanges]);
-
-  const {
-    handleApplyChange,
-    handleApplySelectedChanges,
-    handleConfirmDelete,
-    handleApplyAllChanges,
-    handleRemoveChange,
-    handleRemoveSelectedChanges,
-    handleRemoveAllChanges,
-  } = usePendingChangeHandlers({
-    isTauriRuntime: isTauri(),
-    pendingChangesStatusRef,
-    selectedChangeIds,
-    pendingChangesForView,
-    changesSourceFilter,
-    changesDeviceFilter,
-    confirmDeleteIds,
-    setConfirmDeleteIds,
-    setConfirmDeleteOpen,
-    setPendingChangesApplying,
-    setSelectedChangeIds,
-    setScanStatus,
-    splitChangeIds,
-    refreshCurrentChanges,
-    refreshLibrary,
-  });
 
   const {
     getCandidateCoverUrl,
@@ -892,14 +713,6 @@ function App() {
     setEnrichingItems,
     setEnriching,
     refreshLibrary,
-    setChangeProgress,
-    setApplyingChangeIds,
-    setPendingChangesApplying,
-    loadChangesByStatus,
-    pendingChangesStatusRef,
-    setPendingChanges,
-    setPendingChangesCount,
-    refreshPendingChanges,
   });
 
   const handleQueueRemoveItem = useCallback(async (itemId: string) => {
@@ -986,11 +799,9 @@ function App() {
 
   const handleOpenChangesFromEreader = useCallback(() => {
     setEreaderSyncDialogOpen(false);
-    setPendingChangesStatus("pending");
-    setChangesSourceFilter("ereader");
-    setChangesDeviceFilter(selectedEreaderDeviceId);
+    changesFeature.openForDevice(selectedEreaderDeviceId);
     setViewWithTransition("changes");
-  }, [selectedEreaderDeviceId, setEreaderSyncDialogOpen, setViewWithTransition]);
+  }, [changesFeature, selectedEreaderDeviceId, setEreaderSyncDialogOpen, setViewWithTransition]);
 
   const duplicateActionCount = useMemo(() => {
     const actionableHash = duplicates.filter((group) => {
@@ -1245,32 +1056,7 @@ function App() {
                 onItemUpdate: handleRefreshItemAndChanges,
                 onQueueRemoveItem: handleQueueRemoveItem,
               }}
-              changes={{
-                pendingChangesStatus,
-                setPendingChangesStatus,
-                pendingChangesApplying,
-                pendingChangesLoading,
-                changesSourceFilter,
-                setChangesSourceFilter,
-                changesDeviceFilter,
-                clearChangesDeviceFilter: () => setChangesDeviceFilter(null),
-                pendingChanges: pendingChangesForView,
-                selectedChangeIds,
-                toggleChangeSelection,
-                handleApplyAllChanges,
-                handleApplySelectedChanges,
-                handleApplyChange,
-                handleRemoveChange,
-                handleRemoveAllChanges,
-                handleRemoveSelectedChanges,
-                confirmDeleteOpen,
-                confirmDeleteIds,
-                setConfirmDeleteOpen,
-                setConfirmDeleteIds,
-                handleConfirmDelete,
-                applyingChangeIds,
-                changeProgress,
-              }}
+              changes={changesFeature.view}
               organizer={{
                 organizeMode,
                 setOrganizeMode,
