@@ -26,10 +26,7 @@ static BOL_TOKEN_CACHE: OnceLock<Mutex<Option<BolAccessToken>>> = OnceLock::new(
 static METADATA_DEBUG_ENABLED: OnceLock<bool> = OnceLock::new();
 const MAX_METADATA_CANDIDATES: usize = 12;
 
-pub mod db;
-pub mod models;
 pub mod parser;
-pub mod scanner;
 mod author_metadata;
 
 const MIGRATION_SQL: &str =
@@ -13133,7 +13130,6 @@ pub fn run() {
             scan_folder,
             scan_for_import,
             import_books,
-            scanner::scan_library,
             add_ereader_device,
             list_ereader_devices,
             remove_ereader_device,
