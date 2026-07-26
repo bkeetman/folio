@@ -15,7 +15,7 @@ export * from "./providers";
 
 type EnrichmentSourceName = "openlibrary" | "googlebooks" | "applebooks";
 
-type EnrichedCandidate = {
+export type EnrichedCandidate = {
   title?: string;
   authors?: string[];
   publishedYear?: number;

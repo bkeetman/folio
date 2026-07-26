@@ -5,3 +5,4 @@ export * from "./metadata";
 export * from "./enrichment";
 export * from "./organizer";
 export * from "./library";
+export * from "./folio";

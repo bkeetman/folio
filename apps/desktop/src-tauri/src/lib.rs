@@ -25,6 +25,7 @@ static ENRICH_CANCELLED: AtomicBool = AtomicBool::new(false);
 static BOL_TOKEN_CACHE: OnceLock<Mutex<Option<BolAccessToken>>> = OnceLock::new();
 static METADATA_DEBUG_ENABLED: OnceLock<bool> = OnceLock::new();
 const MAX_METADATA_CANDIDATES: usize = 12;
+const FOLIO_METADATA_CHANGE_TYPE: &str = "folio_metadata";
 
 pub mod parser;
 mod author_metadata;
@@ -2088,12 +2089,12 @@ fn get_pending_changes(
     .prepare(
       "SELECT id, file_id, type, from_path, to_path, changes_json, status, created_at, applied_at, error \
        FROM pending_changes \
-       WHERE status = ?1 \
+       WHERE status = ?1 AND type != ?2 \
        ORDER BY created_at DESC",
     )
     .map_err(|err| err.to_string())?;
     let rows = stmt
-        .query_map(params![status], |row| {
+        .query_map(params![status, FOLIO_METADATA_CHANGE_TYPE], |row| {
             Ok(PendingChange {
                 id: row.get(0)?,
                 file_id: row.get(1)?,
@@ -2202,8 +2203,8 @@ fn remove_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<i64
         // Remove all pending changes
         removed = conn
             .execute(
-                "DELETE FROM pending_changes WHERE status = 'pending'",
-                params![],
+                "DELETE FROM pending_changes WHERE status = 'pending' AND type != ?1",
+                params![FOLIO_METADATA_CHANGE_TYPE],
             )
             .map_err(|err| err.to_string())? as i64;
     } else {
@@ -2211,8 +2212,8 @@ fn remove_pending_changes(app: tauri::AppHandle, ids: Vec<String>) -> Result<i64
         for id in &ids {
             let result = conn
                 .execute(
-                    "DELETE FROM pending_changes WHERE id = ?1 AND status = 'pending'",
-                    params![id],
+                    "DELETE FROM pending_changes WHERE id = ?1 AND status = 'pending' AND type != ?2",
+                    params![id, FOLIO_METADATA_CHANGE_TYPE],
                 )
                 .map_err(|err| err.to_string())?;
             removed += result as i64;
@@ -2321,11 +2322,11 @@ fn apply_pending_changes_sync(app: &tauri::AppHandle, ids: Vec<String>) -> Resul
         let mut stmt = conn
       .prepare(
         "SELECT id, file_id, type, from_path, to_path, changes_json, status, created_at, applied_at, error \
-         FROM pending_changes WHERE status = 'pending' ORDER BY created_at ASC",
+         FROM pending_changes WHERE status = 'pending' AND type != ?1 ORDER BY created_at ASC",
       )
       .map_err(|err| err.to_string())?;
         let rows = stmt
-            .query_map(params![], |row| {
+            .query_map(params![FOLIO_METADATA_CHANGE_TYPE], |row| {
                 Ok(PendingChange {
                     id: row.get(0)?,
                     file_id: row.get(1)?,
@@ -2347,12 +2348,12 @@ fn apply_pending_changes_sync(app: &tauri::AppHandle, ids: Vec<String>) -> Resul
         let mut stmt = conn
       .prepare(
         "SELECT id, file_id, type, from_path, to_path, changes_json, status, created_at, applied_at, error \
-         FROM pending_changes WHERE status = 'pending' AND id = ?1",
+         FROM pending_changes WHERE status = 'pending' AND type != ?2 AND id = ?1",
       )
       .map_err(|err| err.to_string())?;
         for id in ids {
             let row = stmt
-                .query_row(params![id], |row| {
+                .query_row(params![id, FOLIO_METADATA_CHANGE_TYPE], |row| {
                     Ok(PendingChange {
                         id: row.get(0)?,
                         file_id: row.get(1)?,

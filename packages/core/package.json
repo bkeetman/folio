@@ -5,13 +5,21 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "folio": "dist/bin/folio.js",
+    "folio-mcp": "dist/bin/folio-mcp.js"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && pnpm build:bin",
+    "build:bin": "esbuild src/cli/folio.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/bin/folio.js && esbuild src/mcp/server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/bin/folio-mcp.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "scan": "tsx src/cli/scan.ts",
     "enrich": "tsx src/cli/enrich.ts",
-    "list": "tsx src/cli/list.ts"
+    "list": "tsx src/cli/list.ts",
+    "folio": "tsx src/cli/folio.ts",
+    "mcp": "tsx src/mcp/server.ts",
+    "test:folio": "tsx --test src/folio/index.test.ts"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
@@ -20,9 +28,11 @@
     "typescript": "~5.9.3"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.6.2",
     "drizzle-orm": "^0.45.1",
     "epub2": "^3.0.2",
-    "pdf-parse": "^1.1.4"
+    "pdf-parse": "^1.1.4",
+    "zod": "^3.25.76"
   }
 }
