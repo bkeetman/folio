@@ -1,8 +1,14 @@
-import { invoke } from "@tauri-apps/api/core";
 import { BookOpen, ChevronDown, ChevronUp, Grip, List, Loader2, RefreshCcw, Search, UserRound, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  createLoadingCapabilityState,
+  invoke,
+  invokeCapability,
+  isTauri,
+  type CapabilityState,
+} from "../platform/native";
 import { AuthorPhotoImage } from "../components/AuthorPhotoImage";
 import {
   AUTHOR_PROFILE_UPDATED_EVENT,
@@ -74,9 +80,14 @@ export function AuthorsView({
   const [cardView, setCardView] = useState(initialCardView);
   const [expandedAuthorNames, setExpandedAuthorNames] = useState<Set<string>>(new Set());
   const [authorProfiles, setAuthorProfiles] = useState<Record<string, AuthorProfile>>({});
-  const [authorProfilesLoading, setAuthorProfilesLoading] = useState(initialCardView);
-  const [authorProfilesLoaded, setAuthorProfilesLoaded] = useState(false);
-  const [authorProfilesError, setAuthorProfilesError] = useState<string | null>(null);
+  const [authorProfilesState, setAuthorProfilesState] = useState<CapabilityState<AuthorProfile[]>>(
+    createLoadingCapabilityState,
+  );
+  const authorProfilesLoading = authorProfilesState.status === "loading";
+  const authorProfilesLoaded =
+    authorProfilesState.status === "success" || authorProfilesState.status === "unsupported";
+  const authorProfilesError =
+    authorProfilesState.status === "error" ? authorProfilesState.error.message : null;
   const [authorEnrichingAll, setAuthorEnrichingAll] = useState(false);
   const [authorEnrichCancelling, setAuthorEnrichCancelling] = useState(false);
   const [authorEnrichProgress, setAuthorEnrichProgress] = useState<{ current: number; total: number } | null>(null);
@@ -88,37 +99,40 @@ export function AuthorsView({
   const activeAuthor = selectedAuthorNames[0] ?? null;
 
   useEffect(() => {
-    if (authorProfilesLoaded) return;
-    setAuthorProfilesLoading(true);
+    if (authorProfilesState.status !== "loading") return;
     let cancelled = false;
-    void invoke<AuthorProfile[]>("list_author_profiles")
-      .then((profiles) => {
+    void invokeCapability<AuthorProfile[]>(
+      "list_author_profiles",
+      undefined,
+      (state) => {
+        if (!cancelled) setAuthorProfilesState(state);
+      },
+    )
+      .then((result) => {
         if (cancelled) return;
+        if (result.status === "error") {
+          console.error("Failed to load author profiles for card view", result.error.message);
+          setAuthorProfilesState({
+            status: "error",
+            error: {
+              message: t("authors.profileLoadFailed", {
+                defaultValue: "Failed to load author card details.",
+              }),
+            },
+          });
+          return;
+        }
+        if (result.status !== "success") return;
         const byName: Record<string, AuthorProfile> = {};
-        for (const profile of profiles) {
+        for (const profile of result.value) {
           byName[normalizeAuthorKey(profile.name)] = profile;
         }
         setAuthorProfiles(byName);
-        setAuthorProfilesLoaded(true);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error("Failed to load author profiles for card view", error);
-        setAuthorProfilesError(
-          t("authors.profileLoadFailed", {
-            defaultValue: "Failed to load author card details.",
-          })
-        );
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setAuthorProfilesLoading(false);
-        }
       });
     return () => {
       cancelled = true;
     };
-  }, [authorProfilesLoaded, t]);
+  }, [authorProfilesState.status, t]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -199,11 +213,11 @@ export function AuthorsView({
   };
 
   const handleEnrichAllAuthors = async () => {
-    if (authorEnrichingAll || authors.length === 0) return;
+    if (!isTauri() || authorEnrichingAll || authors.length === 0) return;
     setAuthorEnrichingAll(true);
     setAuthorEnrichCancelling(false);
     setAuthorEnrichSummary(null);
-    setAuthorProfilesError(null);
+    setAuthorProfilesState({ status: "success", value: Object.values(authorProfiles) });
     setAuthorEnrichProgress({ current: 0, total: authors.length });
     setAuthorEnrichingName(null);
     authorEnrichCancelRequestedRef.current = false;
@@ -252,17 +266,20 @@ export function AuthorsView({
         }
       }
       flushProfiles();
-      setAuthorProfilesLoaded(true);
+      setAuthorProfilesState({ status: "success", value: Object.values(authorProfiles) });
       if (!cancelled) {
         setAuthorEnrichSummary({ updated, errors });
       }
     } catch (error) {
       console.error("Failed to enrich author metadata in batch", error);
-      setAuthorProfilesError(
-        t("authors.enrichFailed", {
-          defaultValue: "Failed to enrich author metadata.",
-        })
-      );
+      setAuthorProfilesState({
+        status: "error",
+        error: {
+          message: t("authors.enrichFailed", {
+            defaultValue: "Failed to enrich author metadata.",
+          }),
+        },
+      });
     } finally {
       setAuthorEnrichingAll(false);
       setAuthorEnrichCancelling(false);
@@ -332,8 +349,7 @@ export function AuthorsView({
                   onClick={() => {
                     setCardView(true);
                     if (!authorProfilesLoaded) {
-                      setAuthorProfilesLoading(true);
-                      setAuthorProfilesError(null);
+                      setAuthorProfilesState(createLoadingCapabilityState());
                     }
                   }}
                   className={`rounded p-1 transition-colors ${

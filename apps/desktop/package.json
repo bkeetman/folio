@@ -11,7 +11,8 @@
     "build": "tsc -b && vite build",
     "build:tauri": "cargo tauri build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:platform": "tsc -p tsconfig.test.json && tsx --test src/platform/native.test.ts"
   },
   "dependencies": {
     "@folio/core": "workspace:*",
@@ -43,6 +44,7 @@
     "globals": "^16.5.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.14",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4"

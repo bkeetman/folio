@@ -1,8 +1,5 @@
-import { getVersion } from "@tauri-apps/api/app";
-import { isTauri } from "@tauri-apps/api/core";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { check } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useState } from "react";
+import { check, getVersion, isTauri, relaunch } from "../platform/native";
 
 type UseUpdaterArgs = {
   isDesktop: boolean;

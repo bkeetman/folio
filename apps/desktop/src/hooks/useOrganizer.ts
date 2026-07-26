@@ -1,6 +1,5 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke, isTauri, listen, open } from "../platform/native";
 import type {
   OperationProgress,
   OperationStats,
@@ -127,7 +126,6 @@ export function useOrganizer({
     try {
       let selection = organizeRoot;
       if (!selection) {
-        const { open } = await import("@tauri-apps/plugin-dialog");
         const picked = await open({ directory: true, multiple: false });
         if (typeof picked !== "string") return null;
         selection = picked;

@@ -1,6 +1,5 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useCallback, type Dispatch, type SetStateAction } from "react";
+import { invoke, isTauri, listen, open } from "../platform/native";
 import type {
   ImportRequest,
   OperationProgress,
@@ -52,7 +51,6 @@ export function useLibraryOperations({
       setScanning(true);
       setScanStartedAt(Date.now());
       setScanProgress(null);
-      const { open } = await import("@tauri-apps/plugin-dialog");
       const selection: string | string[] | null = await open({
         directory: true,
         multiple: false,

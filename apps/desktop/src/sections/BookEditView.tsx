@@ -1,8 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
 import { ArrowLeft, Check, Image as ImageIcon, Loader2, Search, Trash2, X } from "lucide-react";
 import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { confirm, invoke, open } from "../platform/native";
 import { Button, Input } from "../components/ui";
 import { useAuthorSuggestions } from "../hooks/useAuthorSuggestions";
 import { LANGUAGE_OPTIONS } from "../lib/languageFlags";
@@ -361,7 +361,6 @@ export function BookEditView({
 
     const handleQueueRemove = async () => {
         if (!selectedItemId || !isDesktop) return;
-        const { confirm } = await import("@tauri-apps/plugin-dialog");
         const ok = await confirm(
             t("bookEdit.removeFromLibraryConfirm"),
             {
@@ -390,7 +389,6 @@ export function BookEditView({
         if (!selectedItemId) return;
 
         try {
-            const { open } = await import("@tauri-apps/plugin-dialog");
             const selected = await open({
                 multiple: false,
                 filters: [

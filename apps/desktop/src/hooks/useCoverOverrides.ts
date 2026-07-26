@@ -1,5 +1,5 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke, isTauri } from "../platform/native";
 import type { LibraryItem } from "../types/library";
 
 type CoverOverrideMap = Record<string, string | null>;

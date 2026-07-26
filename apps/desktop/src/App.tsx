@@ -1,4 +1,3 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   useCallback,
   useDeferredValue,
@@ -11,6 +10,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
+import { confirm, invoke, isTauri, open } from "./platform/native";
 import { ProgressBar, ScanProgressBar } from "./components/ProgressBar";
 import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
 import { useCoverOverrides } from "./hooks/useCoverOverrides";
@@ -812,7 +812,6 @@ function App() {
       setScanStatus("Clear requires the Tauri desktop runtime.");
       return;
     }
-    const { confirm } = await import("@tauri-apps/plugin-dialog");
     const ok = await confirm(
       "This will delete all items, files, and metadata from Folio. Your book files are not deleted. Continue?",
       {
@@ -851,7 +850,6 @@ function App() {
 
   const handleChooseRoot = async () => {
     if (!isTauri()) return;
-    const { open } = await import("@tauri-apps/plugin-dialog");
     const selection: string | string[] | null = await open({
       directory: true,
       multiple: false,
@@ -928,7 +926,6 @@ function App() {
       if (!isTauri() || itemIds.length === 0) return false;
       const count = itemIds.length;
       const noun = count === 1 ? "book" : "books";
-      const { confirm } = await import("@tauri-apps/plugin-dialog");
       const confirmed = await confirm(
         `Remove ${count} ${noun} from your library? This queues file deletes in Changes. Files are only deleted after Apply in Changes.`,
         {

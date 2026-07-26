@@ -1,5 +1,5 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
+import { confirm, invoke, isTauri, open } from "../platform/native";
 import type { DuplicateGroup } from "../types/library";
 
 type LibraryMutationOptions<T> = {
@@ -38,7 +38,6 @@ export function useLibraryIssueHandlers({
     async (fileId: string) => {
       if (!isTauri()) return;
       try {
-        const { open } = await import("@tauri-apps/plugin-dialog");
         const selection = await open({ multiple: false });
         if (typeof selection !== "string") return;
         const { pendingChangesCount } = await runLibraryMutationPipeline(
@@ -81,7 +80,6 @@ export function useLibraryIssueHandlers({
 
   const handleRemoveAllMissing = useCallback(async () => {
     if (!isTauri()) return;
-    const { confirm } = await import("@tauri-apps/plugin-dialog");
     const ok = await confirm(
       "This will remove all missing-file entries from your library records. Continue?",
       {
@@ -116,7 +114,6 @@ export function useLibraryIssueHandlers({
     try {
       let selection = organizeRoot;
       if (!selection) {
-        const { open } = await import("@tauri-apps/plugin-dialog");
         const picked: string | string[] | null = await open({
           directory: true,
           multiple: false,

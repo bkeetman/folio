@@ -1,6 +1,6 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { invoke, isTauri } from "../platform/native";
 
 type CoverBlob = {
   mime: string;

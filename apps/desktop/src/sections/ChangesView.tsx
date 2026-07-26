@@ -1,7 +1,7 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { invoke, isTauri } from "../platform/native";
 import { ItemSpinner, ProgressBar } from "../components/ProgressBar";
 import { cn } from "../lib/utils";
 import type { OperationProgress, PendingChange } from "../types/library";

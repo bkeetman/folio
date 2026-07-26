@@ -1,5 +1,5 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
+import { invoke, isTauri } from "../platform/native";
 import type {
   DuplicateGroup,
   InboxItem,

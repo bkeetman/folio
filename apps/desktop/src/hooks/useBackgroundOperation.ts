@@ -1,5 +1,5 @@
-import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { listen } from "../platform/native";
 import type { OperationProgress, OperationStats } from "../types/library";
 
 type UseBackgroundOperationOptions = {

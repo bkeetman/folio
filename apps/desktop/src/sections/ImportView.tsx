@@ -1,9 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
 import { AlertCircle, ArrowLeft, FileUp, FolderUp, Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { invoke, listen, open } from "../platform/native";
 import { Button } from "../components/ui";
 import type {
   ImportCandidate,

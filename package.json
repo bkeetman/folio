@@ -6,7 +6,7 @@
     "dev": "pnpm -C apps/desktop dev",
     "build": "pnpm -C apps/desktop build",
     "lint": "pnpm -C apps/desktop lint",
-    "check": "pnpm lint && pnpm build && pnpm -C packages/core build && pnpm -C packages/core exec tsx --test src/enrichment/providers/apple-books.test.ts && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml"
+    "check": "pnpm lint && pnpm build && pnpm -C apps/desktop test:platform && pnpm -C packages/core build && pnpm -C packages/core exec tsx --test src/enrichment/providers/apple-books.test.ts && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml"
   },
   "packageManager": "pnpm@10.28.2"
 }

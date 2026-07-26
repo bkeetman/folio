@@ -41,9 +41,10 @@
 - CLI list: `pnpm -C packages/core list --db "./folio.db"`.
 
 ## Tests
-- No test runner configured in package scripts.
+- Frontend platform tests use Node's test runner through `tsx`; no general UI test runner is configured.
 - If adding tests, document the single-test command here.
 - Apple Books provider tests: `pnpm -C packages/core exec tsx --test src/enrichment/providers/apple-books.test.ts`.
+- Platform adapter tests: `pnpm -C apps/desktop test:platform`.
 - Author metadata merge tests (Rust): `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml author_metadata::tests`.
 - Author metadata live source probe (manual, network): `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml author_metadata::tests::live_source_probe -- --ignored --nocapture`.
 

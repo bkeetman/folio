@@ -1,5 +1,5 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { invoke, isTauri } from "../platform/native";
 import type {
   MetadataLookupSettings,
   MetadataSourceSetting,

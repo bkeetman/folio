@@ -1,4 +1,3 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { FileText, FolderOpen, HardDrive, Import, Minus, Plus, RefreshCw, Trash2 } from "lucide-react";
 import {
@@ -11,6 +10,7 @@ import {
   type ComponentProps,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { convertFileSrc, open } from "../platform/native";
 import { ScanProgressBar, SyncProgressBar } from "../components/ProgressBar";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -391,7 +391,6 @@ export function EReaderView({
         </p>
         <Button
           onClick={async () => {
-            const { open } = await import("@tauri-apps/plugin-dialog");
             const selection = await open({ directory: true, multiple: false });
             if (typeof selection === "string") {
               const name = selection.split("/").pop() || t("ereader.deviceDefaultName");

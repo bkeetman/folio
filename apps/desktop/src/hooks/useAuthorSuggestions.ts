@@ -1,6 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "../platform/native";
 import type { AuthorSuggestion } from "../types/library";
 
 type UseAuthorSuggestionsArgs = {

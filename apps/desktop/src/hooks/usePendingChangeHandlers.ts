@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { invoke } from "../platform/native";
 import type { PendingChange } from "../types/library";
 
 type PendingChangeStatus = "pending" | "applied" | "error";

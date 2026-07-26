@@ -1,8 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
 import { BookOpen, FileText, FolderOpen, Globe, HardDrive, Loader2, PencilLine, RefreshCcw, UserRound } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { invokeCapability, type CapabilityState } from "../platform/native";
 import { AuthorPhotoImage } from "../components/AuthorPhotoImage";
 import { Badge, Button, Separator } from "../components/ui";
 import { emitAuthorProfileUpdated } from "../lib/authorProfileEvents";
@@ -17,6 +17,36 @@ type EReaderSyncStatus = {
 };
 
 const AUTHOR_BOOKS_PAGE_SIZE = 8;
+const EMPTY_AUTHOR_BOOK_COVER_URLS: Record<string, string> = {};
+const EMPTY_AUTHOR_BOOK_COVER_LOADING_IDS: Record<string, boolean> = {};
+
+type AuthorBooksPaginationState = {
+  authorName: string | null;
+  visibleCount: number;
+};
+
+type AuthorBookCoverState = {
+  authorName: string | null;
+  urls: Record<string, string>;
+  loadingIds: Record<string, boolean>;
+  errors: Record<string, string>;
+};
+
+type ItemFileState = {
+  itemId: string | null;
+  capability: CapabilityState<FileItem[]>;
+};
+
+type RevealFileState = {
+  itemId: string | null;
+  path: string;
+  capability: CapabilityState<void>;
+};
+
+type AuthorBookCoverLoadResult =
+  | { bookId: string; status: "success"; url: string | null }
+  | { bookId: string; status: "unsupported" }
+  | { bookId: string; status: "error"; message: string };
 
 function formatMetadataDate(timestampMs: number | null): string | null {
   if (!timestampMs) return null;
@@ -121,25 +151,51 @@ export function Inspector({
   const { t } = useTranslation();
   const compactLayout = width < 320;
   const hasKnownItemLanguage = isKnownLanguageCode(selectedItem?.language);
-  const [fileState, setFileState] = useState<{ itemId: string | null; files: FileItem[] }>({
+  const [fileState, setFileState] = useState<ItemFileState>({
     itemId: null,
-    files: [],
+    capability: { status: "unsupported", capability: "get_item_files" },
   });
+  const [revealFileState, setRevealFileState] = useState<RevealFileState | null>(null);
   const [authorProfile, setAuthorProfile] = useState<AuthorProfile | null>(null);
   const [authorProfileLoading, setAuthorProfileLoading] = useState(false);
   const [authorProfileRefreshing, setAuthorProfileRefreshing] = useState(false);
   const [authorProfileError, setAuthorProfileError] = useState<string | null>(null);
   const [bookAuthorProfiles, setBookAuthorProfiles] = useState<Record<string, AuthorProfile | null>>({});
   const [bookAuthorProfilesLoading, setBookAuthorProfilesLoading] = useState(false);
-  const [authorBooksVisibleCount, setAuthorBooksVisibleCount] = useState(AUTHOR_BOOKS_PAGE_SIZE);
-  const [authorBookCoverUrls, setAuthorBookCoverUrls] = useState<Record<string, string>>({});
-  const [authorBookCoverLoadingIds, setAuthorBookCoverLoadingIds] = useState<Record<string, boolean>>({});
+  const [authorBooksPagination, setAuthorBooksPagination] = useState<AuthorBooksPaginationState>({
+    authorName: null,
+    visibleCount: AUTHOR_BOOKS_PAGE_SIZE,
+  });
+  const [authorBookCoverState, setAuthorBookCoverState] = useState<AuthorBookCoverState>({
+    authorName: null,
+    urls: {},
+    loadingIds: {},
+    errors: {},
+  });
+  const [authorBookCoverRetryVersion, setAuthorBookCoverRetryVersion] = useState(0);
   const authorBookCoverCacheRef = useRef<Map<string, string | null>>(new Map());
   const bookAuthorProfileCacheRef = useRef<Map<string, AuthorProfile | null>>(new Map());
   const autoFetchAttemptedRef = useRef<Set<string>>(new Set());
   const authorProfileLoadInFlightRef = useRef(false);
   const selectedItemId = selectedItem?.id ?? null;
   const selectedAuthorName = selectedAuthorNames[0] ?? null;
+  const authorBooksVisibleCount =
+    authorBooksPagination.authorName === selectedAuthorName
+      ? authorBooksPagination.visibleCount
+      : AUTHOR_BOOKS_PAGE_SIZE;
+  const authorBookCoverUrls =
+    authorBookCoverState.authorName === selectedAuthorName
+      ? authorBookCoverState.urls
+      : EMPTY_AUTHOR_BOOK_COVER_URLS;
+  const authorBookCoverLoadingIds =
+    authorBookCoverState.authorName === selectedAuthorName
+      ? authorBookCoverState.loadingIds
+      : EMPTY_AUTHOR_BOOK_COVER_LOADING_IDS;
+  const authorBookCoverErrors =
+    authorBookCoverState.authorName === selectedAuthorName
+      ? authorBookCoverState.errors
+      : EMPTY_AUTHOR_BOOK_COVER_URLS;
+  const authorBookCoverErrorCount = Object.keys(authorBookCoverErrors).length;
   const authorMetadataLoading = authorProfileLoading || authorProfileRefreshing;
   const authorHasBio = Boolean(authorProfile?.bio && authorProfile.bio.trim().length > 0);
   const authorHasPhoto = Boolean(authorProfile?.photoUrl && authorProfile.photoUrl.trim().length > 0);
@@ -186,12 +242,19 @@ export function Inspector({
   useEffect(() => {
     if (!selectedItemId) return;
     let cancelled = false;
-    invoke<FileItem[]>("get_item_files", { itemId: selectedItemId })
-      .then((files) => {
+    void invokeCapability<FileItem[]>(
+      "get_item_files",
+      { itemId: selectedItemId },
+      (capability) => {
         if (cancelled) return;
-        setFileState({ itemId: selectedItemId, files });
-      })
-      .catch(console.error);
+        setFileState({ itemId: selectedItemId, capability });
+        if (capability.status === "loading") {
+          setRevealFileState(null);
+        } else if (capability.status === "error") {
+          console.error("Failed to load item files", capability.error.message);
+        }
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -199,36 +262,40 @@ export function Inspector({
 
   useEffect(() => {
     if (selectedItem || !selectedAuthorName) {
-      setAuthorProfile(null);
-      setAuthorProfileLoading(false);
-      setAuthorProfileRefreshing(false);
-      setAuthorProfileError(null);
       authorProfileLoadInFlightRef.current = false;
       return;
     }
     let cancelled = false;
     authorProfileLoadInFlightRef.current = true;
-    setAuthorProfileLoading(true);
-    setAuthorProfileError(null);
-    void invoke<AuthorProfile | null>("get_author_profile", {
-      authorName: selectedAuthorName,
-    })
-      .then((profile) => {
-        if (cancelled) return;
-        setAuthorProfile(profile);
-        if (profile) {
-          emitAuthorProfileUpdated(profile);
-        }
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error("Failed to fetch author profile", error);
+    void invokeCapability<AuthorProfile | null>(
+      "get_author_profile",
+      { authorName: selectedAuthorName },
+      (state) => {
+        if (cancelled || state.status !== "loading") return;
         setAuthorProfile(null);
-        setAuthorProfileError(
-          t("inspector.authorProfileLoadFailed", {
-            defaultValue: "Failed to load author details.",
-          })
-        );
+        setAuthorProfileLoading(true);
+        setAuthorProfileRefreshing(false);
+        setAuthorProfileError(null);
+      },
+    )
+      .then((result) => {
+        if (cancelled) return;
+        if (result.status === "success") {
+          setAuthorProfile(result.value);
+          if (result.value) {
+            emitAuthorProfileUpdated(result.value);
+          }
+          return;
+        }
+        setAuthorProfile(null);
+        if (result.status === "error") {
+          console.error("Failed to fetch author profile", result.error.message);
+          setAuthorProfileError(
+            t("inspector.authorProfileLoadFailed", {
+              defaultValue: "Failed to load author details.",
+            })
+          );
+        }
       })
       .finally(() => {
         if (!cancelled) {
@@ -243,12 +310,7 @@ export function Inspector({
   }, [selectedItem, selectedAuthorName, t]);
 
   useEffect(() => {
-    if (!selectedItem || bookAuthorNames.length === 0) {
-      setBookAuthorProfiles({});
-      setBookAuthorProfilesLoading(false);
-      return;
-    }
-
+    if (!selectedItem || bookAuthorNames.length === 0) return;
     const cached: Record<string, AuthorProfile | null> = {};
     const missingAuthors: string[] = [];
     for (const authorName of bookAuthorNames) {
@@ -259,53 +321,76 @@ export function Inspector({
         missingAuthors.push(authorName);
       }
     }
-    setBookAuthorProfiles(cached);
-
-    if (missingAuthors.length === 0) {
-      setBookAuthorProfilesLoading(false);
-      return;
-    }
-
     let cancelled = false;
-    setBookAuthorProfilesLoading(true);
-    void Promise.all(
-      missingAuthors.map(async (authorName) => {
-        try {
-          const profile = await invoke<AuthorProfile | null>("get_author_profile", {
+    void Promise.resolve().then(async () => {
+      if (cancelled) return;
+      setBookAuthorProfiles(cached);
+      if (missingAuthors.length === 0) {
+        setBookAuthorProfilesLoading(false);
+        return;
+      }
+
+      setBookAuthorProfilesLoading(true);
+      const results = await Promise.all(
+        missingAuthors.map(async (authorName) => {
+          const result = await invokeCapability<AuthorProfile | null>("get_author_profile", {
             authorName,
           });
-          return [authorName, profile] as const;
-        } catch (error) {
-          console.error(`Failed to load profile for author "${authorName}"`, error);
+          if (result.status === "success") {
+            return [authorName, result.value] as const;
+          }
+          if (result.status === "error") {
+            console.error(`Failed to load profile for author "${authorName}"`, result.error.message);
+          }
           return [authorName, null] as const;
-        }
-      })
-    )
-      .then((results) => {
-        if (cancelled) return;
-        const next: Record<string, AuthorProfile | null> = { ...cached };
-        for (const [authorName, profile] of results) {
-          const key = authorProfileKey(authorName);
-          bookAuthorProfileCacheRef.current.set(key, profile);
-          next[key] = profile;
-        }
-        setBookAuthorProfiles(next);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setBookAuthorProfilesLoading(false);
-        }
-      });
+        }),
+      );
+      if (cancelled) return;
+
+      const next: Record<string, AuthorProfile | null> = { ...cached };
+      for (const [authorName, profile] of results) {
+        const key = authorProfileKey(authorName);
+        bookAuthorProfileCacheRef.current.set(key, profile);
+        next[key] = profile;
+      }
+      setBookAuthorProfiles(next);
+      setBookAuthorProfilesLoading(false);
+    }).catch((error: unknown) => {
+      if (!cancelled) {
+        console.error("Failed to load book author profiles", error);
+        setBookAuthorProfilesLoading(false);
+      }
+    });
 
     return () => {
       cancelled = true;
     };
   }, [bookAuthorNames, selectedItem]);
 
-  const files = selectedItem && fileState.itemId === selectedItem.id ? fileState.files : [];
+  const selectedFileCapability =
+    selectedItemId && fileState.itemId === selectedItemId
+      ? fileState.capability
+      : selectedItemId
+        ? ({ status: "loading" } as const)
+        : ({ status: "unsupported", capability: "get_item_files" } as const);
+  const files =
+    selectedFileCapability.status === "success" ? selectedFileCapability.value : [];
+  const filesLoading = selectedFileCapability.status === "loading";
+  const filesError =
+    selectedFileCapability.status === "error" ? selectedFileCapability.error.message : null;
+  const revealCapability =
+    revealFileState?.itemId === selectedItemId ? revealFileState.capability : null;
+  const revealLoading = revealCapability?.status === "loading";
+  const revealError =
+    revealCapability?.status === "error" ? revealCapability.error.message : null;
 
   const handleReveal = (path: string) => {
-    invoke("reveal_file", { path }).catch(console.error);
+    void invokeCapability<void>("reveal_file", { path }, (capability) => {
+      setRevealFileState({ itemId: selectedItemId, path, capability });
+      if (capability.status === "error") {
+        console.error("Failed to reveal file", capability.error.message);
+      }
+    });
   };
 
   const handleAuthorClick = (authorName: string) => {
@@ -342,16 +427,16 @@ export function Inspector({
       if (!selectedAuthorName || selectedItem) return;
       setAuthorProfileRefreshing(true);
       setAuthorProfileError(null);
-      try {
-        const refreshed = await invoke<AuthorProfile | null>("enrich_author_metadata", {
-          authorName: selectedAuthorName,
-        });
-        setAuthorProfile(refreshed);
-        if (refreshed) {
-          emitAuthorProfileUpdated(refreshed);
+      const result = await invokeCapability<AuthorProfile | null>("enrich_author_metadata", {
+        authorName: selectedAuthorName,
+      });
+      if (result.status === "success") {
+        setAuthorProfile(result.value);
+        if (result.value) {
+          emitAuthorProfileUpdated(result.value);
         }
-      } catch (error) {
-        console.error("Failed to refresh author profile", error);
+      } else if (result.status === "error") {
+        console.error("Failed to refresh author profile", result.error.message);
         if (!options?.silent) {
           setAuthorProfileError(
             t("inspector.authorProfileRefreshFailed", {
@@ -359,9 +444,8 @@ export function Inspector({
             })
           );
         }
-      } finally {
-        setAuthorProfileRefreshing(false);
       }
+      setAuthorProfileRefreshing(false);
     },
     [selectedAuthorName, selectedItem, t]
   );
@@ -375,7 +459,7 @@ export function Inspector({
     if (!key) return;
     if (autoFetchAttemptedRef.current.has(key)) return;
     autoFetchAttemptedRef.current.add(key);
-    void handleRefreshAuthorProfile({ silent: true });
+    void Promise.resolve().then(() => handleRefreshAuthorProfile({ silent: true }));
   }, [
     selectedItem,
     selectedAuthorName,
@@ -385,16 +469,10 @@ export function Inspector({
   ]);
 
   useEffect(() => {
-    setAuthorBooksVisibleCount(AUTHOR_BOOKS_PAGE_SIZE);
-  }, [selectedAuthorName]);
-
-  useEffect(() => {
     for (const value of authorBookCoverCacheRef.current.values()) {
       if (value) URL.revokeObjectURL(value);
     }
     authorBookCoverCacheRef.current.clear();
-    setAuthorBookCoverUrls({});
-    setAuthorBookCoverLoadingIds({});
   }, [selectedAuthorName]);
 
   useEffect(() => {
@@ -405,65 +483,103 @@ export function Inspector({
     if (missingBookIds.length === 0) return;
 
     let cancelled = false;
-    setAuthorBookCoverLoadingIds((prev) => {
-      const next = { ...prev };
-      for (const id of missingBookIds) {
-        next[id] = true;
-      }
-      return next;
-    });
-
-    void Promise.all(
-      missingBookIds.map(async (bookId) => {
-        try {
-          const result = await invoke<{ mime: string; bytes: number[] } | null>("get_cover_blob", {
-            itemId: bookId,
-          });
-          if (!result) return [bookId, null] as const;
-          const blob = new Blob([new Uint8Array(result.bytes)], { type: result.mime });
-          const url = URL.createObjectURL(blob);
-          return [bookId, url] as const;
-        } catch {
-          return [bookId, null] as const;
+    void Promise.resolve().then(async () => {
+      if (cancelled) return;
+      setAuthorBookCoverState((previous) => {
+        const current = previous.authorName === selectedAuthorName
+          ? previous
+          : { authorName: selectedAuthorName, urls: {}, loadingIds: {}, errors: {} };
+        const loadingIds = { ...current.loadingIds };
+        const errors = { ...current.errors };
+        for (const id of missingBookIds) {
+          loadingIds[id] = true;
+          delete errors[id];
         }
-      })
-    )
-      .then((results) => {
-        if (cancelled) {
-          for (const [, url] of results) {
-            if (url) URL.revokeObjectURL(url);
-          }
-          return;
-        }
-        const nextUrls: Record<string, string> = {};
-        for (const [bookId, url] of results) {
-          authorBookCoverCacheRef.current.set(bookId, url);
-          if (url) {
-            nextUrls[bookId] = url;
-          }
-        }
-        if (Object.keys(nextUrls).length > 0) {
-          setAuthorBookCoverUrls((prev) => ({
-            ...prev,
-            ...nextUrls,
-          }));
-        }
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setAuthorBookCoverLoadingIds((prev) => {
-          const next = { ...prev };
-          for (const id of missingBookIds) {
-            delete next[id];
-          }
-          return next;
-        });
+        return { ...current, loadingIds, errors };
       });
+
+      const results: AuthorBookCoverLoadResult[] = await Promise.all(
+        missingBookIds.map(async (bookId) => {
+          const result = await invokeCapability<{ mime: string; bytes: number[] } | null>(
+            "get_cover_blob",
+            { itemId: bookId },
+          );
+          if (result.status === "success") {
+            if (!result.value) {
+              return { bookId, status: "success", url: null };
+            }
+            const blob = new Blob([new Uint8Array(result.value.bytes)], {
+              type: result.value.mime,
+            });
+            return {
+              bookId,
+              status: "success",
+              url: URL.createObjectURL(blob),
+            };
+          }
+          if (result.status === "unsupported") {
+            return { bookId, status: "unsupported" };
+          }
+          console.error(`Failed to load cover for book "${bookId}"`, result.error.message);
+          return { bookId, status: "error", message: result.error.message };
+        }),
+      );
+      if (cancelled) {
+        for (const result of results) {
+          if (result.status === "success" && result.url) {
+            URL.revokeObjectURL(result.url);
+          }
+        }
+        return;
+      }
+
+      const nextUrls: Record<string, string> = {};
+      const nextErrors: Record<string, string> = {};
+      for (const result of results) {
+        if (result.status === "success") {
+          authorBookCoverCacheRef.current.set(result.bookId, result.url);
+          if (result.url) {
+            nextUrls[result.bookId] = result.url;
+          }
+        } else if (result.status === "unsupported") {
+          authorBookCoverCacheRef.current.set(result.bookId, null);
+        } else {
+          nextErrors[result.bookId] = result.message;
+        }
+      }
+      setAuthorBookCoverState((previous) => {
+        if (previous.authorName !== selectedAuthorName) return previous;
+        const loadingIds = { ...previous.loadingIds };
+        for (const id of missingBookIds) {
+          delete loadingIds[id];
+        }
+        return {
+          ...previous,
+          urls: { ...previous.urls, ...nextUrls },
+          loadingIds,
+          errors: { ...previous.errors, ...nextErrors },
+        };
+      });
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("Failed to load author book covers", message);
+      setAuthorBookCoverState((previous) => {
+        if (previous.authorName !== selectedAuthorName) return previous;
+        const loadingIds = { ...previous.loadingIds };
+        const errors = { ...previous.errors };
+        for (const id of missingBookIds) {
+          delete loadingIds[id];
+          errors[id] = message;
+        }
+        return { ...previous, loadingIds, errors };
+      });
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [selectedAuthorName, visibleAuthorBooks]);
+  }, [authorBookCoverRetryVersion, selectedAuthorName, visibleAuthorBooks]);
 
   useEffect(() => {
     const coverCache = authorBookCoverCacheRef.current;
@@ -626,7 +742,18 @@ export function Inspector({
             </div>
 
 
-            {files.length > 0 && (
+            {filesLoading ? (
+              <div className="mt-3 flex items-center gap-1.5 text-[11px] text-[var(--app-ink-muted)]">
+                <Loader2 size={12} className="animate-spin" />
+                {t("inspector.loadingFiles", { defaultValue: "Loading files..." })}
+              </div>
+            ) : filesError ? (
+              <div className="mt-3 text-xs text-red-500">
+                {t("inspector.filesLoadFailed", {
+                  defaultValue: "Files could not be loaded.",
+                })}
+              </div>
+            ) : files.length > 0 ? (
               <div className="mt-3">
                 <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)] mb-1">
                   {t("inspector.files")}
@@ -647,16 +774,21 @@ export function Inspector({
                       </div>
                       <button
                         onClick={() => handleReveal(file.path)}
+                        disabled={revealLoading}
                         className="hidden opacity-0 group-hover:block group-hover:opacity-100 p-1 hover:bg-app-bg rounded transition-all"
                         title={t("inspector.revealInFinder")}
                       >
-                        <FolderOpen size={12} className="text-app-ink-muted" />
+                        {revealLoading && revealFileState?.path === file.path ? (
+                          <Loader2 size={12} className="animate-spin text-app-ink-muted" />
+                        ) : (
+                          <FolderOpen size={12} className="text-app-ink-muted" />
+                        )}
                       </button>
                     </div>
                   ))}
                 </div>
               </div>
-            )}
+            ) : null}
 
             <div className="mt-3">
               <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--app-ink-muted)]">
@@ -737,9 +869,13 @@ export function Inspector({
                 size="sm"
                 className="w-full justify-center"
                 onClick={() => files[0] && handleReveal(files[0].path)}
-                disabled={files.length === 0}
+                disabled={files.length === 0 || filesLoading || revealLoading}
               >
-                <FolderOpen size={14} />
+                {revealLoading ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <FolderOpen size={14} />
+                )}
                 {t("inspector.reveal")}
               </Button>
               <Button
@@ -752,6 +888,13 @@ export function Inspector({
                 {t("inspector.edit")}
               </Button>
             </div>
+            {revealError ? (
+              <div className="mt-2 text-xs text-red-500">
+                {t("inspector.revealFailed", {
+                  defaultValue: "The file could not be shown in Finder.",
+                })}
+              </div>
+            ) : null}
 
             {/* eReader Sync Section */}
             {ereaderConnected && (
@@ -950,6 +1093,23 @@ export function Inspector({
                     );
                   })}
                 </div>
+                {authorBookCoverErrorCount > 0 ? (
+                  <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-red-500/30 bg-red-500/5 px-2 py-1.5">
+                    <span className="text-[11px] text-red-500">
+                      {t("inspector.coverLoadFailed", {
+                        defaultValue: "Some covers could not be loaded.",
+                      })}
+                    </span>
+                    <Button
+                      variant="toolbar"
+                      size="sm"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => setAuthorBookCoverRetryVersion((version) => version + 1)}
+                    >
+                      {t("common.retry", { defaultValue: "Retry" })}
+                    </Button>
+                  </div>
+                ) : null}
                 {selectedAuthorBooks.length > AUTHOR_BOOKS_PAGE_SIZE ? (
                   <div className="mt-2 flex gap-2">
                     {remainingAuthorBookCount > 0 ? (
@@ -958,7 +1118,10 @@ export function Inspector({
                         size="sm"
                         className="h-7 px-2.5 text-[11px]"
                         onClick={() =>
-                          setAuthorBooksVisibleCount((prev) => prev + AUTHOR_BOOKS_PAGE_SIZE)
+                          setAuthorBooksPagination({
+                            authorName: selectedAuthorName,
+                            visibleCount: authorBooksVisibleCount + AUTHOR_BOOKS_PAGE_SIZE,
+                          })
                         }
                       >
                         {t("inspector.showMoreBooks", {
@@ -972,7 +1135,12 @@ export function Inspector({
                         variant="toolbar"
                         size="sm"
                         className="h-7 px-2.5 text-[11px]"
-                        onClick={() => setAuthorBooksVisibleCount(AUTHOR_BOOKS_PAGE_SIZE)}
+                        onClick={() =>
+                          setAuthorBooksPagination({
+                            authorName: selectedAuthorName,
+                            visibleCount: AUTHOR_BOOKS_PAGE_SIZE,
+                          })
+                        }
                       >
                         {t("inspector.showLessBooks", { defaultValue: "Show less" })}
                       </Button>

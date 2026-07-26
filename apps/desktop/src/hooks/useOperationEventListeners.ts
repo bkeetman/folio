@@ -1,6 +1,5 @@
-import { isTauri } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { isTauri, listen } from "../platform/native";
 import type {
   ActivityLogItem,
   ApplyMetadataProgress,
