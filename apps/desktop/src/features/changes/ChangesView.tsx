@@ -4,7 +4,8 @@ import { useTranslation } from "react-i18next";
 import { ItemSpinner, ProgressBar } from "../../components/ProgressBar";
 import { Button } from "../../components/ui";
 import { cn } from "../../lib/utils";
-import { invoke, isTauri } from "../../platform/native";
+import { isTauri } from "../../platform/native";
+import { changesNativeGateway } from "./changes-controller";
 import type { ChangesFeatureView } from "./useChangesFeature";
 
 type ChangesViewProps = {
@@ -14,16 +15,6 @@ type ChangesViewProps = {
 type MetadataField = {
   key: string;
   labelKey: string;
-};
-
-type CoverBlob = {
-  mime: string;
-  bytes: number[];
-};
-
-type PendingCoverPreview = {
-  fromCover?: CoverBlob | null;
-  toCover?: CoverBlob | null;
 };
 
 const METADATA_FIELDS: MetadataField[] = [
@@ -142,9 +133,7 @@ function PendingCoverDiff({ changeId }: { changeId: string }) {
       }
       setLoading(true);
       try {
-        const preview = await invoke<PendingCoverPreview | null>("get_pending_cover_preview", {
-          changeId,
-        });
+        const preview = await changesNativeGateway.loadCoverPreview(changeId);
         if (!active) return;
         if (preview?.fromCover?.bytes?.length) {
           const blob = new Blob([new Uint8Array(preview.fromCover.bytes)], {

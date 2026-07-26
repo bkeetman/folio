@@ -7,6 +7,8 @@
   "include": [
     "src/features/changes/changes-model.ts",
     "src/features/changes/changes-model.test.ts",
+    "src/features/changes/changes-controller.ts",
+    "src/features/changes/changes-controller.test.ts",
     "src/platform/native.ts",
     "src/platform/native.test.ts",
     "src/types/library.ts"

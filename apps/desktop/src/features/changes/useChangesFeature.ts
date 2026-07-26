@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
-import { invoke, isTauri, listen } from "../../platform/native";
-import type { OperationProgress, OperationStats, PendingChange, SyncResult } from "../../types/library";
+import { isTauri, listen } from "../../platform/native";
+import type { OperationProgress, OperationStats } from "../../types/library";
+import {
+  changesNativeGateway,
+  createChangesController,
+  type ChangesMutationRequest,
+} from "./changes-controller";
 import {
   createChangesModel,
   type ChangesHistoryStatus,
@@ -9,13 +14,6 @@ import {
   type ChangesSnapshot,
   type ChangesSourceFilter,
 } from "./changes-model";
-
-const SYNC_CHANGE_ID_PREFIX = "sync:";
-
-type MutationRequest = {
-  operation: ChangesMutation;
-  ids: string[];
-};
 
 export type ChangesFeatureView = {
   state: ChangesSnapshot;
@@ -47,19 +45,6 @@ type UseChangesFeatureArgs = {
   reportStatus: (message: string) => void;
 };
 
-function splitChangeIds(ids: string[]) {
-  const fileIds: string[] = [];
-  const syncIds: string[] = [];
-  for (const id of ids) {
-    if (id.startsWith(SYNC_CHANGE_ID_PREFIX)) {
-      syncIds.push(id.slice(SYNC_CHANGE_ID_PREFIX.length));
-    } else {
-      fileIds.push(id);
-    }
-  }
-  return { fileIds, syncIds };
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? "Unknown changes error");
 }
@@ -78,130 +63,37 @@ export function useChangesFeature({
   const [applyingChangeIds, setApplyingChangeIds] = useState<Set<string>>(new Set());
   const [changeProgress, setChangeProgress] = useState<OperationProgress | null>(null);
   const [listenerSetupAttempt, setListenerSetupAttempt] = useState(0);
-  const syncErrorsRef = useRef(0);
-  const syncProcessedRef = useRef(0);
   const fileListenersReadyRef = useRef(false);
 
-  const loadChangesByStatus = useCallback(async (status: ChangesHistoryStatus) => {
-    const [fileChanges, syncChanges] = await Promise.all([
-      invoke<PendingChange[]>("get_pending_changes", { status }),
-      invoke<PendingChange[]>("get_sync_queue_changes", { status }),
-    ]);
-    return [...fileChanges, ...syncChanges].sort((a, b) => b.created_at - a.created_at);
-  }, []);
+  const controller = useMemo(
+    () =>
+      createChangesController({
+        model,
+        gateway: changesNativeGateway,
+        refreshLibrary,
+        reportStatus,
+      }),
+    [model, refreshLibrary, reportStatus],
+  );
 
   const loadHistory = useCallback(
     async (status: ChangesHistoryStatus, showLoading = true) => {
       if (!enabled || !isTauri()) return [];
-      if (showLoading && model.getSnapshot().operation.status === "running") {
-        return model.getSnapshot().items;
-      }
-      if (showLoading) model.dispatch({ type: "history-requested", status });
-      try {
-        const items = await loadChangesByStatus(status);
-        model.dispatch({ type: "history-loaded", status, items });
-        return items;
-      } catch (error) {
-        if (showLoading) {
-          model.dispatch({ type: "history-failed", status, message: errorMessage(error) });
-        } else {
-          reportStatus(`Could not refresh changes: ${errorMessage(error)}`);
-        }
-        return [];
-      }
+      return controller.loadHistory(status, showLoading);
     },
-    [enabled, loadChangesByStatus, model, reportStatus],
+    [controller, enabled],
   );
 
   const refreshPending = useCallback(async () => {
     if (!enabled || !isTauri()) return 0;
-    try {
-      const items = await loadChangesByStatus("pending");
-      if (model.getSnapshot().historyStatus === "pending") {
-        model.dispatch({ type: "history-loaded", status: "pending", items });
-      } else {
-        model.dispatch({ type: "pending-count-refreshed", count: items.length });
-      }
-      return items.length;
-    } catch (error) {
-      reportStatus(`Could not refresh changes: ${errorMessage(error)}`);
-      return model.getSnapshot().pendingCount;
-    }
-  }, [enabled, loadChangesByStatus, model, reportStatus]);
-
-  const refreshCurrent = useCallback(async () => {
-    const status = model.getSnapshot().historyStatus;
-    await loadHistory(status, false);
-    if (status !== "pending") await refreshPending();
-  }, [loadHistory, model, refreshPending]);
+    return controller.refreshPending();
+  }, [controller, enabled]);
 
   const executeNativeMutation = useCallback(
-    async (request: MutationRequest, retrying: boolean) => {
-      const { fileIds, syncIds } = splitChangeIds(request.ids);
-      syncErrorsRef.current = 0;
-      syncProcessedRef.current = 0;
-      try {
-        if (request.operation === "undo") {
-          let processed = 0;
-          if (fileIds.length > 0) {
-            processed += await invoke<number>("remove_pending_changes", { ids: fileIds });
-          }
-          if (syncIds.length > 0) {
-            processed += await invoke<number>("remove_sync_queue_changes", { ids: syncIds });
-          }
-          model.dispatch({ type: "operation-completed", processed, errors: 0 });
-          await refreshCurrent();
-          return;
-        }
-
-        if (syncIds.length > 0) {
-          const syncCommand = retrying ? "retry_sync_queue_changes" : "apply_sync_queue_changes";
-          const result = await invoke<SyncResult>(syncCommand, { ids: syncIds });
-          syncErrorsRef.current = result.errors.length;
-          syncProcessedRef.current = Math.max(0, syncIds.length - result.errors.length);
-          if (result.errors.length > 0) {
-            const failedChanges = await invoke<PendingChange[]>("get_sync_queue_changes", {
-              status: "error",
-            });
-            const failedIds = failedChanges
-              .map((change) => change.id.slice(SYNC_CHANGE_ID_PREFIX.length))
-              .filter((id) => syncIds.includes(id));
-            const message = result.errors.join("; ");
-            (failedIds.length > 0 ? failedIds : syncIds).forEach((id) => {
-              model.dispatch({
-                type: "operation-progressed",
-                itemId: `${SYNC_CHANGE_ID_PREFIX}${id}`,
-                status: "error",
-                message,
-              });
-            });
-          }
-        }
-
-        if (fileIds.length > 0) {
-          const fileCommand = retrying ? "retry_pending_changes" : "apply_pending_changes";
-          await invoke(fileCommand, { ids: fileIds });
-        } else {
-          const errors = syncErrorsRef.current;
-          model.dispatch({
-            type: "operation-completed",
-            processed: Math.max(0, syncIds.length - errors),
-            errors,
-          });
-          await refreshCurrent();
-          await refreshLibrary().catch((error) => {
-            reportStatus(
-              `Changes applied, but the library could not refresh: ${errorMessage(error)}`,
-            );
-          });
-        }
-      } catch (error) {
-        const message = errorMessage(error);
-        model.dispatch({ type: "operation-failed", message });
-        reportStatus(`Could not ${request.operation} changes: ${message}`);
-      }
+    async (request: ChangesMutationRequest, retrying: boolean) => {
+      await controller.executeMutation(request, retrying);
     },
-    [model, refreshCurrent, refreshLibrary, reportStatus],
+    [controller],
   );
 
   const startMutation = useCallback(
@@ -209,7 +101,7 @@ export function useChangesFeature({
       const historyStatus = model.getSnapshot().historyStatus;
       const allowed = historyStatus === "pending" || (retrying && historyStatus === "error");
       if (!enabled || ids.length === 0 || !allowed) return;
-      const { fileIds } = splitChangeIds(ids);
+      const fileIds = ids.filter((id) => !id.startsWith("sync:"));
       if (operation === "apply" && fileIds.length > 0 && !fileListenersReadyRef.current) {
         setListenerSetupAttempt((attempt) => attempt + 1);
         reportStatus("Changes are not ready yet. Please try again in a moment.");
@@ -280,31 +172,14 @@ export function useChangesFeature({
             else next.delete(progress.itemId);
             return next;
           });
-          model.dispatch({
-            type: "operation-progressed",
-            itemId: progress.itemId,
-            status:
-              progress.status === "error"
-                ? "error"
-                : progress.status === "done"
-                  ? "done"
-                  : "processing",
-            message: progress.message ?? undefined,
-          });
+          controller.handleFileProgress(progress);
         }),
       ),
       register(
         listen<OperationStats>("change-complete", (event) => {
-          const errors = event.payload.errors + syncErrorsRef.current;
-          const processed = event.payload.processed + syncProcessedRef.current;
-          model.dispatch({ type: "operation-completed", processed, errors });
           setChangeProgress(null);
           setApplyingChangeIds(new Set());
-          reportStatus(`Changes complete: ${processed} applied, ${errors} errors.`);
-          void refreshCurrent();
-          void refreshLibrary().catch((error) => {
-            reportStatus(`Changes applied, but the library could not refresh: ${errorMessage(error)}`);
-          });
+          void controller.handleFileComplete(event.payload);
         }),
       ),
     ]).then((registrations) => {
@@ -335,7 +210,7 @@ export function useChangesFeature({
       unlistenProgress?.();
       unlistenComplete?.();
     };
-  }, [enabled, listenerSetupAttempt, model, refreshCurrent, refreshLibrary, reportStatus]);
+  }, [controller, enabled, listenerSetupAttempt, model, reportStatus]);
 
   const actions: ChangesFeatureView["actions"] = {
     showHistory: (status) => void loadHistory(status),
