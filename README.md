@@ -30,14 +30,18 @@ Then you can open Folio normally.
 ```bash
 node -v # should be 22.x
 pnpm install
+```
+
+Start the complete desktop app in development mode:
+
+```bash
 pnpm dev
 ```
 
-## Tauri app
+To run only the Vite frontend in a browser:
 
 ```bash
-cargo install tauri-cli --locked --version 2.9.6
-pnpm -C apps/desktop dev:tauri
+pnpm dev:web
 ```
 
 ## Releases

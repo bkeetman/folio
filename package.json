@@ -3,7 +3,8 @@
   "private": true,
   "version": "0.1.29",
   "scripts": {
-    "dev": "pnpm -C apps/desktop dev",
+    "dev": "pnpm -C apps/desktop dev:tauri",
+    "dev:web": "pnpm -C apps/desktop dev",
     "build": "pnpm -C apps/desktop build",
     "lint": "pnpm -C apps/desktop lint",
     "folio": "pnpm -C packages/core folio",

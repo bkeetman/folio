@@ -20,7 +20,8 @@
 - From repo root: `pnpm install`.
 
 ## Common commands (root)
-- Dev (desktop): `pnpm dev` (runs Vite in apps/desktop).
+- Dev (desktop): `pnpm dev` (runs the complete Tauri app).
+- Dev (web only): `pnpm dev:web` (runs Vite in apps/desktop).
 - Build (desktop): `pnpm build`.
 - Lint (desktop): `pnpm lint`.
 - Full verification: `pnpm check`.
