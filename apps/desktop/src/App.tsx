@@ -123,6 +123,10 @@ const LIBRARY_SORT_VALUES: LibrarySort[] = [
 ];
 
 function App() {
+  const showBookEditPrototype =
+    import.meta.env.DEV &&
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("prototype") === "book-edit";
   const readInitialInspectorWidth = () => {
     if (typeof window === "undefined") return 320;
     const raw = window.localStorage.getItem("folio.inspectorWidth");
@@ -884,11 +888,12 @@ function App() {
     <div
       className="grid h-screen overflow-hidden bg-[var(--app-bg)] text-[var(--app-ink)]"
       style={
-        view === "library" ||
+        !showBookEditPrototype &&
+        (view === "library" ||
           view === "library-books" ||
           view === "library-authors" ||
           view === "library-series" ||
-          view === "library-categories"
+          view === "library-categories")
           ? { gridTemplateColumns: `210px minmax(0,1fr) ${inspectorWidth}px` }
           : { gridTemplateColumns: "210px minmax(0,1fr)" }
       }
@@ -917,7 +922,7 @@ function App() {
           ref={mainScrollRef}
           className={`flex min-h-0 flex-1 flex-col gap-4 ${view === "ereader" ? "overflow-hidden" : "overflow-y-auto pr-2 scrollbar-gutter-stable"}`}
         >
-          {view !== "edit" && (
+          {view !== "edit" && !showBookEditPrototype && (
             <TopToolbar
               view={view}
               checkForUpdates={(silent) => void checkForUpdates(silent)}
@@ -1147,7 +1152,7 @@ function App() {
         </div>
       </main>
 
-      {(view === "library" ||
+      {!showBookEditPrototype && (view === "library" ||
         view === "library-books" ||
         view === "library-authors" ||
         view === "library-series" ||

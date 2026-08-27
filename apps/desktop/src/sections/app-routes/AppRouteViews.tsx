@@ -4,6 +4,7 @@ import { CategoriesView } from "../CategoriesView";
 import { InboxView } from "../InboxView";
 import { SeriesView } from "../SeriesView";
 import { TagsView } from "../TagsView";
+import { BookEditSavePrototype } from "../book-edit-prototype/BookEditSavePrototype";
 import type { AppRoutesProps } from "./types";
 
 const LibraryView = lazy(() =>
@@ -54,6 +55,15 @@ export function AppRouteViews({
   tags,
   ereader,
 }: AppRoutesProps) {
+  const showBookEditPrototype =
+    import.meta.env.DEV &&
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("prototype") === "book-edit";
+
+  if (showBookEditPrototype) {
+    return <BookEditSavePrototype item={library.libraryItems[0]} />;
+  }
+
   return (
     <Suspense
       fallback={
