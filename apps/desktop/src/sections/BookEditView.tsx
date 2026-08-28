@@ -1,8 +1,8 @@
-import { ArrowLeft, Check, Image as ImageIcon, Loader2, Search, Trash2, X } from "lucide-react";
-import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, SetStateAction } from "react";
+import { ArrowLeft, Check, ChevronRight, FileCheck2, Image as ImageIcon, Loader2, Search, Sparkles, Trash2, X } from "lucide-react";
+import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, ReactNode, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { confirm, invoke, open } from "../platform/native";
+import { confirm, convertFileSrc, invoke, open } from "../platform/native";
 import { Button, Input } from "../components/ui";
 import { useAuthorSuggestions } from "../hooks/useAuthorSuggestions";
 import { LANGUAGE_OPTIONS } from "../lib/languageFlags";
@@ -16,6 +16,59 @@ type EmbeddedCoverCandidate = {
     bytes: number[];
     score: number;
 };
+
+type PendingCoverChange =
+    | { type: "upload"; path: string; previewUrl: string }
+    | { type: "remove" }
+    | { type: "embedded" }
+    | { type: "candidate"; candidate: EnrichmentCandidate };
+
+type MetadataDraftField = keyof ItemMetadata;
+
+const METADATA_DRAFT_FIELDS: MetadataDraftField[] = [
+    "title",
+    "authors",
+    "publishedYear",
+    "language",
+    "isbn",
+    "series",
+    "seriesIndex",
+    "genres",
+    "description",
+];
+
+function normalizedMetadataValue(metadata: ItemMetadata, field: MetadataDraftField): string {
+    const value = metadata[field];
+    if (Array.isArray(value)) {
+        return value.map((entry) => entry.trim()).filter(Boolean).join("\u0000");
+    }
+    return value === null || value === undefined ? "" : String(value).trim();
+}
+
+function getDirtyMetadataFields(baseline: ItemMetadata, draft: ItemMetadata): MetadataDraftField[] {
+    return METADATA_DRAFT_FIELDS.filter(
+        (field) => normalizedMetadataValue(baseline, field) !== normalizedMetadataValue(draft, field),
+    );
+}
+
+function applyCandidateToDraft(current: ItemMetadata, candidate: EnrichmentCandidate): ItemMetadata {
+    const isbn = candidate.identifiers.find(isLikelyIsbn);
+    return {
+        ...current,
+        title: candidate.title?.trim() || current.title,
+        authors: candidate.authors.length ? candidate.authors : current.authors,
+        publishedYear: candidate.published_year ?? current.publishedYear,
+        language: candidate.language?.trim() || current.language,
+        isbn: isbn || current.isbn,
+        genres: candidate.genres?.length ? candidate.genres : current.genres,
+    };
+}
+
+function formatMetadataValue(metadata: ItemMetadata, field: MetadataDraftField): string {
+    const value = metadata[field];
+    if (Array.isArray(value)) return value.join(", ");
+    return value === null || value === undefined || value === "" ? "Empty" : String(value);
+}
 
 type BookEditViewProps = {
     selectedItemId: string | null;
@@ -81,6 +134,31 @@ function isExpectedEmbeddedCoverMiss(error: unknown): boolean {
     );
 }
 
+function CompactMetadataRow({
+    label,
+    current,
+    changed,
+    review,
+    children,
+}: {
+    label: string;
+    current: string;
+    changed: boolean;
+    review: boolean;
+    children: ReactNode;
+}) {
+    return (
+        <div className={`grid grid-cols-[108px_minmax(0,1fr)_28px_minmax(0,1fr)] items-center gap-3 border-b border-[var(--app-border-soft)] px-4 py-2 ${changed ? "bg-[rgba(249,115,22,0.06)]" : "bg-app-panel"}`}>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.11em] text-app-ink-muted">{label}</div>
+            <div className="truncate text-xs text-app-ink-muted" title={current}>{current}</div>
+            <div className={`flex h-5 w-5 items-center justify-center rounded-full ${changed ? "bg-app-accent text-white" : "bg-app-surface-hover text-app-ink-muted"}`}>
+                {changed ? <ChevronRight size={12} /> : <Check size={11} />}
+            </div>
+            <div className={review ? "truncate text-xs font-medium text-app-ink" : "min-w-0"}>{children}</div>
+        </div>
+    );
+}
+
 export function BookEditView({
     selectedItemId,
     libraryItems,
@@ -116,6 +194,9 @@ export function BookEditView({
     const [embeddedPreviewUrl, setEmbeddedPreviewUrl] = useState<string | null>(null);
     const [localCoverUrl, setLocalCoverUrl] = useState<string | null>(null);
     const [infoMessage, setInfoMessage] = useState<string | null>(null);
+    const [editPhase, setEditPhase] = useState<"edit" | "review">("edit");
+    const [pendingCoverChange, setPendingCoverChange] = useState<PendingCoverChange | null>(null);
+    const [pendingMatchCandidate, setPendingMatchCandidate] = useState<EnrichmentCandidate | null>(null);
     const [embeddedCandidates, setEmbeddedCandidates] = useState<EmbeddedCoverCandidate[]>([]);
     const [selectedEmbeddedIndex, setSelectedEmbeddedIndex] = useState(0);
     const [embeddedSelectionDirty, setEmbeddedSelectionDirty] = useState(false);
@@ -124,6 +205,17 @@ export function BookEditView({
     const [authorsInput, setAuthorsInput] = useState("");
     const [authorsFocused, setAuthorsFocused] = useState(false);
     const [formData, setFormData] = useState<ItemMetadata>({
+        title: "",
+        authors: [],
+        publishedYear: null,
+        language: null,
+        isbn: null,
+        series: null,
+        seriesIndex: null,
+        description: null,
+        genres: [],
+    });
+    const [baselineMetadata, setBaselineMetadata] = useState<ItemMetadata>({
         title: "",
         authors: [],
         publishedYear: null,
@@ -162,8 +254,38 @@ export function BookEditView({
     });
 
     const selectedItem = libraryItems.find((item) => item.id === selectedItemId);
+    const previewMetadata = useMemo<ItemMetadata | null>(() => {
+        if (isDesktop || !selectedItemId || !selectedItem) return null;
+        return {
+            title: selectedItem.title,
+            authors: selectedItem.authors,
+            publishedYear: selectedItem.published_year,
+            language: selectedItem.language ?? null,
+            isbn: selectedItem.isbn ?? null,
+            series: selectedItem.series ?? null,
+            seriesIndex: selectedItem.series_index ?? null,
+            description: null,
+            genres: selectedItem.genres ?? [],
+        };
+    }, [
+        selectedItemId,
+        isDesktop,
+        selectedItem,
+    ]);
     const displayCoverUrl = localCoverUrl ?? coverUrl;
     const hasCover = Boolean(displayCoverUrl || selectedItem?.cover_path);
+    const dirtyMetadataFields = getDirtyMetadataFields(baselineMetadata, formData);
+    const coverDraftDirty = pendingCoverChange !== null || embeddedSelectionDirty;
+    const draftChangeCount = dirtyMetadataFields.length + (coverDraftDirty ? 1 : 0);
+    const draftCoverUrl = pendingCoverChange?.type === "remove"
+        ? null
+        : pendingCoverChange?.type === "upload"
+            ? pendingCoverChange.previewUrl
+            : pendingCoverChange?.type === "candidate"
+                ? getCandidateCoverUrl(pendingCoverChange.candidate)
+                : embeddedSelectionDirty && embeddedPreviewUrl
+                    ? embeddedPreviewUrl
+                    : displayCoverUrl;
     const activeItemIdRef = useRef<string | null>(selectedItemId);
     const embeddedPreviewUrlRef = useRef<string | null>(null);
     const localCoverUrlRef = useRef<string | null>(null);
@@ -172,6 +294,9 @@ export function BookEditView({
         activeItemIdRef.current = selectedItemId;
         setError(null);
         setInfoMessage(null);
+        setEditPhase("edit");
+        setPendingCoverChange(null);
+        setPendingMatchCandidate(null);
         setIsMatchQueryDirty(false);
         setAuthorsInput("");
         clearAuthorSuggestions();
@@ -220,7 +345,9 @@ export function BookEditView({
             setInfoMessage(null);
             invoke<ItemMetadata>("get_item_details", { itemId: selectedItemId })
                 .then((details) => {
-                    setFormData({ ...details, genres: details.genres ?? [] });
+                    const normalized = { ...details, genres: details.genres ?? [] };
+                    setFormData(normalized);
+                    setBaselineMetadata(normalized);
                     setAuthorsInput((details.authors ?? []).join(", "));
                     setIsLoading(false);
                 })
@@ -247,6 +374,14 @@ export function BookEditView({
         loadLocalCoverBlob,
         t,
     ]);
+
+    useEffect(() => {
+        if (!previewMetadata) return;
+        setFormData(previewMetadata);
+        setBaselineMetadata(previewMetadata);
+        setAuthorsInput(previewMetadata.authors.join(", "));
+        setIsLoading(false);
+    }, [previewMetadata]);
 
     useEffect(() => {
         embeddedPreviewUrlRef.current = embeddedPreviewUrl;
@@ -288,6 +423,30 @@ export function BookEditView({
         setIsMatchQueryDirty(false);
     }, [metadataSearchQuery, matchQuery, onMatchQueryChange]);
 
+    const handleUseMatchCandidateInDraft = useCallback((candidate: EnrichmentCandidate) => {
+        const nextDraft = applyCandidateToDraft(formData, candidate);
+        const candidateCoverUrl = getCandidateCoverUrl(candidate);
+        const hasEffectiveChanges = getDirtyMetadataFields(baselineMetadata, nextDraft).length > 0 || Boolean(candidateCoverUrl);
+        setFormData(nextDraft);
+        if (candidate.authors.length) {
+            setAuthorsInput(candidate.authors.join(", "));
+        }
+        setPendingMatchCandidate(candidate);
+        if (candidateCoverUrl) {
+            setPendingCoverChange({ type: "candidate", candidate });
+            setEmbeddedSelectionDirty(false);
+        }
+        setEditPhase("edit");
+        setError(null);
+        setInfoMessage(hasEffectiveChanges
+            ? t("bookEdit.matchAddedToDraft", {
+                defaultValue: "Match values copied into the draft. The Library is unchanged.",
+            })
+            : t("bookEdit.matchAlreadySatisfied", {
+                defaultValue: "This match already agrees with the Library. Nothing needs saving.",
+            }));
+    }, [baselineMetadata, formData, getCandidateCoverUrl, t]);
+
     const handleAuthorsInputChange = useCallback((value: string) => {
         const parsed = parseAuthorsInput(value);
         setAuthorsInput(value);
@@ -318,7 +477,23 @@ export function BookEditView({
         setError(null);
         setInfoMessage(null);
         try {
-            if (embeddedSelectionDirty) {
+            if (pendingMatchCandidate && pendingCoverChange?.type === "candidate") {
+                await invoke("apply_fix_candidate", {
+                    itemId: selectedItemId,
+                    candidate: pendingMatchCandidate,
+                });
+            }
+            if (pendingCoverChange?.type === "upload") {
+                setIsUploadingCover(true);
+                await invoke("upload_cover", {
+                    itemId: selectedItemId,
+                    path: pendingCoverChange.path,
+                });
+            } else if (pendingCoverChange?.type === "remove") {
+                setIsRemovingCover(true);
+                await invoke("remove_cover", { itemId: selectedItemId });
+            } else if (pendingCoverChange?.type === "embedded" || embeddedSelectionDirty) {
+                setIsApplyingEmbeddedCover(true);
                 const selected = embeddedCandidates[selectedEmbeddedIndex];
                 if (selected) {
                     await invoke("use_embedded_cover_from_bytes", {
@@ -326,20 +501,28 @@ export function BookEditView({
                         bytes: selected.bytes,
                         mime: selected.mime,
                     });
-                    onClearCover(selectedItemId);
-                    await onFetchCover(selectedItemId, true);
-                    await loadLocalCoverBlob(selectedItemId);
+                } else {
+                    await invoke("use_embedded_cover", { itemId: selectedItemId });
                 }
-                setEmbeddedSelectionDirty(false);
             }
             if (onSaveMetadata) {
                 await onSaveMetadata(selectedItemId, formData);
             } else {
                 await invoke("save_item_metadata", { itemId: selectedItemId, metadata: formData });
             }
+            if (coverDraftDirty) {
+                onClearCover(selectedItemId);
+                await onFetchCover(selectedItemId, true);
+                await loadLocalCoverBlob(selectedItemId);
+            }
             if (onItemUpdate) {
                 await onItemUpdate();
             }
+            setBaselineMetadata(formData);
+            setPendingCoverChange(null);
+            setPendingMatchCandidate(null);
+            setEmbeddedSelectionDirty(false);
+            setInfoMessage(t("bookEdit.saved", { defaultValue: "Saved to Library." }));
             if (!embedded && setView) {
                 const fallbackView: View = previousView ?? "library-books";
                 // Fallback to library-books if previousView is somehow edit
@@ -350,6 +533,9 @@ export function BookEditView({
             setError(err instanceof Error ? err.message : String(err));
         } finally {
             setIsSaving(false);
+            setIsUploadingCover(false);
+            setIsRemovingCover(false);
+            setIsApplyingEmbeddedCover(false);
         }
     };
 
@@ -357,6 +543,19 @@ export function BookEditView({
         if (embedded || !setView) return;
         const fallbackView: View = previousView ?? "library-books";
         setView(fallbackView === "edit" ? "library-books" : fallbackView);
+    };
+
+    const handleDiscardDraft = () => {
+        setFormData(baselineMetadata);
+        setAuthorsInput(baselineMetadata.authors.join(", "));
+        setPendingCoverChange(null);
+        setPendingMatchCandidate(null);
+        setEmbeddedSelectionDirty(false);
+        setEditPhase("edit");
+        setError(null);
+        setInfoMessage(t("bookEdit.draftDiscarded", {
+            defaultValue: "Draft discarded. The Library and files are unchanged.",
+        }));
     };
 
     const handleQueueRemove = async () => {
@@ -400,88 +599,44 @@ export function BookEditView({
             });
 
             if (selected && typeof selected === "string") {
-                setIsUploadingCover(true);
-                setInfoMessage(t("bookEdit.applyingCover"));
-                await invoke("upload_cover", { itemId: selectedItemId, path: selected });
-
-                // Refresh cover
-                onClearCover(selectedItemId);
-                await onFetchCover(selectedItemId, true);
-                await loadLocalCoverBlob(selectedItemId);
-                if (onItemUpdate) {
-                    await onItemUpdate();
-                }
-                setInfoMessage(t("bookEdit.coverUpdated"));
-                setIsUploadingCover(false);
+                setPendingCoverChange({
+                    type: "upload",
+                    path: selected,
+                    previewUrl: convertFileSrc(selected),
+                });
+                setEmbeddedSelectionDirty(false);
+                setInfoMessage(t("bookEdit.coverAddedToDraft", {
+                    defaultValue: "Cover selected in the draft. Save or Cancel decides the outcome.",
+                }));
             }
         } catch (err) {
-            console.error("Failed to upload cover", err);
-            setError(t("bookEdit.failedUploadCover"));
-            setIsUploadingCover(false);
+            console.error("Failed to select cover", err);
+            setError(t("bookEdit.failedSelectCover", { defaultValue: "Could not select the cover." }));
         }
     };
 
     const handleUseEmbeddedCover = async () => {
         if (!selectedItemId) return;
-        setIsApplyingEmbeddedCover(true);
         setError(null);
-        setInfoMessage(t("bookEdit.applyingEmbeddedCover"));
-        try {
-            const selected = embeddedCandidates[selectedEmbeddedIndex];
-            if (!selected) {
-                await invoke("use_embedded_cover", { itemId: selectedItemId });
-            } else {
-                await invoke("use_embedded_cover_from_bytes", {
-                    itemId: selectedItemId,
-                    bytes: selected.bytes,
-                    mime: selected.mime,
-                });
-            }
-            onClearCover(selectedItemId);
-            await onFetchCover(selectedItemId, true);
-            const hasLocalCover = await loadLocalCoverBlob(selectedItemId);
-            if (!hasLocalCover) {
-                setError(t("bookEdit.embeddedCoverReadbackFailed"));
-                setInfoMessage(null);
-                return;
-            }
-            if (onItemUpdate) {
-                await onItemUpdate();
-            }
-            setEmbeddedSelectionDirty(false);
-            setInfoMessage(t("bookEdit.embeddedCoverApplied"));
-        } catch (err) {
-            console.error("Failed to use embedded cover", err);
-            setError(err instanceof Error ? err.message : t("bookEdit.failedUseEmbeddedCover"));
-            setInfoMessage(null);
-        } finally {
-            setIsApplyingEmbeddedCover(false);
+        if (!embeddedPreviewUrl && embeddedCandidates.length === 0) {
+            setError(t("bookEdit.noEmbeddedCover", { defaultValue: "No embedded cover is available." }));
+            return;
         }
+        setPendingCoverChange({ type: "embedded" });
+        setEmbeddedSelectionDirty(true);
+        setInfoMessage(t("bookEdit.embeddedCoverAddedToDraft", {
+            defaultValue: "Embedded cover selected in the draft. Save or Cancel decides the outcome.",
+        }));
     };
 
     const handleRemoveCover = async () => {
         if (!selectedItemId) return;
-        setIsRemovingCover(true);
         setError(null);
-        setInfoMessage(t("bookEdit.removingCover"));
-        try {
-            await invoke("remove_cover", { itemId: selectedItemId });
-            onClearCover(selectedItemId);
-            setLocalCoverUrl((previous) => {
-                if (previous) URL.revokeObjectURL(previous);
-                return null;
-            });
-            if (onItemUpdate) {
-                await onItemUpdate();
-            }
-            setInfoMessage(t("bookEdit.coverRemoved"));
-        } catch (err) {
-            console.error("Failed to remove cover", err);
-            setError(err instanceof Error ? err.message : t("bookEdit.failedRemoveCover"));
-            setInfoMessage(null);
-        } finally {
-            setIsRemovingCover(false);
-        }
+        setPendingCoverChange({ type: "remove" });
+        setEmbeddedSelectionDirty(false);
+        setInfoMessage(t("bookEdit.coverRemovedFromDraft", {
+            defaultValue: "Cover removed from the draft. Save or Cancel decides the outcome.",
+        }));
     };
 
     const loadEmbeddedCoverCandidates = useCallback(async (itemId: string) => {
@@ -545,6 +700,10 @@ export function BookEditView({
         });
         setSelectedEmbeddedIndex(index);
         setEmbeddedSelectionDirty(true);
+        setPendingCoverChange({ type: "embedded" });
+        setInfoMessage(t("bookEdit.embeddedCoverAddedToDraft", {
+            defaultValue: "Embedded cover selected in the draft. Save or Cancel decides the outcome.",
+        }));
     };
 
     useEffect(() => {
@@ -564,6 +723,323 @@ export function BookEditView({
         return (
             <div className="flex h-full items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-app-accent" />
+            </div>
+        );
+    }
+
+    if (!embedded) {
+        const busy = isSaving || isUploadingCover || isRemovingCover || isApplyingEmbeddedCover || isQueueingRemove;
+        const isReview = editPhase === "review";
+        const fieldChanged = (field: MetadataDraftField) => dirtyMetadataFields.includes(field);
+        const showField = (field: MetadataDraftField) => !isReview || fieldChanged(field);
+        const draftCoverLabel = pendingCoverChange?.type === "remove"
+            ? t("bookEdit.noCover", { defaultValue: "No cover" })
+            : pendingCoverChange?.type === "upload"
+                ? t("bookEdit.selectedCover", { defaultValue: "Selected cover" })
+                : pendingCoverChange?.type === "embedded"
+                    ? t("bookEdit.embeddedCover", { defaultValue: "Embedded cover" })
+                    : pendingCoverChange?.type === "candidate"
+                        ? t("bookEdit.suggestedCover", { defaultValue: "Suggested cover" })
+                        : t("bookEdit.libraryCover", { defaultValue: "Library cover" });
+
+        return (
+            <div className="mx-auto flex w-full max-w-[1380px] flex-col gap-3 pb-8">
+                <header className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex min-w-0 items-center gap-3">
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={handleCancel}
+                            disabled={busy}
+                            className="h-9 w-9 shrink-0 rounded-full border border-[var(--app-border-soft)] bg-app-surface/70"
+                            aria-label={t("bookEdit.backToLibrary", { defaultValue: "Back to Library" })}
+                        >
+                            <ArrowLeft size={16} />
+                        </Button>
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-app-ink-muted">
+                                {t("bookEdit.editBook", { defaultValue: "Edit book" })}
+                            </p>
+                            <h1 className="truncate font-serif text-2xl leading-tight text-app-ink">
+                                {formData.title || selectedItem.title || t("bookEdit.untitled")}
+                            </h1>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="rounded-full border border-[var(--app-border-soft)] bg-app-surface px-2.5 py-1 text-[11px] font-medium text-app-ink-muted">
+                            {draftChangeCount
+                                ? t("bookEdit.draftChangeCount", { count: draftChangeCount, defaultValue: `${draftChangeCount} draft change${draftChangeCount === 1 ? "" : "s"}` })
+                                : t("bookEdit.libraryUnchanged", { defaultValue: "Library unchanged" })}
+                        </span>
+                        {draftChangeCount > 0 ? (
+                            <Button variant="outline" size="sm" onClick={handleDiscardDraft} disabled={busy} className="h-8 px-3">
+                                <X size={13} />{t("bookEdit.cancel", { defaultValue: "Cancel" })}
+                            </Button>
+                        ) : null}
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={handleQueueRemove}
+                            disabled={busy || !isDesktop}
+                            className="h-9 w-9 text-red-500/75 hover:bg-red-500/10 hover:text-red-500"
+                            title={t("bookEdit.removeFromLibrary")}
+                        >
+                            {isQueueingRemove ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                        </Button>
+                    </div>
+                </header>
+
+                <nav aria-label={t("bookEdit.editProgress", { defaultValue: "Edit progress" })} className="grid overflow-hidden rounded-lg border border-[var(--app-border-soft)] bg-app-panel sm:grid-cols-3">
+                    {[
+                        {
+                            label: t("bookEdit.editStep", { defaultValue: "Edit" }),
+                            detail: t("bookEdit.editStepDetail", { defaultValue: "Compare and adjust" }),
+                            active: !isReview,
+                            complete: isReview,
+                        },
+                        {
+                            label: t("bookEdit.reviewStep", { defaultValue: "Review" }),
+                            detail: t("bookEdit.reviewStepDetail", { count: draftChangeCount, defaultValue: `${draftChangeCount} change${draftChangeCount === 1 ? "" : "s"}` }),
+                            active: isReview,
+                            complete: false,
+                        },
+                        {
+                            label: t("bookEdit.saveStep", { defaultValue: "Save" }),
+                            detail: t("bookEdit.saveStepDetail", { defaultValue: "Library first, files follow" }),
+                            active: false,
+                            complete: false,
+                        },
+                    ].map((step, index) => (
+                        <button
+                            key={step.label}
+                            type="button"
+                            disabled={busy || index === 2 || (index === 1 && draftChangeCount === 0)}
+                            onClick={() => setEditPhase(index === 0 ? "edit" : "review")}
+                            className={`flex items-center gap-3 border-[var(--app-border-soft)] px-4 py-2.5 text-left sm:border-r sm:last:border-r-0 ${step.active ? "bg-[var(--app-ink)] text-app-surface" : "bg-app-panel text-app-ink-muted"}`}
+                        >
+                            <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${step.complete ? "border-emerald-500 bg-emerald-500 text-white" : step.active ? "border-white/30" : "border-[var(--app-border)]"}`}>
+                                {step.complete ? <Check size={12} /> : index + 1}
+                            </span>
+                            <span>
+                                <span className="block text-xs font-semibold">{step.label}</span>
+                                <span className={`block text-[10px] ${step.active ? "opacity-65" : "text-app-ink-muted"}`}>{step.detail}</span>
+                            </span>
+                        </button>
+                    ))}
+                </nav>
+
+                {error ? (
+                    <div className="rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-500">{error}</div>
+                ) : infoMessage ? (
+                    <div className="rounded-md border border-[var(--app-border-soft)] bg-app-surface px-3 py-2 text-xs text-app-ink-muted">{infoMessage}</div>
+                ) : null}
+
+                <div className="grid gap-3 min-[1120px]:grid-cols-[minmax(0,1fr)_300px]">
+                    <main className="overflow-hidden rounded-xl border border-[var(--app-border-soft)] bg-app-panel shadow-soft">
+                        <div className="flex items-center justify-between border-b border-[var(--app-border-soft)] bg-[var(--app-ink)] px-4 py-2.5 text-app-surface">
+                            <div>
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] opacity-60">
+                                    {isReview ? t("bookEdit.finalCheck", { defaultValue: "Final check" }) : t("bookEdit.libraryAndDraft", { defaultValue: "Library and draft" })}
+                                </p>
+                                <p className="mt-0.5 text-xs font-semibold">
+                                    {isReview ? t("bookEdit.onlyChangesShown", { defaultValue: "Only effective changes are shown" }) : t("bookEdit.originalPreserved", { defaultValue: "Edit without losing the original" })}
+                                </p>
+                            </div>
+                            {isReview ? (
+                                <button type="button" onClick={() => setEditPhase("edit")} disabled={busy} className="text-[11px] font-semibold opacity-75 hover:opacity-100">
+                                    {t("bookEdit.backToEditing", { defaultValue: "Back to editing" })}
+                                </button>
+                            ) : null}
+                        </div>
+                        <div className="grid grid-cols-[108px_minmax(0,1fr)_28px_minmax(0,1fr)] gap-3 border-b border-[var(--app-border-soft)] bg-app-surface px-4 py-2 text-[9px] font-semibold uppercase tracking-[0.13em] text-app-ink-muted">
+                            <span>{t("bookEdit.field", { defaultValue: "Field" })}</span>
+                            <span>{t("bookEdit.inLibrary", { defaultValue: "In Library" })}</span>
+                            <span />
+                            <span>{isReview ? t("bookEdit.afterSave", { defaultValue: "After Save" }) : t("bookEdit.draft", { defaultValue: "Draft" })}</span>
+                        </div>
+
+                        {showField("title") ? (
+                            <CompactMetadataRow label={t("bookEdit.title")} current={formatMetadataValue(baselineMetadata, "title")} changed={fieldChanged("title")} review={isReview}>
+                                {isReview ? formatMetadataValue(formData, "title") : (
+                                    <div className="flex gap-1.5">
+                                        <Input value={formData.title || ""} onChange={(event) => setFormData({ ...formData, title: event.target.value })} className="h-8 min-w-0 text-xs" />
+                                        <Button variant="ghost" size="sm" onClick={() => setFormData((current) => {
+                                            const cleaned = cleanupMetadataTitle(current);
+                                            return cleaned.changed ? { ...current, title: cleaned.title, publishedYear: cleaned.publishedYear } : current;
+                                        })} disabled={!titleCleanupPreview.changed} className="h-8 shrink-0 px-2 text-[10px]">{t("bookEdit.autoClean")}</Button>
+                                    </div>
+                                )}
+                            </CompactMetadataRow>
+                        ) : null}
+
+                        {showField("authors") ? (
+                            <CompactMetadataRow label={t("bookEdit.authors")} current={formatMetadataValue(baselineMetadata, "authors")} changed={fieldChanged("authors")} review={isReview}>
+                                {isReview ? formatMetadataValue(formData, "authors") : (
+                                    <div className="relative">
+                                        <Input
+                                            value={authorsInput || formData.authors.join(", ")}
+                                            onFocus={() => setAuthorsFocused(true)}
+                                            onBlur={() => window.setTimeout(() => setAuthorsFocused(false), 120)}
+                                            onChange={(event) => handleAuthorsInputChange(event.target.value)}
+                                            onKeyDown={handleAuthorsInputKeyDown}
+                                            className="h-8 w-full text-xs"
+                                        />
+                                        {showAuthorSuggestions ? (
+                                            <div ref={authorSuggestionsListRef} className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-[var(--app-border-soft)] bg-app-surface shadow-lg">
+                                                {authorSuggestionsLoading ? <div className="px-3 py-2 text-xs text-app-ink-muted">{t("common.loading")}</div> : authorSuggestions.map((suggestion, index) => (
+                                                    <button
+                                                        key={suggestion.id}
+                                                        type="button"
+                                                        data-suggestion-index={index}
+                                                        aria-selected={index === activeAuthorSuggestionIndex}
+                                                        onMouseDown={(event) => { event.preventDefault(); handleApplyAuthorSuggestion(suggestion); }}
+                                                        onMouseEnter={() => setActiveAuthorSuggestionIndex(index)}
+                                                        className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs ${index === activeAuthorSuggestionIndex ? "bg-app-surface-hover" : "hover:bg-app-surface-hover"}`}
+                                                    >
+                                                        <span className="truncate">{suggestion.name}</span><span className="ml-3 text-app-ink-muted">{suggestion.bookCount}</span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                )}
+                            </CompactMetadataRow>
+                        ) : null}
+
+                        {showField("publishedYear") ? (
+                            <CompactMetadataRow label={t("bookEdit.publicationYear")} current={formatMetadataValue(baselineMetadata, "publishedYear")} changed={fieldChanged("publishedYear")} review={isReview}>
+                                {isReview ? formatMetadataValue(formData, "publishedYear") : <Input type="number" value={formData.publishedYear ?? ""} onChange={(event) => setFormData({ ...formData, publishedYear: parseInt(event.target.value, 10) || null })} className="h-8 text-xs" />}
+                            </CompactMetadataRow>
+                        ) : null}
+
+                        {showField("language") ? (
+                            <CompactMetadataRow label={t("bookEdit.language")} current={formatMetadataValue(baselineMetadata, "language")} changed={fieldChanged("language")} review={isReview}>
+                                {isReview ? formatMetadataValue(formData, "language") : (
+                                    <select value={formData.language ?? ""} onChange={(event) => setFormData({ ...formData, language: event.target.value || null })} className="h-8 w-full rounded-md border border-[var(--app-border-soft)] bg-app-surface px-2 text-xs text-app-ink">
+                                        <option value="">{t("bookEdit.select")}</option>
+                                        {LANGUAGE_OPTIONS.map((language) => <option key={language.code} value={language.code}>{language.flag ? `${language.flag} ${language.name}` : language.name}</option>)}
+                                    </select>
+                                )}
+                            </CompactMetadataRow>
+                        ) : null}
+
+                        {showField("isbn") ? (
+                            <CompactMetadataRow label={t("bookEdit.isbn")} current={formatMetadataValue(baselineMetadata, "isbn")} changed={fieldChanged("isbn")} review={isReview}>
+                                {isReview ? formatMetadataValue(formData, "isbn") : <Input value={formData.isbn ?? ""} onChange={(event) => setFormData({ ...formData, isbn: event.target.value || null })} className="h-8 text-xs" />}
+                            </CompactMetadataRow>
+                        ) : null}
+
+                        {showField("series") ? (
+                            <CompactMetadataRow label={t("bookEdit.series")} current={formatMetadataValue(baselineMetadata, "series")} changed={fieldChanged("series")} review={isReview}>
+                                {isReview ? formatMetadataValue(formData, "series") : <Input value={formData.series ?? ""} onChange={(event) => setFormData({ ...formData, series: event.target.value || null })} className="h-8 text-xs" />}
+                            </CompactMetadataRow>
+                        ) : null}
+
+                        {showField("seriesIndex") ? (
+                            <CompactMetadataRow label={t("bookEdit.seriesNumber")} current={formatMetadataValue(baselineMetadata, "seriesIndex")} changed={fieldChanged("seriesIndex")} review={isReview}>
+                                {isReview ? formatMetadataValue(formData, "seriesIndex") : <Input type="number" step="0.1" value={formData.seriesIndex ?? ""} onChange={(event) => setFormData({ ...formData, seriesIndex: parseFloat(event.target.value) || null })} className="h-8 text-xs" />}
+                            </CompactMetadataRow>
+                        ) : null}
+
+                        {showField("genres") ? (
+                            <CompactMetadataRow label={t("bookEdit.categories")} current={formatMetadataValue(baselineMetadata, "genres")} changed={fieldChanged("genres")} review={isReview}>
+                                {isReview ? formatMetadataValue(formData, "genres") : <Input value={(formData.genres ?? []).join(", ")} onChange={(event) => setFormData({ ...formData, genres: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })} className="h-8 text-xs" />}
+                            </CompactMetadataRow>
+                        ) : null}
+
+                        {showField("description") ? (
+                            <CompactMetadataRow label={t("bookEdit.description")} current={formatMetadataValue(baselineMetadata, "description")} changed={fieldChanged("description")} review={isReview}>
+                                {isReview ? formatMetadataValue(formData, "description") : <textarea value={formData.description ?? ""} onChange={(event) => setFormData({ ...formData, description: event.target.value || null })} className="h-14 w-full resize-none rounded-md border border-[var(--app-border-soft)] bg-app-surface px-2 py-1.5 text-xs text-app-ink outline-none focus:ring-1 focus:ring-[var(--app-accent)]" />}
+                            </CompactMetadataRow>
+                        ) : null}
+
+                        {isReview && coverDraftDirty ? (
+                            <div className="grid grid-cols-[108px_minmax(0,1fr)_28px_minmax(0,1fr)] items-center gap-3 bg-[rgba(249,115,22,0.06)] px-4 py-3">
+                                <div className="text-[10px] font-semibold uppercase tracking-[0.11em] text-app-ink-muted">{t("bookEdit.bookCover")}</div>
+                                <div className="flex items-center gap-2 text-xs text-app-ink-muted"><span className="h-9 w-7 overflow-hidden rounded-sm border border-[var(--app-border-soft)] bg-app-surface">{displayCoverUrl ? <img src={displayCoverUrl} alt="" className="h-full w-full object-cover" /> : null}</span>{t("bookEdit.libraryCover", { defaultValue: "Library cover" })}</div>
+                                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-app-accent text-white"><ChevronRight size={12} /></div>
+                                <div className="flex items-center gap-2 text-xs font-medium"><span className="h-9 w-7 overflow-hidden rounded-sm border border-[var(--app-border-soft)] bg-app-surface">{draftCoverUrl ? <img src={draftCoverUrl} alt="" className="h-full w-full object-cover" /> : null}</span>{draftCoverLabel}</div>
+                            </div>
+                        ) : null}
+                    </main>
+
+                    <aside className="space-y-3">
+                        {!isReview ? (
+                            <section className="rounded-xl border border-[var(--app-border-soft)] bg-app-panel p-3.5">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2 text-xs font-semibold text-app-ink"><Sparkles size={14} className="text-app-accent" />{t("bookEdit.matchMetadata")}</div>
+                                    {pendingMatchCandidate ? <span className="rounded-full bg-app-surface-hover px-2 py-0.5 text-[9px] font-semibold text-app-ink-muted">{pendingMatchCandidate.source}</span> : null}
+                                </div>
+                                <div className="mt-3 flex gap-2">
+                                    <Input value={matchQuery} onChange={(event) => { const value = event.target.value; onMatchQueryChange(value); setIsMatchQueryDirty(value !== metadataSearchQuery); }} onKeyDown={(event) => { if (event.key === "Enter") onMatchSearch(matchQuery); }} className="h-8 flex-1 text-xs" />
+                                    <Button variant="primary" size="sm" onClick={() => onMatchSearch(matchQuery)} disabled={matchLoading || !matchQuery.trim() || !isDesktop} className="h-8 px-2.5">{matchLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}</Button>
+                                </div>
+                                <button type="button" onClick={handleUseCurrentMetadataQuery} disabled={!metadataSearchQuery} className="mt-1.5 block w-full text-right text-[10px] text-app-ink-muted hover:text-app-accent disabled:opacity-50">{t("bookEdit.useCurrentMetadata")}</button>
+                                {matchCandidates.length ? (
+                                    <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
+                                        {matchCandidates.slice(0, 4).map((candidate) => (
+                                            <button key={candidate.id} type="button" onClick={() => handleUseMatchCandidateInDraft(candidate)} disabled={busy} className="flex w-full items-center gap-2 rounded-md border border-[var(--app-border-soft)] bg-app-surface p-2 text-left hover:border-[var(--app-accent)]">
+                                                <span className="h-12 w-8 shrink-0 overflow-hidden rounded-sm border border-[var(--app-border-soft)] bg-app-panel">{getCandidateCoverUrl(candidate) ? <img src={getCandidateCoverUrl(candidate) ?? ""} alt="" className="h-full w-full object-cover" /> : null}</span>
+                                                <span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-app-ink">{candidate.title || t("bookEdit.untitled")}</span><span className="block truncate text-[10px] text-app-ink-muted">{candidate.authors.join(", ")} · {candidate.source}</span></span>
+                                                <span className="text-[10px] font-semibold text-app-accent">{Math.round(candidate.confidence * 100)}%</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : matchLoading ? <div className="mt-3 flex items-center gap-2 text-[11px] text-app-ink-muted"><Loader2 size={13} className="animate-spin" />{t("bookEdit.searchingSources")}</div> : null}
+                            </section>
+                        ) : pendingMatchCandidate ? (
+                            <section className="rounded-xl border border-[var(--app-border-soft)] bg-app-panel p-3.5">
+                                <div className="flex items-center gap-2 text-xs font-semibold"><Sparkles size={14} className="text-app-accent" />{t("bookEdit.matchInDraft", { defaultValue: "Match in draft" })}</div>
+                                <p className="mt-2 text-[11px] text-app-ink-muted">{pendingMatchCandidate.source} · {Math.round(pendingMatchCandidate.confidence * 100)}%</p>
+                            </section>
+                        ) : null}
+
+                        <section className="rounded-xl border border-[var(--app-border-soft)] bg-app-panel p-3.5">
+                            <div className="flex items-start gap-3">
+                                <div className="h-36 w-24 shrink-0 overflow-hidden rounded-md border border-[var(--app-border-soft)] bg-app-surface shadow-sm">
+                                    {draftCoverUrl ? <img src={draftCoverUrl} alt="" className="h-full w-full object-cover" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : <div className="flex h-full items-center justify-center"><ImageIcon size={24} className="text-app-ink-muted" /></div>}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-app-ink-muted">{t("bookEdit.coverInDraft", { defaultValue: "Cover in draft" })}</p>
+                                    <p className="mt-1 text-[11px] font-medium text-app-ink">{draftCoverLabel}</p>
+                                    {!isReview ? (
+                                        <div className="mt-3 space-y-1.5">
+                                            <button type="button" onClick={handleChangeCover} disabled={busy || !isDesktop} className="block text-left text-[11px] font-semibold text-app-ink-muted hover:text-app-accent disabled:opacity-50">{hasCover ? t("bookEdit.changeCover") : t("bookEdit.addCover")}</button>
+                                            <button type="button" onClick={handleUseEmbeddedCover} disabled={busy || isLoadingEmbeddedPreview || !isDesktop} className="block text-left text-[11px] font-semibold text-app-ink-muted hover:text-app-accent disabled:opacity-50">{t("bookEdit.useEmbeddedCover")}</button>
+                                            <button type="button" onClick={handleRemoveCover} disabled={busy || (!hasCover && !coverDraftDirty)} className="block text-left text-[11px] font-semibold text-red-500 disabled:opacity-50">{t("bookEdit.removeCover")}</button>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            </div>
+                            {!isReview && embeddedPreviewUrl ? (
+                                <div className="mt-3 flex items-center gap-2 border-t border-[var(--app-border-soft)] pt-3">
+                                    <img src={embeddedPreviewUrl} alt="" className="h-12 w-8 rounded-sm object-cover" />
+                                    <select value={String(selectedEmbeddedIndex)} onChange={(event) => handleSelectEmbeddedCandidate(parseInt(event.target.value, 10))} className="h-8 min-w-0 flex-1 rounded-md border border-[var(--app-border-soft)] bg-app-surface px-2 text-[10px] text-app-ink">
+                                        {embeddedCandidates.map((candidate, index) => <option key={`${candidate.path}-${index}`} value={index}>{candidate.path}</option>)}
+                                    </select>
+                                </div>
+                            ) : null}
+                        </section>
+
+                        <section className="rounded-xl border border-[var(--app-border-soft)] bg-app-panel p-3.5">
+                            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.13em] text-app-ink-muted"><FileCheck2 size={13} />{t("bookEdit.saveBoundary", { defaultValue: "Save boundary" })}</div>
+                            <p className="mt-2 text-[11px] leading-relaxed text-app-ink-muted">{t("bookEdit.saveBoundaryDetailV2", { defaultValue: "Save updates the Library. File copies continue separately afterward." })}</p>
+                            {!isReview ? (
+                                <Button variant="primary" size="sm" className="mt-3 w-full" onClick={() => setEditPhase("review")} disabled={busy || draftChangeCount === 0}>
+                                    {t("bookEdit.reviewChanges", { count: draftChangeCount, defaultValue: `Review ${draftChangeCount} change${draftChangeCount === 1 ? "" : "s"}` })}<ChevronRight size={13} />
+                                </Button>
+                            ) : (
+                                <div className="mt-3 grid grid-cols-2 gap-2">
+                                    <Button variant="outline" size="sm" onClick={handleDiscardDraft} disabled={busy}>{t("bookEdit.cancel", { defaultValue: "Cancel" })}</Button>
+                                    <Button variant="primary" size="sm" onClick={handleSave} disabled={busy || draftChangeCount === 0 || !isDesktop}>
+                                        {isSaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}{t("bookEdit.saveDraft", { defaultValue: "Save changes" })}
+                                    </Button>
+                                </div>
+                            )}
+                            {!isDesktop ? <p className="mt-2 text-center text-[10px] text-app-ink-muted">{t("bookEdit.previewOnly", { defaultValue: "Preview only in the web build" })}</p> : null}
+                        </section>
+                    </aside>
+                </div>
             </div>
         );
     }

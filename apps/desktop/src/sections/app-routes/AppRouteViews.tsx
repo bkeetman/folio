@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useMemo } from "react";
 import { AuthorsView } from "../AuthorsView";
 import { CategoriesView } from "../CategoriesView";
 import { InboxView } from "../InboxView";
@@ -54,6 +54,27 @@ export function AppRouteViews({
   tags,
   ereader,
 }: AppRoutesProps) {
+  const editLibraryItems = useMemo(
+    () => library.libraryItems.length > 0
+      ? library.libraryItems
+      : library.allBooks.map((book) => ({
+          id: book.id,
+          title: book.title,
+          published_year: typeof book.year === "number" ? book.year : null,
+          created_at: book.createdAt,
+          authors: book.authors,
+          file_count: 0,
+          formats: [book.format],
+          cover_path: book.cover,
+          tags: book.tags,
+          language: book.language,
+          series: book.series,
+          series_index: book.seriesIndex,
+          genres: book.genres,
+        })),
+    [library.allBooks, library.libraryItems],
+  );
+
   return (
     <Suspense
       fallback={
@@ -260,7 +281,7 @@ export function AppRouteViews({
       {view === "edit" ? (
         <BookEditView
           selectedItemId={library.selectedItemId}
-          libraryItems={library.libraryItems}
+          libraryItems={editLibraryItems}
           setView={setView}
           previousView={edit.previousView}
           isDesktop={isDesktop}
