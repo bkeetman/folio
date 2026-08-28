@@ -13,7 +13,6 @@ import {
   Save,
   Search,
   Sparkles,
-  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button, Input } from "../../components/ui";
@@ -185,96 +184,144 @@ function TextField({
   );
 }
 
-function HeaderActions({
-  dirtyFields,
-  syncState,
-  onCancel,
-  onSave,
-}: Pick<PrototypeViewProps, "dirtyFields" | "syncState" | "onCancel" | "onSave">) {
-  return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
-      <SyncBadge syncState={syncState} />
-      <Button variant="outline" size="sm" onClick={onCancel} disabled={!dirtyFields.length}>
-        <X size={13} /> Cancel
-      </Button>
-      <Button variant="primary" size="sm" onClick={onSave} disabled={!dirtyFields.length}>
-        <Save size={13} /> Save changes
-      </Button>
-    </div>
-  );
-}
-
 function VariantA(props: PrototypeViewProps) {
   const { draft, baseline, dirtyFields, syncState, notice, setField, applyProposal, setCover, onCancel, onSave, onSimulateProblem } = props;
+  const [phase, setPhase] = useState<"edit" | "review">("edit");
+  const saved = syncState !== "idle";
+  const fields: Array<{ key: Exclude<DraftKey, "cover" | "description">; label: string }> = [
+    { key: "title", label: "Title" },
+    { key: "authors", label: "Authors" },
+    { key: "publishedYear", label: "Published" },
+    { key: "language", label: "Language" },
+    { key: "isbn", label: "ISBN" },
+    { key: "series", label: "Series" },
+    { key: "seriesIndex", label: "No." },
+    { key: "genres", label: "Categories" },
+  ];
+  const visibleFields = phase === "review"
+    ? fields.filter(({ key }) => dirtyFields.includes(key))
+    : fields;
+
+  const handleCancel = () => {
+    onCancel();
+    setPhase("edit");
+  };
+
   return (
-    <div className="mx-auto w-full max-w-[1240px] pb-10">
-      <header className="mb-5 flex flex-wrap items-center justify-between gap-4 border-b border-black/10 pb-4">
-        <div className="flex items-center gap-3">
-          <button type="button" aria-label="Back to preserved Library context" className="flex h-9 w-9 items-center justify-center rounded-full border border-black/10 bg-white/65 hover:bg-white">
+    <div className="mx-auto w-full max-w-[1380px] pb-12">
+      <header className="mb-3 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <button type="button" aria-label="Back to preserved Library context" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/70 hover:bg-white">
             <ArrowLeft size={16} />
           </button>
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#8c8177]">Edit book · return to 24 filtered results</div>
-            <h1 className="font-serif text-2xl leading-tight text-[#1a1614]">{draft.title}</h1>
+          <div className="min-w-0">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#8c8177]">Library · Science fiction · 24 results</div>
+            <h1 className="truncate font-serif text-2xl leading-tight text-[#1a1614]">{draft.title}</h1>
           </div>
         </div>
-        <HeaderActions dirtyFields={dirtyFields} syncState={syncState} onCancel={onCancel} onSave={onSave} />
+        <SyncBadge syncState={syncState} />
       </header>
 
+      <nav aria-label="Edit progress" className="mb-3 grid overflow-hidden rounded-lg border border-black/10 bg-white sm:grid-cols-3">
+        {[
+          { label: "Edit", detail: "Compare and adjust", active: phase === "edit" && !saved, complete: phase === "review" || saved },
+          { label: "Review", detail: `${dirtyFields.length} change${dirtyFields.length === 1 ? "" : "s"}`, active: phase === "review" && !saved, complete: saved },
+          { label: "Saved", detail: saved ? "Library updated" : "Files follow afterward", active: saved, complete: false },
+        ].map((step, index) => (
+          <button
+            key={step.label}
+            type="button"
+            disabled={index === 2 || (index === 1 && !dirtyFields.length)}
+            onClick={() => index === 0 ? setPhase("edit") : setPhase("review")}
+            className={`flex items-center gap-3 border-black/10 px-4 py-2.5 text-left sm:border-r sm:last:border-r-0 ${step.active ? "bg-[#27211e] text-white" : "bg-white text-[#706860]"} disabled:cursor-default`}
+          >
+            <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${step.complete ? "border-emerald-500 bg-emerald-500 text-white" : step.active ? "border-white/35" : "border-black/15"}`}>{step.complete ? <Check size={12} /> : index + 1}</span>
+            <span><span className="block text-xs font-semibold">{step.label}</span><span className={`block text-[10px] ${step.active ? "text-white/65" : "text-[#8c8177]"}`}>{step.detail}</span></span>
+          </button>
+        ))}
+      </nav>
+
       <DraftState dirtyFields={dirtyFields} syncState={syncState} />
-      {notice ? <div className="mt-3 rounded-md border border-emerald-700/10 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">{notice}</div> : null}
+      {notice ? <div className={`mt-2 rounded-md border px-3 py-2 text-xs ${syncState === "problem" ? "border-amber-200 bg-amber-50 text-amber-900" : "border-emerald-700/10 bg-emerald-50 text-emerald-800"}`}>{notice}</div> : null}
 
-      <div className="mt-5 grid gap-6 xl:grid-cols-[210px_minmax(430px,1fr)_280px]">
-        <aside className="space-y-3">
-          <CoverProof draft={draft} />
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" size="sm" onClick={() => setCover("embedded")}>Embedded</Button>
-            <Button variant="outline" size="sm" onClick={() => setCover("proposal")}>Suggested</Button>
-          </div>
-          <Button variant="ghost" size="sm" className="w-full text-red-600" onClick={() => setCover("removed")}>Remove in draft</Button>
-          <p className="text-[11px] leading-relaxed text-[#706860]">Cover choices stay in this draft. Cancel restores the Library cover.</p>
-        </aside>
-
-        <main className="rounded-xl border border-black/10 bg-white p-6 shadow-[0_18px_50px_rgba(35,27,20,0.06)]">
-          <div className="mb-5 flex items-center justify-between">
+      <div className="mt-3 grid gap-3 min-[1120px]:grid-cols-[minmax(0,1fr)_300px]">
+        <main className="overflow-hidden rounded-xl border border-black/10 bg-white shadow-[0_16px_42px_rgba(35,27,20,0.055)]">
+          <div className="flex items-center justify-between border-b border-black/10 bg-[#27211e] px-4 py-2.5 text-white">
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-orange-700">The catalog card</div>
-              <h2 className="mt-1 text-lg font-semibold">Book details</h2>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.15em] text-white/60">{phase === "edit" ? "Library and draft" : "Final check"}</div>
+              <div className="mt-0.5 text-xs font-semibold">{phase === "edit" ? "Edit without losing the original" : "Only effective changes are shown"}</div>
             </div>
-            <span className="text-[11px] text-[#706860]">All edits save together</span>
+            {phase === "review" ? <button type="button" onClick={() => setPhase("edit")} className="text-[11px] font-semibold text-white/75 hover:text-white">Back to editing</button> : null}
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <TextField label="Title" value={draft.title} onChange={(value) => setField("title", value)} className="col-span-2" />
-            <TextField label="Authors" value={draft.authors} onChange={(value) => setField("authors", value)} className="col-span-2" />
-            <TextField label="Published" value={draft.publishedYear} onChange={(value) => setField("publishedYear", value)} />
-            <TextField label="Language" value={draft.language} onChange={(value) => setField("language", value)} />
-            <TextField label="ISBN" value={draft.isbn} onChange={(value) => setField("isbn", value)} className="col-span-2" />
-            <TextField label="Series" value={draft.series} onChange={(value) => setField("series", value)} />
-            <TextField label="No." value={draft.seriesIndex} onChange={(value) => setField("seriesIndex", value)} />
-            <TextField label="Categories" value={draft.genres} onChange={(value) => setField("genres", value)} className="col-span-2" />
-            <label className="col-span-2 block">
-              <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.11em] text-[#706860]">Description</span>
-              <textarea value={draft.description} onChange={(event) => setField("description", event.target.value)} className="min-h-32 w-full rounded-md border border-black/10 bg-white/80 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-orange-500" />
-            </label>
+
+          <div className="grid grid-cols-[112px_1fr_28px_1fr] gap-3 border-b border-black/10 bg-[#f7f5f2] px-4 py-2 text-[9px] font-semibold uppercase tracking-[0.13em] text-[#706860]">
+            <span>Field</span><span>In Library</span><span /><span>{phase === "edit" ? "Draft" : "After Save"}</span>
           </div>
+
+          {visibleFields.map(({ key, label }) => (
+            <DiffRow key={key} label={label} current={baseline[key]} draft={draft[key]} onChange={(value) => setField(key, value)} dense />
+          ))}
+
+          {phase === "review" && dirtyFields.includes("cover") ? (
+            <div className="grid grid-cols-[112px_1fr_28px_1fr] items-center gap-3 bg-orange-50/60 px-4 py-3">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#706860]">Cover</div>
+              <div className="flex items-center gap-2 text-xs text-[#706860]"><span className="h-9 w-7 rounded-sm bg-gradient-to-br from-[#283d3b] via-[#4d6a60] to-[#d2b48c]" />Library cover</div>
+              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-orange-500 text-white"><ChevronRight size={12} /></div>
+              <div className="flex items-center gap-2 text-xs font-semibold"><span className={`h-9 w-7 rounded-sm ${draft.cover === "removed" ? "border border-dashed border-black/20 bg-white" : "bg-gradient-to-br from-[#221d36] via-[#6d3f5f] to-[#d7905b]"}`} />{draft.cover === "proposal" ? "Suggested cover" : draft.cover === "embedded" ? "Embedded cover" : "No cover"}</div>
+            </div>
+          ) : null}
+
+          {phase === "edit" || dirtyFields.includes("description") ? (
+            <div className={`grid grid-cols-[112px_1fr_28px_1fr] items-start gap-3 px-4 py-3 ${dirtyFields.includes("description") ? "bg-orange-50/60" : "bg-white"}`}>
+              <div className="pt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#706860]">Description</div>
+              <p className="line-clamp-2 pt-2 text-xs leading-relaxed text-[#706860]">{baseline.description || "Empty"}</p>
+              <div className={`mt-2 flex h-5 w-5 items-center justify-center rounded-full ${dirtyFields.includes("description") ? "bg-orange-500 text-white" : "bg-[#eee9e3] text-[#8c8177]"}`}>{dirtyFields.includes("description") ? <ChevronRight size={12} /> : <Check size={11} />}</div>
+              <textarea value={draft.description} onChange={(event) => setField("description", event.target.value)} className="h-16 w-full resize-none rounded-md border border-black/10 bg-white px-3 py-2 text-xs leading-relaxed outline-none focus:ring-2 focus:ring-orange-500" />
+            </div>
+          ) : null}
+
+          {phase === "review" && !dirtyFields.length ? (
+            <div className="flex min-h-48 flex-col items-center justify-center px-6 text-center">
+              <Check size={24} className="text-emerald-600" />
+              <h2 className="mt-3 text-sm font-semibold">No unsaved changes</h2>
+              <p className="mt-1 text-xs text-[#706860]">The draft matches the Library.</p>
+            </div>
+          ) : null}
         </main>
 
-        <aside className="space-y-4 border-l border-black/10 pl-5">
-          <section>
-            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#8c8177]"><ListChecks size={13} /> Draft margin</div>
-            <div className="mt-3 space-y-2">
-              {dirtyFields.length ? dirtyFields.map((field) => (
-                <div key={field} className="border-l-2 border-orange-500 pl-3">
-                  <div className="text-xs font-semibold">{fieldLabel(field)}</div>
-                  <div className="truncate text-[11px] text-[#706860]">{String(baseline[field]) || "Empty"} → {String(draft[field]) || "Empty"}</div>
+        <aside className="space-y-3">
+          <section className="rounded-xl border border-violet-200 bg-violet-50 p-3.5">
+            <div className="flex items-center justify-between"><div className="flex items-center gap-2 text-xs font-semibold text-violet-950"><Sparkles size={14} /> Best match</div><span className="rounded-full bg-violet-200 px-2 py-0.5 text-[9px] font-bold uppercase text-violet-900">High</span></div>
+            <p className="mt-2 text-[11px] leading-relaxed text-violet-900/75">6 matching values from Open Library and Apple Books.</p>
+            <Button variant="outline" size="sm" className="mt-3 w-full border-violet-300 bg-white" onClick={() => applyProposal()}>Use suggestions in draft</Button>
+          </section>
+
+          <section className="rounded-xl border border-black/10 bg-white p-3.5">
+            <div className="flex items-start gap-3">
+              <CoverProof draft={draft} compact />
+              <div className="min-w-0 flex-1">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#706860]">Cover in draft</div>
+                <div className="mt-2 space-y-1.5">
+                  <button type="button" onClick={() => setCover("library")} className="block text-left text-[11px] font-semibold text-[#504943] hover:text-orange-700">Keep Library cover</button>
+                  <button type="button" onClick={() => setCover("embedded")} className="block text-left text-[11px] font-semibold text-[#504943] hover:text-orange-700">Use embedded cover</button>
+                  <button type="button" onClick={() => setCover("proposal")} className="block text-left text-[11px] font-semibold text-violet-800 hover:text-violet-950">Use suggested cover</button>
+                  <button type="button" onClick={() => setCover("removed")} className="block text-left text-[11px] font-semibold text-red-600">Remove in draft</button>
                 </div>
-              )) : <p className="text-xs leading-relaxed text-[#706860]">Start editing or use selected suggestions. Nothing changes outside this page until Save.</p>}
+              </div>
             </div>
           </section>
-          <section className="rounded-lg border border-violet-200 bg-violet-50/70 p-4">
-            <div className="flex items-center gap-2 text-xs font-semibold text-violet-900"><Sparkles size={14} /> 6 suggestions</div>
-            <p className="mt-2 text-[11px] leading-relaxed text-violet-800">Open Library and Apple Books agree on author, year, language, categories, description, and cover.</p>
-            <Button variant="outline" size="sm" className="mt-3 w-full border-violet-300 bg-white/60" onClick={() => applyProposal()}>Review and use values</Button>
+
+          <section className="rounded-xl border border-black/10 bg-white p-3.5">
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#706860]"><ListChecks size={13} /> Save boundary</div>
+            <p className="mt-2 text-[11px] leading-relaxed text-[#504943]">Save updates the Library once. Two EPUB updates run separately afterward.</p>
+            {phase === "edit" && !saved ? (
+              <Button variant="primary" size="sm" className="mt-3 w-full" onClick={() => setPhase("review")} disabled={!dirtyFields.length}>Review {dirtyFields.length || ""} change{dirtyFields.length === 1 ? "" : "s"} <ChevronRight size={13} /></Button>
+            ) : (
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Button variant="outline" size="sm" onClick={handleCancel} disabled={!dirtyFields.length}>Cancel</Button>
+                <Button variant="primary" size="sm" onClick={onSave} disabled={!dirtyFields.length}>Save</Button>
+              </div>
+            )}
           </section>
           {syncState === "succeeded" ? <Button variant="ghost" size="sm" className="w-full text-amber-700" onClick={onSimulateProblem}>Simulate file problem</Button> : null}
         </aside>
@@ -288,21 +335,23 @@ function DiffRow({
   current,
   draft,
   onChange,
+  dense = false,
 }: {
   label: string;
   current: string;
   draft: string;
   onChange: (value: string) => void;
+  dense?: boolean;
 }) {
   const changed = current !== draft;
   return (
-    <div className={`grid grid-cols-[130px_1fr_32px_1fr] items-center gap-3 border-b border-black/8 px-4 py-3 ${changed ? "bg-orange-50/60" : "bg-white"}`}>
+    <div className={`grid items-center gap-3 border-b border-black/8 px-4 ${dense ? "grid-cols-[112px_1fr_28px_1fr] py-2" : "grid-cols-[130px_1fr_32px_1fr] py-3"} ${changed ? "bg-orange-50/60" : "bg-white"}`}>
       <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#706860]">{label}</div>
       <div className="truncate text-xs text-[#706860]">{current || "Empty"}</div>
       <div className={`flex h-5 w-5 items-center justify-center rounded-full ${changed ? "bg-orange-500 text-white" : "bg-[#eee9e3] text-[#8c8177]"}`}>
         {changed ? <ChevronRight size={12} /> : <Check size={11} />}
       </div>
-      <Input value={draft} onChange={(event) => onChange(event.target.value)} className="h-8 bg-white text-xs" />
+      <Input value={draft} onChange={(event) => onChange(event.target.value)} className={`${dense ? "h-7" : "h-8"} bg-white text-xs`} />
     </div>
   );
 }
@@ -444,7 +493,10 @@ export function BookEditSavePrototype({ item }: { item?: LibraryItem }) {
 
   useEffect(() => {
     if (syncState !== "queued") return;
-    const timeout = window.setTimeout(() => setSyncState("succeeded"), 1400);
+    const timeout = window.setTimeout(() => {
+      setSyncState("succeeded");
+      setNotice("Saved to Library. 2 EPUB files are up to date.");
+    }, 1400);
     return () => window.clearTimeout(timeout);
   }, [syncState]);
 

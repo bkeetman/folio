@@ -4,7 +4,7 @@ import { useEffect } from "react";
 export type PrototypeVariant = "A" | "B" | "C";
 
 const variants: Array<{ key: PrototypeVariant; name: string }> = [
-  { key: "A", name: "Quiet editor" },
+  { key: "A", name: "Compact hybrid" },
   { key: "B", name: "Compare workbench" },
   { key: "C", name: "Guided flow" },
 ];
