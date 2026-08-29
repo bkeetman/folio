@@ -32,6 +32,18 @@ _Avoid_: Library, selection
 The explicit set of books chosen for one batch workflow. It may include books outside the current Result set and never implicitly expands when that Result set changes.
 _Avoid_: Current results, filtered books
 
+**Batch field operation**:
+An explicit instruction in an Edit draft that preserves, replaces, clears, adds, or removes a field value for every book in the Batch selection. Blank input is never itself an operation.
+_Avoid_: Bulk patch, implicit clear
+
+**Mixed field value**:
+The state in which books in a Batch selection do not share the same value for a field. It conveys variation rather than an edit and remains preserved until an explicit Batch field operation changes it.
+_Avoid_: Empty value, unknown value
+
+**Individual-only field**:
+A field whose intended value must be chosen for each book separately and therefore cannot receive a Batch field operation.
+_Avoid_: Unsupported field, disabled field
+
 **Edit draft**:
 The unsaved metadata and cover choices being composed for one or more books. An edit draft ends at one explicit Save or Cancel boundary.
 _Avoid_: Pending change, queued change
