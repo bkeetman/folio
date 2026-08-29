@@ -29,11 +29,11 @@ The books currently shown by the Library workspace after applying its query, fil
 _Avoid_: Library, selection
 
 **Batch selection**:
-The explicit set of books chosen for one batch workflow. It may include books outside the current Result set and never implicitly expands when that Result set changes.
+The explicit set of books chosen for one batch workflow. It may include books outside the current Result set, never implicitly expands when that Result set changes, and remains fixed for the lifetime of its Edit draft.
 _Avoid_: Current results, filtered books
 
 **Batch field operation**:
-An explicit instruction in an Edit draft that preserves, replaces, clears, adds, or removes a field value for every book in the Batch selection. Blank input is never itself an operation.
+An explicit instruction in an Edit draft that preserves, replaces, clears, adds, or removes a field value for every book in the Batch selection. Adding and removing values may coexist, while replacing or clearing is exclusive; blank input is never itself an operation.
 _Avoid_: Bulk patch, implicit clear
 
 **Mixed field value**:
@@ -47,6 +47,14 @@ _Avoid_: Unsupported field, disabled field
 **Edit draft**:
 The unsaved metadata and cover choices being composed for one or more books. An edit draft ends at one explicit Save or Cancel boundary.
 _Avoid_: Pending change, queued change
+
+**Batch Save**:
+One explicit Save that evaluates and commits every book in a Batch selection independently under one Save correlation. A failed book does not reverse books already saved successfully.
+_Avoid_: Batch transaction, bulk commit
+
+**Unchanged result**:
+The per-book outcome when Save finds no effective difference from the current Library. It creates no Library mutation, Library version, or File operation.
+_Avoid_: No-op mutation, empty Save
 
 **Library mutation**:
 A change committed to the Library by Save. It is distinct from the file operations derived from it.
