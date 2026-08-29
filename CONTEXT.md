@@ -56,6 +56,18 @@ _Avoid_: Batch transaction, bulk commit
 The per-book outcome when Save finds no effective difference from the current Library. It creates no Library mutation, Library version, or File operation.
 _Avoid_: No-op mutation, empty Save
 
+**Save result**:
+The durable per-book outcome of Save: Saved, Unchanged, Needs review, or Failed to save. A later File operation failure is a separate Problem and never revises a Saved result.
+_Avoid_: Batch status, file task result
+
+**Save conflict**:
+A Needs review result produced when the current Library version no longer matches the version on which an Edit draft was based.
+_Avoid_: Save failure, concurrent edit error
+
+**Save failure**:
+A Failed to save result produced when Folio cannot commit a book's intended Library mutation for a reason other than a Save conflict.
+_Avoid_: File operation failure, Problem
+
 **Library mutation**:
 A change committed to the Library by Save. It is distinct from the file operations derived from it.
 _Avoid_: Change, pending change
