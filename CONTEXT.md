@@ -12,6 +12,26 @@ _Avoid_: Database, collection state
 Whether Folio actively manages a book. Removing Library membership does not move or delete any physical file.
 _Avoid_: File existence, deletion
 
+**Library workspace**:
+The current discovery context of query, filters, ordering, presentation, explicit selection, and return position within the Library.
+_Avoid_: Search page, filter state
+
+**Covers view**:
+The calm, visual presentation of a Library workspace in which book covers are the primary browsing affordance.
+_Avoid_: Grid page, card mode
+
+**Details view**:
+The compact presentation of the same Library workspace in which a result table and focused book inspection remain visible together.
+_Avoid_: List page, workbench mode
+
+**Result set**:
+The books currently shown by the Library workspace after applying its query, filters, and ordering. It is distinct from the books explicitly selected for batch work.
+_Avoid_: Library, selection
+
+**Batch selection**:
+The explicit set of books chosen for one batch workflow. It may include books outside the current Result set and never implicitly expands when that Result set changes.
+_Avoid_: Current results, filtered books
+
 **Edit draft**:
 The unsaved metadata and cover choices being composed for one or more books. An edit draft ends at one explicit Save or Cancel boundary.
 _Avoid_: Pending change, queued change
