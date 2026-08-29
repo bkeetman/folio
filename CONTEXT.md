@@ -64,13 +64,25 @@ _Avoid_: Batch status, file task result
 A Needs review result produced when the current Library version no longer matches the version on which an Edit draft was based.
 _Avoid_: Save failure, concurrent edit error
 
+**Conflict resolution**:
+New per-field intent for a Save conflict, chosen by preserving the current Library value, applying the earlier intended value, or supplying another value against the latest Library version.
+_Avoid_: Force save, overwrite conflict
+
 **Save failure**:
 A Failed to save result produced when Folio cannot commit a book's intended Library mutation for a reason other than a Save conflict.
 _Avoid_: File operation failure, Problem
 
+**Unresolved Save result**:
+A Needs review or Failed to save result that remains recoverable independently of books already Saved or Unchanged until the user resolves or explicitly discards it.
+_Avoid_: Pending change, failed batch
+
 **Library mutation**:
 A change committed to the Library by Save. It is distinct from the file operations derived from it.
 _Avoid_: Change, pending change
+
+**Library-only change**:
+A Library mutation whose value cannot be embedded in a Managed file's format. It is fully Saved in the Library and schedules no unsupported File operation.
+_Avoid_: Partial save, file failure
 
 **Mutation field**:
 The immutable before-and-after evidence for one field changed by a Library mutation, including the value's origin and the reason it was chosen.
