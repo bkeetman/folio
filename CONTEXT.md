@@ -28,6 +28,22 @@ _Avoid_: List page, workbench mode
 The books currently shown by the Library workspace after applying its query, filters, and ordering. It is distinct from the books explicitly selected for batch work.
 _Avoid_: Library, selection
 
+**Author**:
+A named Library entity credited to one or more books. Creating a new Author is explicit user intent and is never inferred silently from unmatched batch text.
+_Avoid_: Author string, contributor text
+
+**Category**:
+A member of Folio's controlled subject vocabulary applied to books. Categories are not user-created labels.
+_Avoid_: Genre, tag
+
+**Tag**:
+A user-managed named label reused by identity across books. Tags are created through Tags management rather than implicitly from editing text.
+_Avoid_: Category, free-form category
+
+**Series position**:
+A book-specific ordinal meaningful only within a Series. Setting it is individual-only, and removing the Series also removes its position.
+_Avoid_: Batch sequence, standalone index
+
 **Batch selection**:
 The explicit set of books chosen for one batch workflow. It may include books outside the current Result set, never implicitly expands when that Result set changes, and remains fixed for the lifetime of its Edit draft.
 _Avoid_: Current results, filtered books
