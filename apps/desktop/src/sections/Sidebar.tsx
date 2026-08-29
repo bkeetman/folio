@@ -61,6 +61,8 @@ export function Sidebar({
   pendingView,
 }: SidebarProps) {
   const { t } = useTranslation();
+  const activityPrototype = import.meta.env.DEV
+    && new URLSearchParams(window.location.search).get("prototype") === "activity";
   const matchesView = (target: View | View[]) => {
     const values = Array.isArray(target) ? target : [target];
     return values.includes(view);
@@ -221,10 +223,12 @@ export function Sidebar({
           >
             <FileClock size={16} />
             <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-              <span className="min-w-0 truncate">{t("sidebar.changes")}</span>
-              {pendingChangesCount > 0 ? (
+              <span className="min-w-0 truncate">
+                {activityPrototype ? "Activity" : t("sidebar.changes")}
+              </span>
+              {(activityPrototype ? 2 : pendingChangesCount) > 0 ? (
                 <span className="min-w-[20px] rounded-full bg-app-accent/10 px-2 py-0.5 text-[10px] font-semibold text-app-accent">
-                  {pendingChangesCount}
+                  {activityPrototype ? 2 : pendingChangesCount}
                 </span>
               ) : null}
             </span>

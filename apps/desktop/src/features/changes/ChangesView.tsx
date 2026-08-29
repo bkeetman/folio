@@ -6,6 +6,7 @@ import { Button } from "../../components/ui";
 import { cn } from "../../lib/utils";
 import { isTauri } from "../../platform/native";
 import { changesNativeGateway } from "./changes-controller";
+import { ActivityPrototypeView } from "./activity-prototype/ActivityPrototypeView";
 import type { ChangesFeatureView } from "./useChangesFeature";
 
 type ChangesViewProps = {
@@ -223,6 +224,12 @@ function PendingCoverDiff({ changeId }: { changeId: string }) {
 
 export function ChangesView({ feature }: ChangesViewProps) {
   const { t } = useTranslation();
+  if (
+    import.meta.env.DEV &&
+    new URLSearchParams(window.location.search).get("prototype") === "activity"
+  ) {
+    return <ActivityPrototypeView />;
+  }
   const { state, applyingChangeIds, changeProgress, confirmDeleteIds, actions } = feature;
   const pendingChangesStatus = state.historyStatus;
   const changesSourceFilter = state.sourceFilter;

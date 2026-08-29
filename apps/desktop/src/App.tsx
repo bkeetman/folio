@@ -140,7 +140,13 @@ function App() {
       ? (raw as LibrarySort)
       : "default";
   };
-  const [view, setView] = useState<View>("library-books");
+  const [view, setView] = useState<View>(() => {
+    if (import.meta.env.DEV) {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("prototype") === "activity") return "changes";
+    }
+    return "library-books";
+  });
   const [isViewTransitionPending, startViewTransition] = useTransition();
   const [pendingView, setPendingView] = useState<View | null>(null);
   const [previousView, setPreviousView] = useState<View>("library-books");
