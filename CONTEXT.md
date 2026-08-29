@@ -185,5 +185,5 @@ Compare the actual file state with the desired file state after divergence or an
 _Avoid_: Retry, force apply
 
 **Revert**:
-A new Library mutation that restores selected values from an earlier recorded state without erasing the intervening history.
+A new Library mutation that restores selected values from an earlier recorded state without erasing the intervening history. Each affected book is evaluated independently against its current Library version.
 _Avoid_: Undo, rollback
