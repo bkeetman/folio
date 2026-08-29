@@ -13,6 +13,7 @@ import {
 import { confirm, invoke, isTauri, open } from "./platform/native";
 import { OperationStatusPanel } from "./components/OperationStatusPanel";
 import { SyncConfirmDialog } from "./components/SyncConfirmDialog";
+import { BatchEditPrototype } from "./features/batch-edit-prototype/BatchEditPrototype";
 import { useChangesFeature } from "./features/changes/useChangesFeature";
 import { LibraryDiscoveryPrototype } from "./features/library-discovery-prototype/LibraryDiscoveryPrototype";
 import { useCoverOverrides } from "./hooks/useCoverOverrides";
@@ -127,6 +128,10 @@ function App() {
   const libraryDiscoveryPrototype =
     import.meta.env.DEV &&
     new URLSearchParams(window.location.search).get("prototype") === "library-discovery";
+  const batchEditPrototype =
+    import.meta.env.DEV &&
+    new URLSearchParams(window.location.search).get("prototype") === "batch-edit";
+  const libraryPrototype = libraryDiscoveryPrototype || batchEditPrototype;
   const readInitialInspectorWidth = () => {
     if (typeof window === "undefined") return 320;
     const raw = window.localStorage.getItem("folio.inspectorWidth");
@@ -893,7 +898,7 @@ function App() {
           view === "library-authors" ||
           view === "library-series" ||
           view === "library-categories"
-          ? libraryDiscoveryPrototype
+          ? libraryPrototype
             ? { gridTemplateColumns: "210px minmax(0,1fr)" }
             : { gridTemplateColumns: `210px minmax(0,1fr) ${inspectorWidth}px` }
           : { gridTemplateColumns: "210px minmax(0,1fr)" }
@@ -923,7 +928,7 @@ function App() {
           ref={mainScrollRef}
           className={`flex min-h-0 flex-1 flex-col gap-4 ${view === "ereader" ? "overflow-hidden" : "overflow-y-auto pr-2 scrollbar-gutter-stable"}`}
         >
-          {view !== "edit" && !libraryDiscoveryPrototype && (
+          {view !== "edit" && !libraryPrototype && (
             <TopToolbar
               view={view}
               checkForUpdates={(silent) => void checkForUpdates(silent)}
@@ -945,7 +950,7 @@ function App() {
             />
           )}
 
-          {!libraryDiscoveryPrototype ? <OperationStatusPanel
+          {!libraryPrototype ? <OperationStatusPanel
             state={operations.state}
             etaLabel={operations.isRunning("scan") ? scanEtaLabel : null}
             onCancel={
@@ -960,7 +965,9 @@ function App() {
             disabled={operations.isBusy}
             className="flex min-h-0 flex-1 flex-col gap-4 border-0 p-0"
           >
-            {libraryDiscoveryPrototype ? (
+            {batchEditPrototype ? (
+              <BatchEditPrototype />
+            ) : libraryDiscoveryPrototype ? (
               <LibraryDiscoveryPrototype books={allBooks} />
             ) : (
             <AppRoutes
@@ -1157,7 +1164,7 @@ function App() {
         </div>
       </main>
 
-      {!libraryDiscoveryPrototype && (view === "library" ||
+      {!libraryPrototype && (view === "library" ||
         view === "library-books" ||
         view === "library-authors" ||
         view === "library-series" ||
