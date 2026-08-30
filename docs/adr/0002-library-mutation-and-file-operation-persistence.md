@@ -24,14 +24,33 @@ result, while different intent under the same identity is rejected.
 The same per-book transaction records the new Library state, changed fields
 with copied before-and-after provenance, cover asset references, proposal
 outcomes, immutable Desired file-state revisions, and any safe File operations
-required to realize those revisions. Batch Save uses an independent transaction
-per book. File operations target stable Managed-file or Device-copy identities;
-paths and fingerprints are preconditions, never identity.
+required to realize those revisions, together with that book's durable Save
+result. Batch Save uses an independent transaction per book. No physical file
+side effect occurs inside this transaction. File operations target stable
+Managed-file or Device-copy identities; paths and fingerprints are
+preconditions, never identity.
 
-Cover assets are immutable and content-addressed. A staged cover is promoted
-only inside the successful Save transaction. Reverting Library values creates a
-new mutation and never rewrites history; restoring a physical EPUB uses its
+Save uses field-level optimistic concurrency. When the Library version changed,
+fields untouched by the draft are rebased onto the latest version. Only a draft
+field whose current value also differs from its expected value becomes a Save
+conflict.
+
+Cover assets are immutable and content-addressed. Review places a candidate in
+temporary staging and validates it. Before Save, Folio publishes the asset
+durably under its content identity; the successful Save transaction only adds
+the reference. An unreferenced asset left by a crash is harmless and may be
+garbage-collected. Assets remain while referenced by current Library state,
+mutation or Revert history, or Desired file state. Reverting Library values
+creates a new mutation and never rewrites history; Series and Series position
+are restored as one consistency group. Restoring a physical EPUB uses its
 separate Recovery copy.
+
+Proposal review maps provider genres to the controlled Category vocabulary and
+requires explicit intent to create an unmatched Author. Unknown Categories are
+not created implicitly. Merely inspecting a review does not change proposal
+state; confirming a review may resolve an already-equal field as `satisfied`.
+Only valid high-confidence additions to empty fields may be selected by default,
+and confidence never authorizes Save.
 
 File operations use one authoritative current row plus append-only transition,
 attempt, and checkpoint records. Their lifecycle is `queued` to `running`, then
@@ -45,7 +64,10 @@ Only the owning Rust File-operation module changes operation state, using
 compare-and-swap transitions. Its scheduler claims executable work atomically
 with a worker identity, unique claim token, and short lease. Every claim creates
 an immutable Operation attempt. External side effects append durable
-checkpoints. An expired running lease is inspected and may become
+checkpoints for verified preconditions, a durable Recovery copy when required,
+validated staging, publication, target verification, and source retirement when
+required. Staging is flushed and validated on the target filesystem before an
+atomic same-directory rename. An expired running lease is inspected and may become
 `needs_reconciliation`; it is never blindly requeued. Retry is permitted only
 when Folio can prove no effect occurred and original preconditions still hold;
 it transitions the same failed operation back to `queued` and the next claim

@@ -37,7 +37,10 @@ completed results. Save cannot be cancelled after it starts.
 CLI and MCP machine contracts are generated from the same Rust types and JSON
 Schemas. Responses use a versioned data-or-error envelope; business outcomes
 remain structured results. Completed Save correlations retain a permanent
-summary, while detailed progress may compact after 30 days.
+summary, while detailed progress may compact after 30 days. Adapters may repeat
+the same idempotent Save for classified transient SQLite-busy or local-transport
+failures, but stop after three total attempts or two seconds. Validation,
+conflict, and permanent storage failures are never retried automatically.
 
 ## Consequences
 

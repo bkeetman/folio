@@ -45,7 +45,7 @@ A user-managed named label reused by identity across books. Tags are created thr
 _Avoid_: Category, free-form category
 
 **Series position**:
-A book-specific ordinal meaningful only within a Series. Setting it is individual-only, and removing the Series also removes its position.
+A book-specific ordinal meaningful only within a Series. Setting it is individual-only; Series and Series position form one consistency group when values are removed or reverted.
 _Avoid_: Batch sequence, standalone index
 
 **Batch selection**:
@@ -93,7 +93,7 @@ The durable per-book outcome of Save: Saved, Unchanged, Needs review, or Failed 
 _Avoid_: Batch status, file task result
 
 **Save conflict**:
-A Needs review result produced when the current Library version no longer matches the version on which an Edit draft was based.
+A Needs review result produced when a field changed in an Edit draft also changed from its expected Library value. Unrelated concurrent field changes are incorporated without conflict.
 _Avoid_: Save failure, concurrent edit error
 
 **Conflict resolution**:
@@ -133,7 +133,7 @@ A caller-supplied identity that makes replaying the same command return its orig
 _Avoid_: Request ID, operation ID
 
 **Cover asset**:
-An immutable, content-addressed cover image that may be referenced by Library mutations and Desired file states.
+An immutable, content-addressed cover image retained while it is referenced by the Library, mutation history, or a Desired file state.
 _Avoid_: Cover file, current cover row
 
 **Managed file**:
