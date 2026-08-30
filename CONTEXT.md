@@ -72,6 +72,10 @@ _Avoid_: Pending change, queued change
 One explicit Save that evaluates and commits every book in a Batch selection independently under one Save correlation. A failed book does not reverse books already saved successfully.
 _Avoid_: Batch transaction, bulk commit
 
+**Headless Save**:
+A Save invoked through CLI or MCP without the desktop interface. It uses the same Edit draft, review evidence, expected Library versions, idempotency, and per-book Save results as an interactive Save.
+_Avoid_: Proposal apply, direct metadata update
+
 **Unchanged result**:
 The per-book outcome when Save finds no effective difference from the current Library. It creates no Library mutation, Library version, or File operation.
 _Avoid_: No-op mutation, empty Save
