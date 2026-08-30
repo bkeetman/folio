@@ -14,3 +14,4 @@ reverse or easy to rediscover incorrectly.
 
 - [ADR-0001: Runtime and schema ownership](0001-runtime-and-schema-ownership.md)
 - [ADR-0002: Library mutation and file-operation persistence](0002-library-mutation-and-file-operation-persistence.md)
+- [ADR-0003: Rebuild the Library at the domain-model cutover](0003-rebuild-library-at-domain-model-cutover.md)

@@ -71,21 +71,18 @@ future CLI are adapters over the same interfaces. The transaction seam used by
 Save is internal so callers cannot partially record Library state and file
 intent.
 
-Legacy completed work migrates to compact history. Pending or failed legacy
-filesystem rows without trustworthy preconditions become Problems for review
-and are never made automatically executable. Existing books receive a version
-zero baseline without a fabricated mutation; existing covers are hashed into
-immutable assets. Before this schema migration, the Rust migration runner must
-apply each migration and its ledger marker atomically, create a recoverable
-backup, and configure foreign keys, WAL, and a busy timeout.
+Cutover from the pre-domain database is governed by ADR-0003 and deliberately
+does not translate legacy queues or catalog history into this model. The Rust
+migration runner must still apply future migrations and their ledger markers
+atomically and configure foreign keys, WAL, and a busy timeout.
 
 ## Consequences
 
 Save becomes the single commit point for Library truth while filesystem work
 can remain asynchronous and observable. Durable intent, claims, and checkpoints
 make crash recovery and Retry decisions evidence-based. The cost is a richer
-schema and an explicit migration from legacy queues, but callers see two small
-interfaces rather than queue-specific rules.
+schema and a one-time clean rebuild from the pre-domain database, but callers
+see two small interfaces rather than queue-specific rules.
 
 ## Rejected alternatives
 

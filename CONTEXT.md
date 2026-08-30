@@ -100,18 +100,6 @@ _Avoid_: Change, pending change
 A Library mutation whose value cannot be embedded in a Managed file's format. It is fully Saved in the Library and schedules no unsupported File operation.
 _Avoid_: Partial save, file failure
 
-**Legacy history**:
-Compact immutable evidence imported from records created before Library mutations and File operations existed. It describes known past state without becoming executable intent or synthesizing unknown detail.
-_Avoid_: Reconstructed mutation, migrated queue
-
-**Migration evidence**:
-The raw, non-executable legacy records retained to explain how cutover classified or grouped prior state. It preserves uncertainty without becoming Library history or current intent.
-_Avoid_: Backup, legacy queue
-
-**Migration Problem**:
-A review-only Problem created from legacy intent or divergence whose execution state or preconditions cannot be proved. It never executes until fresh observation and user intent derive safe new work.
-_Avoid_: Migrated operation, pending legacy change
-
 **Mutation field**:
 The immutable before-and-after evidence for one field changed by a Library mutation, including the value's origin and the reason it was chosen.
 _Avoid_: Current field source, change field
