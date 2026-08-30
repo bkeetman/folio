@@ -51,6 +51,16 @@ silently omitted. The new application can show the legacy backup location but
 does not open or restore that schema. The backup remains a rollback artifact for
 the old application only.
 
+Each rebuild root progresses independently. An unavailable root keeps the
+rebuild in `needs_attention` while reachable roots continue; the user may Retry
+that root or explicitly remove it from this rebuild without deleting books
+already discovered. Extraction verifies each fingerprint before and after
+reading. A changing file is deferred and retried after the root pass, and a file
+that remains unstable becomes an individual Problem rather than blocking other
+books. Canonical aliases or the same filesystem object produce one Managed file;
+identical bytes in distinct physical files produce separate Managed files linked
+to the same book.
+
 The new schema starts from one squashed baseline and one Rust-owned migration
 ledger. Future schema versions use atomic in-place migrations from that baseline.
 The pre-rebuild database and derived-cache backup is retained for 30 days, its

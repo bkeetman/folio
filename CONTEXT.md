@@ -69,7 +69,7 @@ The unsaved metadata and cover choices being composed for one or more books. An 
 _Avoid_: Pending change, queued change
 
 **Draft review**:
-An immutable snapshot of an Edit draft's selected fields, effective before-and-after values, and expected Library versions. A batch review contains independent per-book segments so one stale book cannot invalidate the others.
+An immutable snapshot of an Edit draft's selected fields, effective before-and-after values, and expected field values. Unrelated Library changes remain compatible, and a batch review contains independent per-book segments.
 _Avoid_: Dry run, confirmation flag
 
 **Batch Save**:
@@ -77,7 +77,7 @@ One explicit Save that evaluates and commits every book in a Batch selection ind
 _Avoid_: Batch transaction, bulk commit
 
 **Headless Save**:
-A Save invoked through CLI or MCP without the desktop interface. It uses the same Edit draft, review evidence, expected Library versions, idempotency, and per-book Save results as an interactive Save.
+A Save invoked through CLI or MCP without the desktop interface. It uses the same Edit draft, review evidence, expected field values, idempotency, and per-book Save results as an interactive Save.
 _Avoid_: Proposal apply, direct metadata update
 
 **Domain host**:
@@ -105,7 +105,7 @@ A Failed to save result produced when Folio cannot commit a book's intended Libr
 _Avoid_: File operation failure, Problem
 
 **Unresolved Save result**:
-A Needs review or Failed to save result that remains recoverable independently of books already Saved or Unchanged until the user resolves or explicitly discards it.
+A Needs review or Failed to save result with an open recovery action independent of books already Saved or Unchanged. Discard closes that action without rewriting the immutable Save result.
 _Avoid_: Pending change, failed batch
 
 **Library mutation**:
@@ -151,6 +151,10 @@ _Avoid_: Replace file, search by filename
 **Replace file**:
 Explicitly substitute different physical bytes for a missing Managed file by creating a new Managed-file identity for the same book and retaining the former identity as history.
 _Avoid_: Locate, overwrite
+
+**Managed-file tombstone**:
+The retained identity and history of a Managed file that is no longer active. Finding its exact physical bytes does not reactivate it without explicit intent.
+_Avoid_: Deleted file, missing file
 
 **Metadata candidate**:
 An ephemeral metadata or cover result returned by an external provider. It is not targeted durable intent and may be copied into an edit draft.
@@ -209,7 +213,7 @@ Folio-managed temporary storage for removed or replaced local book files, retain
 _Avoid_: Trash, backup folder, deleted files
 
 **Recovery copy**:
-The exact prior physical version of a rewritten, replaced, or overwritten local book file held in the Recovery Bin. Restoring it is separate from reverting Library metadata.
+The exact prior physical version of a rewritten, replaced, or overwritten local book file held temporarily in the Recovery Bin. Expiry removes its bytes but preserves its tombstone and operation history.
 _Avoid_: Backup, file undo, Library revert
 
 **Activity**:

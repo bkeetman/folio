@@ -39,11 +39,13 @@ Cover assets are immutable and content-addressed. Review places a candidate in
 temporary staging and validates it. Before Save, Folio publishes the asset
 durably under its content identity; the successful Save transaction only adds
 the reference. An unreferenced asset left by a crash is harmless and may be
-garbage-collected. Assets remain while referenced by current Library state,
-mutation or Revert history, or Desired file state. Reverting Library values
-creates a new mutation and never rewrites history; Series and Series position
-are restored as one consistency group. Restoring a physical EPUB uses its
-separate Recovery copy.
+garbage-collected. A durable headless review retains its staged asset until that
+review is used, discarded, or invalidated; interactive review references end at
+app restart. Assets remain while referenced by current Library state, mutation
+or Revert history, or Desired file state. Reverting Library values creates a new
+mutation and never rewrites history; Series and Series position are restored as
+one consistency group. Restoring a physical EPUB uses its separate Recovery
+copy.
 
 Proposal review maps provider genres to the controlled Category vocabulary and
 requires explicit intent to create an unmatched Author. Unknown Categories are
@@ -111,25 +113,34 @@ copy merely to make the operation appear successful.
 A missing Managed file leaves Library membership intact and produces a Problem;
 removing membership is a separate action. Locate rebinds only an exact
 fingerprint match. Different bytes require explicit Replace file, which creates
-a new identity and tombstones the old one. Save still commits Library truth when
-one or more Managed files are missing or unwritable: available supported files
-receive independent work, while missing files retain the latest Desired file
-state and surface a Problem until they are located or replaced. Membership
-removal supersedes queued safe file work and waits for running safe work to
-finish or require Reconcile. Confirmed destructive work must finish or be
-explicitly cancelled before membership ends. If an e-reader disappears before
-publication, its work becomes blocked waiting for that exact device.
-Disconnection after possible publication requires Reconcile against the same
-device identity.
+a new identity and tombstones the old one. Rediscovering a tombstoned fingerprint
+never reactivates it automatically: the user may keep the replacement or
+reactivate the former identity as an additional Managed file. Any newly active,
+restored, or replacement file is reviewed against the latest Desired file state;
+confirmed supported safe updates run without importing its possibly stale
+metadata into the Library.
+
+Save still commits Library truth when one or more Managed files are missing or
+unwritable: available supported files receive independent work, while missing
+files retain the latest Desired file state and surface a Problem until they are
+located or replaced. Membership removal supersedes queued safe file work and
+waits for running safe work to finish or require Reconcile. Confirmed destructive
+work must finish or be explicitly cancelled before membership ends. If an
+e-reader disappears before publication, its work becomes blocked waiting for
+that exact device. Disconnection after possible publication requires Reconcile
+against the same device identity.
 
 Library mutations, field evidence, proposal decisions, Save correlations, and
 idempotency identities are retained with Library history. Detailed operation
 transitions, attempts, and checkpoints remain available for 30 days after
 resolution and may then compact into a permanent immutable summary. Recovery
 copies may be removed after 30 days, but their tombstones and operation
-summaries remain. Activity and Problems are projections: Problems derive from
-failed or inconsistent operations, while notification seen/dismissed state is
-stored separately.
+summaries remain. Their exact expiry is visible; Folio warns seven days before
+expiry when a copy still supports membership reactivation or unresolved work.
+Cleanup failure is retried and is not itself a Problem while the extra copy is
+safe. Activity and Problems are projections: Problems derive from failed or
+inconsistent operations, while notification seen/dismissed state is stored
+separately.
 
 The external Rust seams are two deep modules. The Library-mutation module owns
 Save, Revert, and mutation history. The File-operation module owns destructive
