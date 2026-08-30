@@ -68,6 +68,10 @@ _Avoid_: Unsupported field, disabled field
 The unsaved metadata and cover choices being composed for one or more books. An edit draft ends at one explicit Save or Cancel boundary.
 _Avoid_: Pending change, queued change
 
+**Draft review**:
+An immutable snapshot of an Edit draft's selected fields, effective before-and-after values, and expected Library versions. Its review identity authorizes only the matching Headless Save while those versions remain current.
+_Avoid_: Dry run, confirmation flag
+
 **Batch Save**:
 One explicit Save that evaluates and commits every book in a Batch selection independently under one Save correlation. A failed book does not reverse books already saved successfully.
 _Avoid_: Batch transaction, bulk commit
