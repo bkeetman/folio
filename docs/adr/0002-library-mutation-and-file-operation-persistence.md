@@ -67,7 +67,11 @@ an immutable Operation attempt. External side effects append durable
 checkpoints for verified preconditions, a durable Recovery copy when required,
 validated staging, publication, target verification, and source retirement when
 required. Staging is flushed and validated on the target filesystem before an
-atomic same-directory rename. An expired running lease is inspected and may become
+atomic same-directory rename. Paths are canonicalized using the target
+filesystem's case and Unicode behavior and a resolved parent directory; a target
+itself may not be a symlink. Any collision or fingerprint change since preview
+makes only that action stale and returns it to review. Folio never derives a new
+name or overwrite implicitly. An expired running lease is inspected and may become
 `needs_reconciliation`; it is never blindly requeued. Retry is permitted only
 when Folio can prove no effect occurred and original preconditions still hold;
 it transitions the same failed operation back to `queued` and the next claim
@@ -82,6 +86,21 @@ fingerprint-validated Managed file or Device copy is a safe File task. A
 destructive File operation is created only after confirmation, and the
 confirmation becomes unusable when its preconditions change rather than merely
 because time passes.
+
+Recovery copies live in a Folio-managed Recovery Bin on the source filesystem.
+Required capacity is verified before changing the source, and the 30-day
+retention period begins only when the operation succeeds. Cleanup waits while a
+volume is unavailable. A successful Organizer copy creates a new Managed-file
+identity for the same book; a move preserves the original identity and changes
+its observed path only after physical success.
+
+A missing Managed file leaves Library membership intact and produces a Problem;
+removing membership is a separate action. Membership removal supersedes queued
+safe file work and waits for running safe work to finish or require Reconcile.
+Confirmed destructive work must finish or be explicitly cancelled before
+membership ends. If an e-reader disappears before publication, its work becomes
+blocked waiting for that exact device. Disconnection after possible publication
+requires Reconcile against the same device identity.
 
 Library mutations, field evidence, proposal decisions, Save correlations, and
 idempotency identities are retained with Library history. Detailed operation

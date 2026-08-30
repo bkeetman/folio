@@ -32,7 +32,12 @@ stale target cannot block unrelated books. Only a distinct Save with that review
 identity and a caller-supplied idempotency identity creates per-book Library
 mutations. The host records a Save correlation and its per-book intents before
 processing, resumes unfinished results after a crash, and never reprocesses
-completed results. Save cannot be cancelled after it starts.
+completed results. Save cannot be cancelled after it starts. A correlation is
+`running`, `resolved`, or `needs_attention` and reports counts for unfinished
+and every per-book outcome. Its per-book order is frozen before execution so
+paginated results remain stable. Unresolved results expose Review latest, Save
+again with new review evidence and idempotency, and Discard unresolved; none
+blindly repeats prior intent.
 
 CLI and MCP machine contracts are generated from the same Rust types and JSON
 Schemas. Responses use a versioned data-or-error envelope; business outcomes
@@ -41,6 +46,20 @@ summary, while detailed progress may compact after 30 days. Adapters may repeat
 the same idempotent Save for classified transient SQLite-busy or local-transport
 failures, but stop after three total attempts or two seconds. Validation,
 conflict, and permanent storage failures are never retried automatically.
+General Library cursors are bound to a Library revision and return
+`cursor_stale` after that revision changes. Save-result cursors instead use the
+correlation's immutable intent order.
+
+One installation-bound local Actor owns decisions across desktop, CLI, MCP, and
+host restarts; ephemeral sessions remain separate audit evidence. Idempotency is
+scoped by Actor and command kind. Concurrent identical commands join one
+execution, while a reused identity with different canonical intent returns
+`idempotency_conflict`.
+
+Machine errors contain a stable code, human message, retryability of `never`,
+`same_request`, or `after_user_action`, and optional code-specific details. The
+envelope always identifies its schema and request. Per-book Save outcomes remain
+data rather than errors.
 
 ## Consequences
 

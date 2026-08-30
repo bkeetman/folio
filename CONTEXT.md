@@ -9,7 +9,7 @@ The canonical catalog of books, metadata, covers, and known files. After Save, t
 _Avoid_: Database, collection state
 
 **Library membership**:
-Whether Folio actively manages a book. Removing Library membership does not move or delete any physical file.
+Whether Folio actively manages a book. A missing Managed file does not end membership, and removing membership does not move or delete any physical file.
 _Avoid_: File existence, deletion
 
 **Library rebuild**:
@@ -129,15 +129,19 @@ The durable identity grouping all independent per-book results created by one ex
 _Avoid_: Batch transaction, queue group
 
 **Idempotency identity**:
-A caller-supplied identity that makes replaying the same command return its original result while rejecting different intent under the same identity.
+A caller-supplied identity scoped to one Actor and command kind that makes replaying the same intent return its original result while rejecting different intent under the same identity.
 _Avoid_: Request ID, operation ID
+
+**Actor**:
+The durable local identity responsible for proposal, review, and Save decisions across desktop, CLI, MCP, and their temporary sessions.
+_Avoid_: Client session, connection
 
 **Cover asset**:
 An immutable, content-addressed cover image retained while it is referenced by the Library, mutation history, or a Desired file state.
 _Avoid_: Cover file, current cover row
 
 **Managed file**:
-A physical book file known to the Library by a stable identity. Its path and fingerprint are observed attributes and may change without changing that identity.
+A physical book file known to the Library by a stable identity. A book may have multiple Managed files; each has its own observed path and fingerprint.
 _Avoid_: File path, Library item
 
 **Metadata candidate**:
@@ -185,7 +189,7 @@ Immutable evidence authorizing one reviewed move, overwrite, or delete only whil
 _Avoid_: Approval flag, confirmed state
 
 **Organizer plan**:
-A reviewable set of exact copy or move destinations derived from the current Library and physical files. It creates durable File operations only after confirmation.
+A reviewable set of exact copy or move destinations derived from the current Library and physical files. A successful copy adds a new Managed file while a successful move preserves the existing identity at its new path.
 _Avoid_: Organizer changes, rename queue
 
 **Device copy**:
