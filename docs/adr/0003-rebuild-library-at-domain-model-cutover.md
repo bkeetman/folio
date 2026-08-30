@@ -36,6 +36,14 @@ interruption can be continued without repeating cutover. Derived `covers` and
 user book locations remain untouched. Existing WebView presentation preferences
 remain outside this database boundary.
 
+Cutover runs under exclusive Domain-host ownership and uses a durable phase
+marker. The user confirms all rebuild folders before Folio checkpoints the old
+SQLite WAL and creates the timestamped backup. Folio builds and validates the
+new baseline at a temporary path, then atomically swaps it into the canonical
+database path. Startup recovery follows the marker to select either the intact
+old database before swap or the valid new database after swap; it never guesses.
+Derived-cache backup happens outside the critical swap and can be resumed.
+
 The new schema starts from one squashed baseline and one Rust-owned migration
 ledger. Future schema versions use atomic in-place migrations from that baseline.
 The pre-rebuild database and derived-cache backup is retained for 30 days, its

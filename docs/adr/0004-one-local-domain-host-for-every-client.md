@@ -27,11 +27,12 @@ The local transport uses OS permissions and an installation-bound credential.
 
 Headless writes preserve the interactive Edit draft boundary. Draft review
 returns a durable review identity bound to selected values and expected Library
-versions. Only a distinct Save with that review identity and a caller-supplied
-idempotency identity creates per-book Library mutations. The host records a
-Save correlation and its per-book intents before processing, resumes unfinished
-results after a crash, and never reprocesses completed results. Save cannot be
-cancelled after it starts.
+versions. A batch review identity contains independent per-book segments so a
+stale target cannot block unrelated books. Only a distinct Save with that review
+identity and a caller-supplied idempotency identity creates per-book Library
+mutations. The host records a Save correlation and its per-book intents before
+processing, resumes unfinished results after a crash, and never reprocesses
+completed results. Save cannot be cancelled after it starts.
 
 CLI and MCP machine contracts are generated from the same Rust types and JSON
 Schemas. Responses use a versioned data-or-error envelope; business outcomes

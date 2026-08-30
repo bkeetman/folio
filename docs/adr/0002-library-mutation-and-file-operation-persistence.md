@@ -47,11 +47,17 @@ with a worker identity, unique claim token, and short lease. Every claim creates
 an immutable Operation attempt. External side effects append durable
 checkpoints. An expired running lease is inspected and may become
 `needs_reconciliation`; it is never blindly requeued. Retry is permitted only
-when Folio can prove no effect occurred and original preconditions still hold.
+when Folio can prove no effect occurred and original preconditions still hold;
+it transitions the same failed operation back to `queued` and the next claim
+creates a new immutable attempt. Reconcile records the conclusion of an
+uncertain operation and creates a linked new operation when follow-up work is
+required.
 
-A move, overwrite, or delete requires an immutable Destructive confirmation
-containing the reviewed plan, exact action, target fingerprints, actor, and
-time. The File operation is created only after confirmation, and the
+A move, delete, or overwrite that displaces a different existing target requires
+an immutable Destructive confirmation containing the reviewed plan, exact
+action, target fingerprints, actor, and time. Replacing bytes of the same
+fingerprint-validated Managed file or Device copy is a safe File task. A
+destructive File operation is created only after confirmation, and the
 confirmation becomes unusable when its preconditions change rather than merely
 because time passes.
 

@@ -69,7 +69,7 @@ The unsaved metadata and cover choices being composed for one or more books. An 
 _Avoid_: Pending change, queued change
 
 **Draft review**:
-An immutable snapshot of an Edit draft's selected fields, effective before-and-after values, and expected Library versions. Its review identity authorizes only the matching Headless Save while those versions remain current.
+An immutable snapshot of an Edit draft's selected fields, effective before-and-after values, and expected Library versions. A batch review contains independent per-book segments so one stale book cannot invalidate the others.
 _Avoid_: Dry run, confirmation flag
 
 **Batch Save**:
@@ -173,11 +173,11 @@ A versioned description of the metadata, cover, location, and presence that a ma
 _Avoid_: Pending change, target change
 
 **File task**:
-An automatically started file operation that brings a physical book file into agreement with its desired file state, such as writing EPUB metadata or a cover.
+An automatically started file operation that brings a physical book file into agreement with its desired file state, such as safely replacing bytes of the same fingerprint-validated Managed file or Device copy.
 _Avoid_: Change, pending change, sync change
 
 **Destructive file operation**:
-A file operation for moving, overwriting, or deleting physical files that requires an explicit preview and confirmation before execution.
+A file operation for moving or deleting physical files, or displacing a different existing target that is not the fingerprint-validated Managed file or Device copy being updated. It requires explicit preview and confirmation before execution.
 _Avoid_: File task
 
 **Destructive confirmation**:
@@ -193,7 +193,7 @@ A physical derivative of a Library file placed on a specific e-reader. It never 
 _Avoid_: Synced Library file, managed source
 
 **Recovery Bin**:
-Folio-managed temporary storage for removed or replaced local book files, retained for 30 days so the physical action can be restored independently of Library history.
+Folio-managed temporary storage for removed or replaced local book files, retained for 30 days with their Managed-file tombstones so the physical action can be restored independently of Library history.
 _Avoid_: Trash, backup folder, deleted files
 
 **Recovery copy**:
@@ -209,11 +209,11 @@ A user-facing projection of a failed operation or inconsistent Library and file 
 _Avoid_: Error row, failed change
 
 **Retry**:
-Repeat a File operation only after Folio has proved that the earlier attempt changed nothing and its original preconditions still hold.
+Requeue the same failed File operation through a guarded state transition only after Folio has proved that the earlier attempt changed nothing and its original preconditions still hold. Execution creates a new Operation attempt without erasing prior transitions.
 _Avoid_: Reapply, resume, try again
 
 **Reconcile**:
-Compare the actual file state with the desired file state after divergence or an uncertain outcome, then resolve the difference or derive safe follow-up work.
+Compare the actual file state with the desired file state after divergence or an uncertain outcome, record a conclusion for the original File operation, then resolve the difference or derive a linked new operation.
 _Avoid_: Retry, force apply
 
 **Revert**:
