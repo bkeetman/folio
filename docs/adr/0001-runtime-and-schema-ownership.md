@@ -134,15 +134,12 @@ callers use domain interfaces rather than SQL or table-shaped results.
 
 4. **Consolidate persistence**
    - Move the migration SQL into the Rust persistence module.
-   - Reconcile both existing migration ledgers: Drizzle's
-     `__drizzle_migrations` history and Rust's `schema_migrations` history.
-     Detect and test Drizzle-only, Rust-only, combined, and partially applied
-     databases before recording the canonical Rust history.
-   - Run each migration and its ledger insert in one transaction.
+   - Apply the one-time pre-domain clean rebuild from ADR-0003 rather than
+     reconciling Drizzle and Rust legacy ledgers record by record.
+   - Start the rebuilt schema from one squashed Rust-owned baseline.
+   - Run every later migration and its ledger insert in one transaction.
    - Add a pre-migration backup or equivalent recoverable checkpoint and verify
-     recovery from interrupted or invalid migration SQL.
-   - Prove representative existing databases upgrade in place before deleting
-     the Drizzle schema and migration scripts.
+     recovery from interrupted or invalid future migration SQL.
 
 5. **Generate native contracts**
    - Introduce the Rust native-contract module at the Tauri seam.
@@ -173,8 +170,9 @@ wins conflicts.
 
 ## Compatibility constraints
 
-- Existing Folio databases must upgrade in place; migrations are append-only
-  and never rewrite or renumber released migrations.
+- ADR-0003 governs the one-time cutover from the pre-domain database. After
+  that clean baseline, migrations upgrade in place, remain append-only, and
+  never rewrite or renumber released baseline migrations.
 - There must be exactly one migration runner and one writer for a production
   database in a process.
 - Tauri command names, event names, and serialized payloads remain compatible
