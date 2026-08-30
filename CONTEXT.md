@@ -104,6 +104,10 @@ _Avoid_: Partial save, file failure
 Compact immutable evidence imported from records created before Library mutations and File operations existed. It describes known past state without becoming executable intent or synthesizing unknown detail.
 _Avoid_: Reconstructed mutation, migrated queue
 
+**Migration evidence**:
+The raw, non-executable legacy records retained to explain how cutover classified or grouped prior state. It preserves uncertainty without becoming Library history or current intent.
+_Avoid_: Backup, legacy queue
+
 **Migration Problem**:
 A review-only Problem created from legacy intent or divergence whose execution state or preconditions cannot be proved. It never executes until fresh observation and user intent derive safe new work.
 _Avoid_: Migrated operation, pending legacy change
