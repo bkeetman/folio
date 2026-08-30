@@ -80,6 +80,10 @@ _Avoid_: Batch transaction, bulk commit
 A Save invoked through CLI or MCP without the desktop interface. It uses the same Edit draft, review evidence, expected Library versions, idempotency, and per-book Save results as an interactive Save.
 _Avoid_: Proposal apply, direct metadata update
 
+**Domain host**:
+The sole local Rust runtime that owns one Library's persistent commands, background workers, and client sessions. Desktop, CLI, and MCP are adapters to this host and never become alternate database owners.
+_Avoid_: Database process, CLI database connection
+
 **Unchanged result**:
 The per-book outcome when Save finds no effective difference from the current Library. It creates no Library mutation, Library version, or File operation.
 _Avoid_: No-op mutation, empty Save
