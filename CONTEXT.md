@@ -12,6 +12,10 @@ _Avoid_: Database, collection state
 Whether Folio actively manages a book. Removing Library membership does not move or delete any physical file.
 _Avoid_: File existence, deletion
 
+**Library rebuild**:
+The one-time cutover that starts a fresh Library from user-confirmed book folders while preserving the physical book files. It deliberately discards the pre-domain catalog and its database-only state rather than translating legacy queues.
+_Avoid_: Legacy migration, Clear Library Data
+
 **Library workspace**:
 The current discovery context of query, filters, ordering, presentation, explicit selection, and return position within the Library.
 _Avoid_: Search page, filter state
