@@ -44,10 +44,12 @@ database path. Startup recovery follows the marker to select either the intact
 old database before swap or the valid new database after swap; it never guesses.
 Derived-cache backup happens outside the critical swap and can be resumed.
 Confirmed folders are stored as one canonical, overlap-deduplicated root set.
-An unreachable root blocks completion and is never silently omitted. The user
-may cancel or resume while the old database is still canonical; after the atomic
-swap, returning to the old database is an explicit backup restore rather than
-rebuild cancellation.
+Every root must be reachable during preflight. The user may cancel before the
+atomic swap. After the swap, scanning is normal resumable work in the new
+Library; a root that later becomes unavailable pauses that scan and is never
+silently omitted. The new application can show the legacy backup location but
+does not open or restore that schema. The backup remains a rollback artifact for
+the old application only.
 
 The new schema starts from one squashed baseline and one Rust-owned migration
 ledger. Future schema versions use atomic in-place migrations from that baseline.

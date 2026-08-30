@@ -54,11 +54,13 @@ and confidence never authorizes Save.
 
 File operations use one authoritative current row plus append-only transition,
 attempt, and checkpoint records. Their lifecycle is `queued` to `running`, then
-`succeeded`, `failed`, or `needs_reconciliation`; queued work may also become
-`superseded`. An Operation blocker can make queued work temporarily
-unclaimable. A newer Desired file-state revision supersedes older waiting safe
-work, while a running operation may produce at most one follow-up operation.
-Destructive work never coalesces.
+`succeeded`, `failed`, `cancelled`, or `needs_reconciliation`; queued work may
+also become `superseded`. Cancellation is terminal only before target
+publication and makes its Destructive confirmation unusable; after publication
+the operation must finish or Reconcile. An Operation blocker can make queued
+work temporarily unclaimable. A newer Desired file-state revision supersedes
+older waiting safe work, while a running operation may produce at most one
+follow-up operation. Destructive work never coalesces.
 
 Only the owning Rust File-operation module changes operation state, using
 compare-and-swap transitions. Its scheduler claims executable work atomically
@@ -94,13 +96,31 @@ volume is unavailable. A successful Organizer copy creates a new Managed-file
 identity for the same book; a move preserves the original identity and changes
 its observed path only after physical success.
 
+Restore always previews the exact destination. A free destination may be
+published safely; an occupied destination requires either a different explicit
+path or a newly confirmed destructive overwrite. Restore reactivates Library
+membership only when the Recovery copy came from removing that book and file;
+restoring an earlier physical version never reverts Library metadata.
+
+A cross-volume move that published its target but could not retire its source
+requires Reconcile while the Managed-file identity remains at the source. The
+user may finish the confirmed move or keep both, which creates a new
+Managed-file identity for the verified target. Folio never removes either valid
+copy merely to make the operation appear successful.
+
 A missing Managed file leaves Library membership intact and produces a Problem;
-removing membership is a separate action. Membership removal supersedes queued
-safe file work and waits for running safe work to finish or require Reconcile.
-Confirmed destructive work must finish or be explicitly cancelled before
-membership ends. If an e-reader disappears before publication, its work becomes
-blocked waiting for that exact device. Disconnection after possible publication
-requires Reconcile against the same device identity.
+removing membership is a separate action. Locate rebinds only an exact
+fingerprint match. Different bytes require explicit Replace file, which creates
+a new identity and tombstones the old one. Save still commits Library truth when
+one or more Managed files are missing or unwritable: available supported files
+receive independent work, while missing files retain the latest Desired file
+state and surface a Problem until they are located or replaced. Membership
+removal supersedes queued safe file work and waits for running safe work to
+finish or require Reconcile. Confirmed destructive work must finish or be
+explicitly cancelled before membership ends. If an e-reader disappears before
+publication, its work becomes blocked waiting for that exact device.
+Disconnection after possible publication requires Reconcile against the same
+device identity.
 
 Library mutations, field evidence, proposal decisions, Save correlations, and
 idempotency identities are retained with Library history. Detailed operation

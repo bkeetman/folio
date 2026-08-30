@@ -13,7 +13,7 @@ Whether Folio actively manages a book. A missing Managed file does not end membe
 _Avoid_: File existence, deletion
 
 **Library rebuild**:
-The one-time cutover that starts a fresh Library from user-confirmed book folders while preserving the physical book files. It deliberately discards the pre-domain catalog and its database-only state rather than translating legacy queues.
+The one-time cutover that creates a new Library identity and then rescans user-confirmed book folders while preserving the physical book files. It deliberately discards the pre-domain catalog and its database-only state rather than translating legacy queues.
 _Avoid_: Legacy migration, Clear Library Data
 
 **Library workspace**:
@@ -129,7 +129,7 @@ The durable identity grouping all independent per-book results created by one ex
 _Avoid_: Batch transaction, queue group
 
 **Idempotency identity**:
-A caller-supplied identity scoped to one Actor and command kind that makes replaying the same intent return its original result while rejecting different intent under the same identity.
+A caller-supplied identity scoped to one Library, Actor, and command kind that makes replaying the same accepted intent return its original result while rejecting different intent under the same identity.
 _Avoid_: Request ID, operation ID
 
 **Actor**:
@@ -143,6 +143,14 @@ _Avoid_: Cover file, current cover row
 **Managed file**:
 A physical book file known to the Library by a stable identity. A book may have multiple Managed files; each has its own observed path and fingerprint.
 _Avoid_: File path, Library item
+
+**Locate**:
+Reconnect a missing Managed file to a new observed path only when its fingerprint proves that its identity is unchanged.
+_Avoid_: Replace file, search by filename
+
+**Replace file**:
+Explicitly substitute different physical bytes for a missing Managed file by creating a new Managed-file identity for the same book and retaining the former identity as history.
+_Avoid_: Locate, overwrite
 
 **Metadata candidate**:
 An ephemeral metadata or cover result returned by an external provider. It is not targeted durable intent and may be copied into an edit draft.

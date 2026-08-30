@@ -37,7 +37,10 @@ completed results. Save cannot be cancelled after it starts. A correlation is
 and every per-book outcome. Its per-book order is frozen before execution so
 paginated results remain stable. Unresolved results expose Review latest, Save
 again with new review evidence and idempotency, and Discard unresolved; none
-blindly repeats prior intent.
+blindly repeats prior intent. CLI exposes these through `folio saves
+show|recover|discard`; MCP exposes `get_save_result`, `recover_save_result`, and
+`discard_save_result`. Recovery creates a new Edit draft, after which the normal
+review and Save commands remain mandatory.
 
 CLI and MCP machine contracts are generated from the same Rust types and JSON
 Schemas. Responses use a versioned data-or-error envelope; business outcomes
@@ -52,14 +55,20 @@ correlation's immutable intent order.
 
 One installation-bound local Actor owns decisions across desktop, CLI, MCP, and
 host restarts; ephemeral sessions remain separate audit evidence. Idempotency is
-scoped by Actor and command kind. Concurrent identical commands join one
+scoped by Library identity, Actor, and command kind. A command rejected before
+durable acceptance does not claim its identity. Once accepted, canonical intent
+and result remain with Library history. Concurrent identical commands join one
 execution, while a reused identity with different canonical intent returns
-`idempotency_conflict`.
+`idempotency_conflict`. A clean rebuild creates a new Library identity.
 
 Machine errors contain a stable code, human message, retryability of `never`,
 `same_request`, or `after_user_action`, and optional code-specific details. The
 envelope always identifies its schema and request. Per-book Save outcomes remain
-data rather than errors.
+data rather than errors. The initial stable codes are `invalid_request`,
+`not_found`, `review_invalid`, `cursor_stale`, `idempotency_conflict`,
+`precondition_changed`, `temporarily_unavailable`, `host_unavailable`,
+`protocol_incompatible`, `storage_unavailable`, `permission_denied`,
+`invariant_violation`, and `internal`.
 
 ## Consequences
 
